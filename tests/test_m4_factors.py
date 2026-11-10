@@ -39,10 +39,35 @@ def test_industry_excess_returns():
     assert out.industry_excess_20.iloc[0] == pytest.approx(.10)
 
 
-def test_rank_factor_preserves_missing():
-    out = rank_factor(pd.Series([1., 2., np.nan]))
-    assert out.iloc[1] == 100
-    assert pd.isna(out.iloc[2])
+def test_rank_factor_direction_and_missing():
+    values = pd.Series([1., 2., 3., np.nan])
+    high = rank_factor(values, higher_is_better=True)
+    low = rank_factor(values, higher_is_better=False)
+    assert high.iloc[2] == 100
+    assert high.iloc[0] < high.iloc[1]
+    assert low.iloc[0] == 100
+    assert low.iloc[2] < low.iloc[1]
+    assert pd.isna(high.iloc[3])
+
+
+def test_pullback_duration_counts_sessions_since_latest_peak():
+    x = bars()
+    x.loc[22, "close"] = 32.0
+    x.loc[23, "close"] = 31.0
+    x.loc[24, "close"] = 30.0
+    out = price_structure(x)
+    assert out.pullback_duration.iloc[22] == 0
+    assert out.pullback_duration.iloc[23] == 1
+    assert out.pullback_duration.iloc[24] == 2
+
+
+def test_price_structure_point_in_time_cutoff():
+    x = bars()
+    x.loc[24, "available_time"] = pd.Timestamp("2026-11-10T09:00:00Z")
+    out = price_structure(x, decision_time="2026-11-10T08:30:00Z")
+    assert len(out) == 24
+    with pytest.raises(ValueError):
+        price_structure(x, decision_time="2026-11-10T08:30:00")
 
 
 def test_residual_requires_historical_industry_key():
