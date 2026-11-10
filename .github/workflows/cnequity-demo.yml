@@ -39,8 +39,19 @@ jobs:
           DEMO_DAYS: ${{ inputs.days }}
         run: |
           mkdir -p validation/cnequity-demo
-          cne --version | tee validation/cnequity-demo/cne-version.txt
+          python -c "from importlib.metadata import version; print('cnequity', version('cnequity'))" | tee validation/cnequity-demo/cne-version.txt
           cne init --profile demo --symbols "$DEMO_SYMBOLS" --days "$DEMO_DAYS" --data-root "$RUNNER_TEMP/cnequity-demo-lake" --config-out "$RUNNER_TEMP/cnequity-demo.toml" --json 2>&1 | tee validation/cnequity-demo/init.log
+          echo "CNE_CONFIG=$RUNNER_TEMP/cnequity-demo.toml" >> "$GITHUB_ENV"
+      - name: Capture CNEquity quality and coverage audit
+        if: always()
+        run: |
+          set +e
+          cne check 2>&1 | tee validation/cnequity-demo/check.log
+          check_status=${PIPESTATUS[0]}
+          cne status --datasets 2>&1 | tee validation/cnequity-demo/status.log
+          status_status=${PIPESTATUS[0]}
+          printf '{"cne_check_exit_code": %s, "cne_status_exit_code": %s}\\n' "$check_status" "$status_status" > validation/cnequity-demo/audit-exit-codes.json
+          exit 0
       - name: Validate loaded daily bars and produce bounded evidence report
         run: |
           python - <<'PY'
