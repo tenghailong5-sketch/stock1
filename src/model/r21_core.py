@@ -82,7 +82,8 @@ def weighted_score(weights: Mapping[str, float], factors: Mapping[str, float]) -
     if missing:
         raise ValueError(f"missing factors: {','.join(sorted(missing))}")
     values = [factors[k] for k in weights]
-    if any(v is None or not 0 <= float(v) <= 100 for v in values):
+    if any(isinstance(v, bool) or v is None or not 0 <= float(v) <= 100
+           for v in values):
         raise ValueError("factor values must be finite numbers in [0,100]")
     return sum(weights[k] * float(factors[k]) for k in weights) / 100.0
 
