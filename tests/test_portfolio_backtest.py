@@ -86,8 +86,8 @@ def test_retrieval_time_only_dataset_is_blocked_before_simulation():
         run_portfolio_backtest(candidates, bars)
 
 
-def test_entry_is_skipped_when_stop_is_not_below_next_open():
-    candidates = frame([candidate(stop=10.0)])
+def test_entry_is_skipped_when_stop_is_not_below_slippage_adjusted_entry():
+    candidates = frame([candidate(stop=10.02)])
     bars = frame([bar("000001", "2026-01-06", open_=10.0)])
     result = run_portfolio_backtest(candidates, bars)
     assert result["fills"] == []
