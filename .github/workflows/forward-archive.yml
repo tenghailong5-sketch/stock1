@@ -1,0 +1,41 @@
+name: FHM-100 Forward Data Archive
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 8 * * 1-5" # 16:30 Beijing time; schedule runs from the default branch only
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fhm100-forward-archive
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Capture index and industry snapshots
+        run: python -m src.collectors.forward_archive --output data/forward_archive
+      - name: Commit append-only archive
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/forward_archive
+          if ! git diff --cached --quiet; then
+            git commit -m "Archive forward-only market data"
+            git push
+          else
+            echo "No new archive records."
+          fi
