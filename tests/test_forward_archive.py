@@ -20,6 +20,19 @@ class FakeArchiveAkshare:
             {"代码": "000002", "最新价": 9, "涨跌幅": 0.0},
         ])
 
+
+    def stock_zt_pool_em(self, date):
+        return pd.DataFrame([{"代码": "000001", "名称": "样例", "连板数": 2}])
+
+    def stock_zt_pool_dtgc_em(self, date):
+        return pd.DataFrame(columns=["代码", "名称"])
+
+    def stock_zt_pool_zbgc_em(self, date):
+        return pd.DataFrame([{"代码": "600000", "名称": "样例炸板", "炸板次数": 1}])
+
+    def stock_zt_pool_previous_em(self, date):
+        return pd.DataFrame([{"代码": "000002", "名称": "昨日涨停"}])
+
     def stock_board_industry_name_em(self):
         return pd.DataFrame([
             {"板块名称": "电子", "板块代码": "BK0001"},
@@ -58,7 +71,7 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
     )
     assert set(counts) == {
         "index_000001", "index_399001", "index_399006",
-        "index_000688", "index_000300", "industry_membership", "market_breadth",
+        "index_000688", "index_000300", "industry_membership", "market_breadth", "limit_pools",
     }
     assert all(counts[f"index_{code}"] == 1 for code in ("000001", "399001", "399006", "000688", "000300"))
     assert counts["industry_membership"] == 4  # two symbols across two industries
