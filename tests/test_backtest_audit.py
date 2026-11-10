@@ -78,3 +78,18 @@ def test_duplicate_symbol_decision_strategy_is_rejected():
     audit = audit_backtest_dataset(candidates, bars)
     assert not audit.ready
     assert "candidate_duplicate_natural_key" in audit.errors
+
+def test_execution_flags_must_be_explicit_booleans():
+    candidates, bars = datasets()
+    bars.loc[0, "limit_down_locked"] = None
+    audit = audit_backtest_dataset(candidates, bars)
+    assert not audit.ready
+    assert "bar_invalid_boolean:limit_down_locked" in audit.errors
+
+
+def test_unknown_strategy_is_rejected():
+    candidates, bars = datasets()
+    candidates.loc[0, "strategy"] = "D"
+    audit = audit_backtest_dataset(candidates, bars)
+    assert not audit.ready
+    assert "candidate_contains_unknown_strategy" in audit.errors
