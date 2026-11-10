@@ -31,9 +31,12 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
         raise ValueError("bars missing: " + ",".join(sorted(missing)))
     x = _numeric(bars, ["open", "high", "low", "close", "volume", "amount"])
     x["trade_date"] = pd.to_datetime(x["trade_date"], errors="coerce")
-    x["available_time"] = pd.to_datetime(x["available_time"], errors="coerce", utc=True)
-    if x["trade_date"].isna().any() or x["available_time"].isna().any():
+    raw_available = pd.to_datetime(x["available_time"], errors="coerce")
+    if x["trade_date"].isna().any() or raw_available.isna().any():
         raise ValueError("invalid trade_date or available_time")
+    if raw_available.dt.tz is None:
+        raise ValueError("available_time must be timezone-aware")
+    x["available_time"] = raw_available.dt.tz_convert("UTC")
     if decision_time is not None:
         cutoff = pd.Timestamp(decision_time)
         if cutoff.tzinfo is None:
