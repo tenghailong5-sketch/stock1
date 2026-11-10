@@ -1,0 +1,41 @@
+name: FHM-100 Daily Research
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8 * * 1-5" # 16:00 Beijing time, weekdays
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fhm100-daily
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run research scan
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_API_BASE_URL: ${{ secrets.AI_API_BASE_URL }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+        run: python -m src.fhm100
+      - name: Upload research report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fhm100-report-${{ github.run_number }}
+          path: output/
+          if-no-files-found: warn
+          retention-days: 30
