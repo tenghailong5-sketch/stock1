@@ -164,7 +164,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Capture forward-only A-share market data")
-    parser.add_argument("--output", default="data/forward_archive")\n    parser.add_argument("--dry-run", action="store_true", help="fetch and validate all sources without writing archive files")
+    parser.add_argument("--output", default="data/forward_archive")
+    parser.add_argument("--dry-run", action="store_true", help="fetch and validate all sources without writing archive files")
     args = parser.parse_args()
     import akshare as ak
 
