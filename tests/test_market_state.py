@@ -25,7 +25,7 @@ def test_m3_requires_full_60_session_percentile_history():
 
 
 def test_m3_score_matches_specification():
-    out = calculate_state_scores(history(60))
+    out = calculate_state_scores(history(60), decision_time="2026-11-10T09:00:00Z")
     row = out.iloc[-1]
     expected = .35*1 + .25*1 + .20*1 + .20*1 - .10*1
     assert row.StateScore == pytest.approx(expected)
