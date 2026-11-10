@@ -23,12 +23,17 @@ def _numeric(frame: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
     """Compute price factors using only bars available by decision_time.
 
-    If decision_time is omitted, bars must still carry timezone-aware
-    available_time values; the caller is responsible for upstream PIT filtering.
+    A timezone-aware decision_time is mandatory; rows not yet available at
+    that instant are excluded before any rolling feature is calculated.
     """
     missing = REQUIRED_BARS - set(bars.columns)
     if missing:
         raise ValueError("bars missing: " + ",".join(sorted(missing)))
+    if decision_time is None:
+        raise ValueError("decision_time is required for point-in-time price factors")
+    cutoff = pd.Timestamp(decision_time)
+    if cutoff.tzinfo is None:
+        raise ValueError("decision_time must be timezone-aware")
     x = _numeric(bars, ["open", "high", "low", "close", "volume", "amount"])
     x["trade_date"] = pd.to_datetime(x["trade_date"], errors="coerce")
     raw_available = pd.to_datetime(x["available_time"], errors="coerce")
@@ -37,14 +42,16 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
     if raw_available.dt.tz is None:
         raise ValueError("available_time must be timezone-aware")
     x["available_time"] = raw_available.dt.tz_convert("UTC")
-    if decision_time is not None:
-        cutoff = pd.Timestamp(decision_time)
-        if cutoff.tzinfo is None:
-            raise ValueError("decision_time must be timezone-aware")
-        x = x.loc[x["available_time"] <= cutoff.tz_convert("UTC")].copy()
+    x = x.loc[x["available_time"] <= cutoff.tz_convert("UTC")].copy()
     x = x.sort_values(["symbol", "trade_date"]).copy()
+    if x.duplicated(["symbol", "trade_date"]).any():
+        raise ValueError("duplicate symbol/trade_date bars")
     if x[["open", "high", "low", "close"]].isna().any().any():
         raise ValueError("invalid OHLC values")
+    if ((x[["open", "high", "low", "close"]] <= 0).any(axis=1)
+        | (x["high"] < x[["open", "low", "close"]].max(axis=1))
+        | (x["low"] > x[["open", "high", "close"]].min(axis=1))).any():
+        raise ValueError("inconsistent OHLC values")
     span = (x["high"] - x["low"]).where(lambda v: v > 0)
     x["CLV"] = (x["close"] - x["low"]) / span
     x["BodyStrength"] = (x["close"] - x["open"]) / span
@@ -152,6 +159,8 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
     stocks = _pit_frame(stock_returns, decision_time, "stock returns")
     markets = _pit_frame(market_returns, decision_time, "market returns")
     industries = _pit_frame(industry_returns, decision_time, "industry returns")
+    if stocks.duplicated(["symbol", "trade_date"]).any():
+        raise ValueError("duplicate point-in-time stock rows")
     if markets.duplicated(["trade_date"]).any():
         raise ValueError("duplicate point-in-time market rows")
     if industries.duplicated(["trade_date", "industry_code"]).any():
