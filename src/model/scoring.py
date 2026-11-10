@@ -33,7 +33,10 @@ def _require_bool(data: Mapping[str, Any], key: str, reasons: list[str]) -> bool
     if not isinstance(value, bool):
         reasons.append(f"missing_or_invalid:{key}")
         return False
-    return value
+    if value is False:
+        reasons.append(f"hard_gate_failed:{key}")
+        return False
+    return True
 
 
 def _score(strategy: str, weights: Mapping[str, int],
@@ -69,10 +72,7 @@ def score_a(factors: Mapping[str, Any], gates: Mapping[str, Any],
     for key in ("industry_top_30pct", "stock_residual_top_20pct",
                 "amount_ma20_ge_100m", "breakout_or_confirmed_retest",
                 "no_high_volume_stall_or_repeated_rejection"):
-        if not _require_bool(gates, key, reasons):
-            continue
-        if gates[key] is False:
-            reasons.append(f"hard_gate_failed:{key}")
+        _require_bool(gates, key, reasons)
     if gates.get("next_open_gap_pct") is not None:
         if not _finite_number(gates["next_open_gap_pct"]):
             reasons.append("invalid:next_open_gap_pct")
