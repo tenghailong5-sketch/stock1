@@ -37,7 +37,7 @@ def test_unverified_corporate_action_blocks_total_return():
                       "close":[10.,9.]})
     a = pd.DataFrame({"symbol":["000001"],"ex_date":["2026-01-02"],"action_type":["cash_dividend"],
                       "cash_per_share":[1.],"share_factor":[1.],"verified_status":["PENDING"]})
-    out = build_total_return_index(p,a)
+    out = build_total_return_index(p,a,complete_symbols={"000001"})
     assert out.total_return_index.isna().all()
 
 
@@ -46,7 +46,7 @@ def test_verified_cash_dividend_total_return_is_continuous():
                       "close":[10.,9.]})
     a = pd.DataFrame({"symbol":["000001"],"ex_date":["2026-01-02"],"action_type":["cash_dividend"],
                       "cash_per_share":[1.],"share_factor":[1.],"verified_status":["VERIFIED"]})
-    out = build_total_return_index(p,a)
+    out = build_total_return_index(p,a,complete_symbols={"000001"})
     assert out.total_return_index.iloc[-1] == pytest.approx(100.0)
 
 
@@ -117,3 +117,23 @@ def test_industry_membership_rejects_naive_availability_and_bad_interval():
     base.loc[0, "available_time"] = "2026-01-01 00:00:00"
     with pytest.raises(ValueError, match="timezone-aware"):
         assert_historical_industry_membership(base, "2026-02-01T00:00:00Z")
+
+ 
+def test_total_return_requires_explicit_complete_action_coverage():
+    p = pd.DataFrame({"symbol":["000001","000001"],"trade_date":pd.to_datetime(["2026-01-01","2026-01-02"]),
+                      "close":[10.,11.]})
+    a = pd.DataFrame(columns=["symbol","ex_date","action_type","cash_per_share","share_factor","verified_status"])
+    out = build_total_return_index(p,a)
+    assert out.total_return_index.isna().all()
+    assert set(out.corporate_action_status) == {"MISSING_ACTION_COVERAGE"}
+
+
+def test_total_return_rejects_duplicate_actions_on_same_ex_date():
+    p = pd.DataFrame({"symbol":["000001","000001"],"trade_date":pd.to_datetime(["2026-01-01","2026-01-02"]),
+                      "close":[10.,11.]})
+    a = pd.DataFrame({"symbol":["000001","000001"],"ex_date":["2026-01-02","2026-01-02"],
+                      "action_type":["cash_dividend","bonus"],"cash_per_share":[1.,0.],
+                      "share_factor":[1.,2.],"verified_status":["VERIFIED","VERIFIED"]})
+    out = build_total_return_index(p,a,complete_symbols={"000001"})
+    assert out.total_return_index.isna().all()
+    assert set(out.corporate_action_status) == {"INVALID_ACTION_LEDGER"}
