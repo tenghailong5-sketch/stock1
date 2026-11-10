@@ -187,9 +187,11 @@ def assert_historical_industry_membership(membership: pd.DataFrame,
     x = membership.copy()
     if x[["symbol", "industry_code", "valid_from", "available_time", "source_id"]].isna().any().any():
         raise ValueError("industry membership key/date fields cannot be missing")
-    x["valid_from"] = pd.to_datetime(x["valid_from"], errors="coerce")
-    x["valid_to"] = pd.to_datetime(x["valid_to"], errors="coerce")
-    if x["valid_from"].isna().any() or x["valid_to"].notna().any() and x.loc[x["valid_to"].notna(), "valid_to"].isna().any():
+    raw_from = x["valid_from"].copy()
+    raw_to = x["valid_to"].copy()
+    x["valid_from"] = pd.to_datetime(raw_from, errors="coerce")
+    x["valid_to"] = pd.to_datetime(raw_to, errors="coerce")
+    if x["valid_from"].isna().any() or (raw_to.notna() & x["valid_to"].isna()).any():
         raise ValueError("invalid industry membership validity dates")
     if (x["valid_to"].notna() & (x["valid_to"] < x["valid_from"])).any():
         raise ValueError("industry membership valid_to precedes valid_from")
