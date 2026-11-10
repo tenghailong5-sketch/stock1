@@ -24,14 +24,25 @@ def _rolling_percentile(values: pd.Series, window: int = 60) -> pd.Series:
     return values.astype(float).rolling(window, min_periods=window).apply(rank_last, raw=True)
 
 
-def calculate_state_scores(index_daily: pd.DataFrame, window: int = 60) -> pd.DataFrame:
-    """Calculate R1 StateScore and its components; missing inputs remain missing."""
-    missing = REQUIRED - set(index_daily.columns)
+def calculate_state_scores(index_daily: pd.DataFrame, window: int = 60,
+                           decision_time=None) -> pd.DataFrame:
+    """Calculate R1 StateScore from observations actually available at decision_time."""
+    missing = (REQUIRED | {"available_time"}) - set(index_daily.columns)
     if missing:
         raise ValueError("index_daily missing: " + ",".join(sorted(missing)))
     if window != 60:
         raise ValueError("FHM-100 R1 specifies a 60-session percentile window")
+    if decision_time is None:
+        raise ValueError("decision_time is required for point-in-time market state")
+    cutoff = pd.Timestamp(decision_time)
+    if cutoff.tzinfo is None:
+        raise ValueError("decision_time must be timezone-aware")
     x = index_daily.copy()
+    available = pd.to_datetime(x["available_time"], errors="coerce")
+    if available.isna().any() or available.dt.tz is None:
+        raise ValueError("available_time must be valid and timezone-aware")
+    x["available_time"] = available.dt.tz_convert("UTC")
+    x = x.loc[x["available_time"] <= cutoff.tz_convert("UTC")].copy()
     x["trade_date"] = pd.to_datetime(x["trade_date"], errors="coerce")
     x = x.sort_values("trade_date").reset_index(drop=True)
     if x["trade_date"].isna().any() or x["trade_date"].duplicated().any():
@@ -40,7 +51,10 @@ def calculate_state_scores(index_daily: pd.DataFrame, window: int = 60) -> pd.Da
                "limit_up_cnt", "limit_down_cnt", "vol20"]
     for col in numeric:
         x[col] = pd.to_numeric(x[col], errors="coerce")
-    if (x[["close", "ma20", "ma60", "amount_ma20"]] <= 0).any().any():
+    if x[numeric].isna().any().any():
+        # Keep malformed observations visible as missing; they cannot create a state.
+        x.loc[x[numeric].isna().any(axis=1), numeric] = np.nan
+    if ((x[["close", "ma20", "ma60", "amount_ma20"]] <= 0) & x[["close", "ma20", "ma60", "amount_ma20"]].notna()).any().any():
         raise ValueError("prices and amount_ma20 must be positive")
     if ((x[["breadth"]] < 0) | (x[["breadth"]] > 1)).any().any():
         raise ValueError("breadth must be in [0,1]")
@@ -51,6 +65,8 @@ def calculate_state_scores(index_daily: pd.DataFrame, window: int = 60) -> pd.Da
         0.5 * (x["close"] > x["ma20"]).astype(float)
         + 0.5 * (x["ma20"] > x["ma60"]).astype(float)
     )
+    trend_missing = x[["close", "ma20", "ma60"]].isna().any(axis=1)
+    x.loc[trend_missing, "S_trend"] = np.nan
     x["limit_balance"] = x["limit_up_cnt"] - x["limit_down_cnt"]
     x["activity_ratio"] = x["amount"] / x["amount_ma20"]
     x["S_breadth"] = _rolling_percentile(x["breadth"], window)
