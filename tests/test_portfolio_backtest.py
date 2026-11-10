@@ -144,3 +144,17 @@ def test_open_position_risk_includes_paid_buy_fees_and_minimum_sell_commission()
     assert risk == pytest.approx(100 * (10.0 - 9.0 * 0.999)
                                  + 5.5 + 5.0
                                  + 100 * 9.0 * 0.999 * (5.0 + 0.1) / 10000)
+
+
+def test_custom_execution_costs_reduce_position_size_conservatively():
+    candidates = frame([candidate(stop=9.0)])
+    bars = frame([
+        bar("000001", "2026-01-06", open_=10.0, high=10.2, low=9.8, close=10.0),
+        bar("000001", "2026-01-07", open_=10.0, high=10.2, low=9.8, close=10.0),
+    ])
+    low_cost = run_portfolio_backtest(candidates, bars, costs=ExecutionCosts())
+    high_costs = ExecutionCosts(commission_bps=10, minimum_commission=10,
+                                sell_stamp_duty_bps=10, slippage_bps=30,
+                                transfer_fee_bps=1)
+    high_cost = run_portfolio_backtest(candidates, bars, costs=high_costs)
+    assert low_cost["open_positions"][0]["shares"] > high_cost["open_positions"][0]["shares"]
