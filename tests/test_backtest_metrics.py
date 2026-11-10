@@ -83,3 +83,26 @@ def test_invalid_trade_pnl_is_rejected():
         calculate_backtest_metrics(
             equity(100), [{"exit_date": "2026-01-02", "realized_pnl": float("nan")}], 100
         )
+
+
+
+def test_initial_capital_is_included_in_drawdown_high_water_mark():
+    result = calculate_backtest_metrics(equity(90000, 95000), [], 100000)
+    assert result["max_drawdown_pct"] == 10.0
+    assert result["max_drawdown_peak_date"] is None
+    assert result["max_drawdown_trough_date"] == "2026-01-01"
+
+
+def test_partial_exit_fills_are_aggregated_as_one_round_trip():
+    trades = [
+        {"symbol": "600000", "entry_date": "2026-01-01", "exit_date": "2026-01-03", "realized_pnl": -20},
+        {"symbol": "600000", "entry_date": "2026-01-01", "exit_date": "2026-01-04", "realized_pnl": 50},
+        {"symbol": "000001", "entry_date": "2026-01-02", "exit_date": "2026-01-05", "realized_pnl": -10},
+    ]
+    result = calculate_backtest_metrics(equity(100, 105), trades, 100)
+    assert result["trade_count"] == 2
+    assert result["wins"] == 1
+    assert result["losses"] == 1
+    assert result["realized_trade_pnl"] == 20
+    assert result["win_rate_pct"] == 50.0
+    assert result["profit_factor"] == 1.5
