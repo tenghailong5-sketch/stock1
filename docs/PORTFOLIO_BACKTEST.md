@@ -23,3 +23,7 @@ The result contains the audit status, initial and ending cash/equity, total retu
 - The engine uses the sizing module's estimated 30 bps round-trip risk allowance and the execution module's configured cost assumptions. These are research assumptions, not a historical fee schedule.
 - No real-world historical performance claim is valid unless independently sourced point-in-time candidate data, complete survivorship-safe universe history, corporate actions and tradability events pass the admission audit.
 - The current AkShare retrieval-time snapshots do not meet those requirements. This engine's unit tests validate event logic only; they do not validate strategy profitability.
+
+
+### Risk-budget cost treatment
+New position sizing reserves an additional fixed 10 currency units for round-trip minimum commissions, on top of its conservative 30 bps variable-cost allowance. Existing-position risk is recalculated from the actual recorded buy-side fees and modeled stop-exit slippage, sell commission (including the minimum), stamp duty, and transfer fee. This is a conservative estimate, not a guarantee of realized maximum loss; gaps, partial fills, suspensions, and locked limit-down exits can still exceed the planned stop risk.
