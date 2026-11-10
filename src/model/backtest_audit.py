@@ -7,9 +7,6 @@ or when survivorship/corporate-action/execution evidence is incomplete.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
-from typing import Iterable
-
 import pandas as pd
 
 
@@ -72,8 +69,10 @@ def audit_backtest_dataset(candidates: pd.DataFrame, bars: pd.DataFrame) -> Back
     for label, frame in (("candidate", candidates), ("bar", bars)):
         if frame[["symbol", "source_revision"]].isna().any().any():
             errors.append(label + "_missing_identity_or_revision")
-        if frame.duplicated(["symbol", "source_revision"]).any():
-            errors.append(label + "_duplicate_symbol_revision")
+        natural_key = (["symbol", "decision_time", "strategy"]
+                       if label == "candidate" else ["symbol", "trade_date"])
+        if frame.duplicated(natural_key).any():
+            errors.append(label + "_duplicate_natural_key")
         if not frame["historical_pit_eligible"].map(lambda x: isinstance(x, bool) and x).all():
             errors.append(label + "_contains_non_pit_observations")
         for col in ("corporate_actions_resolved", "universe_complete", "delisted_included"):
@@ -90,8 +89,8 @@ def audit_backtest_dataset(candidates: pd.DataFrame, bars: pd.DataFrame) -> Back
         if (available > decisions).any():
             errors.append("candidate_lookahead_available_after_decision")
 
-    if not bars["trade_date"].map(_aware_timestamp).all():
-        errors.append("bar_trade_date_must_be_timezone_aware")
+    if pd.to_datetime(bars["trade_date"], errors="coerce").isna().any():
+        errors.append("bar_invalid_trade_date")
     numeric_cols = ["open", "high", "low", "close", "volume"]
     numeric = bars[numeric_cols].apply(pd.to_numeric, errors="coerce")
     if numeric.isna().any().any():
