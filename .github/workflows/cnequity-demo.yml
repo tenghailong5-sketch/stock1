@@ -1,6 +1,8 @@
 name: CNEquity Bounded Demo Validation
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       symbols:
@@ -35,8 +37,8 @@ jobs:
           python -m pip install cnequity
       - name: Record CNEquity version and initialize isolated real-data demo
         env:
-          DEMO_SYMBOLS: ${{ inputs.symbols }}
-          DEMO_DAYS: ${{ inputs.days }}
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ' }}
+          DEMO_DAYS: ${{ inputs.days || '10' }}
         run: |
           mkdir -p validation/cnequity-demo
           python -c "from importlib.metadata import version; print('cnequity', version('cnequity'))" | tee validation/cnequity-demo/cne-version.txt
@@ -54,7 +56,7 @@ jobs:
           exit 0
       - name: Validate loaded daily bars and produce bounded evidence report
         env:
-          DEMO_SYMBOLS: ${{ inputs.symbols }}
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ' }}
         run: |
           python - <<'PY'
           import json
