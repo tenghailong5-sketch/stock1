@@ -9,6 +9,8 @@ from datetime import date
 import math
 from numbers import Integral, Real
 
+import numpy as np
+
 
 @dataclass(frozen=True)
 class ExecutionCosts:
@@ -80,8 +82,7 @@ def simulate_daily_fill(
     for flag_name, flag_value in (("suspended", suspended),
                                   ("limit_up_locked", limit_up_locked),
                                   ("limit_down_locked", limit_down_locked)):
-        if not (isinstance(flag_value, bool) or
-                (type(flag_value).__module__ == "numpy" and type(flag_value).__name__ == "bool_")):
+        if not isinstance(flag_value, (bool, np.bool_)):
             raise ValueError(flag_name + " must be an explicit boolean")
     if (isinstance(max_participation, bool) or not isinstance(max_participation, Real)
             or not math.isfinite(float(max_participation))
