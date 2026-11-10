@@ -81,6 +81,7 @@ def test_duplicate_symbol_decision_strategy_is_rejected():
 
 def test_execution_flags_must_be_explicit_booleans():
     candidates, bars = datasets()
+    bars["limit_down_locked"] = bars["limit_down_locked"].astype(object)
     bars.loc[0, "limit_down_locked"] = None
     audit = audit_backtest_dataset(candidates, bars)
     assert not audit.ready
