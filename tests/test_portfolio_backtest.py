@@ -3,7 +3,8 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from src.model.portfolio_backtest import run_portfolio_backtest
+from src.model.execution import ExecutionCosts
+from src.model.portfolio_backtest import _risk, run_portfolio_backtest
 
 
 DECISION = pd.Timestamp("2026-01-05T15:00:00+08:00")
@@ -131,3 +132,15 @@ def test_portfolio_never_opens_more_than_two_positions():
     assert len(buys) == 2
     assert len(result["open_positions"]) == 2
     assert result["skipped"][-1]["reason"] == "position_sizing_rejected"
+
+
+def test_open_position_risk_includes_paid_buy_fees_and_minimum_sell_commission():
+    position = {
+        "shares": 100, "entry_price": 10.0, "stop_price": 9.0,
+        "buy_cost": 5.5,
+    }
+    risk = _risk(position, ExecutionCosts())
+    assert risk > 111.0
+    assert risk == pytest.approx(100 * (10.0 - 9.0 * 0.999)
+                                 + 5.5 + 5.0
+                                 + 100 * 9.0 * 0.999 * (5.0 + 0.1) / 10000)
