@@ -79,6 +79,6 @@ def test_fetch_calls_all_four_date_scoped_apis():
         fake, trade_date="20261111",
         captured_at="2026-11-11T16:30:00+08:00",
     )
-    assert len(result) == 4
+    assert len(result) == 5
     assert {event for event, _ in fake.calls} == set(POOL_APIS.values())
     assert {date for _, date in fake.calls} == {"20261111"}
