@@ -98,7 +98,7 @@
 - `stock_zt_pool_em`：涨停股池；
 - `stock_zt_pool_dtgc_em`：跌停股池；
 - `stock_zt_pool_zbgc_em`：炸板股池；
-- `stock_zt_pool_previous_em`：昨日涨停股池。
+- `stock_zt_pool_previous_em`：昨日涨停股池；\n- `stock_zt_pool_strong_em`：强势股池，用于观察连板梯队与强势股结构。
 
 每类接口单独形成一条日期快照，保留供应商原始字段列表、记录数量、采集时间、来源、内容哈希和 `historical_pit_eligible=false` 标记。空池只有在响应仍包含预期代码列时才记录为零条；空响应、字段缺失、重复证券代码、无效日期或接口不可用均 fail closed。四类数据全部获取和校验后才会写入归档。
 
