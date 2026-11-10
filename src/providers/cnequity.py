@@ -30,8 +30,12 @@ def _default_loader():
 
 def normalize_daily_bars(frame: pd.DataFrame) -> pd.DataFrame:
     """Validate CNEquity raw daily bars without fabricating PIT metadata."""
+    # CNEquity query.load() returns Polars; convert without an Arrow bridge.
     if not isinstance(frame, pd.DataFrame):
-        raise TypeError("CNEquity daily_bars must be a pandas DataFrame")
+        if hasattr(frame, "to_dicts"):
+            frame = pd.DataFrame(frame.to_dicts())
+        else:
+            raise TypeError("CNEquity daily_bars must be a DataFrame-like table")
     missing = sorted(_REQUIRED - set(frame.columns))
     if missing:
         raise ValueError("CNEquity daily_bars missing columns: " + ",".join(missing))
@@ -86,12 +90,19 @@ def normalize_daily_bars(frame: pd.DataFrame) -> pd.DataFrame:
 def load_daily_bars(
     symbols: Sequence[str],
     *,
+    start: str | None = None,
+    end: str | None = None,
     loader: Callable | None = None,
 ) -> pd.DataFrame:
-    """Load a bounded symbol set from CNEquity and validate the raw bars."""
+    """Load bounded CNEquity symbols; symbols use e.g. 600000.SH."""
     normalized_symbols = sorted({str(symbol).strip() for symbol in symbols if str(symbol).strip()})
     if not normalized_symbols:
         raise ValueError("at least one CNEquity symbol is required")
     load = loader or _default_loader()
-    frame = load("daily_bars", symbols=normalized_symbols)
+    kwargs = {"symbols": normalized_symbols, "adjust": None}
+    if start is not None:
+        kwargs["start"] = start
+    if end is not None:
+        kwargs["end"] = end
+    frame = load("daily_bars", **kwargs)
     return normalize_daily_bars(frame)
