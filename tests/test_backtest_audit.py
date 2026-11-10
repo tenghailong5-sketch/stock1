@@ -94,3 +94,10 @@ def test_unknown_strategy_is_rejected():
     audit = audit_backtest_dataset(candidates, bars)
     assert not audit.ready
     assert "candidate_contains_unknown_strategy" in audit.errors
+
+def test_blank_ruleset_version_is_rejected():
+    candidates, bars = datasets()
+    candidates.loc[0, "ruleset_version"] = "   "
+    audit = audit_backtest_dataset(candidates, bars)
+    assert not audit.ready
+    assert "candidate_missing_ruleset_version" in audit.errors
