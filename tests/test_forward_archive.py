@@ -13,6 +13,13 @@ class FakeArchiveAkshare:
             "收盘": 3030, "成交量": 100000, "成交额": 200000000,
         }])
 
+    def stock_zh_a_spot_em(self):
+        return pd.DataFrame([
+            {"代码": "000001", "最新价": 10, "涨跌幅": 2.0},
+            {"代码": "600000", "最新价": 8, "涨跌幅": -1.0},
+            {"代码": "000002", "最新价": 9, "涨跌幅": 0.0},
+        ])
+
     def stock_board_industry_name_em(self):
         return pd.DataFrame([
             {"板块名称": "电子", "板块代码": "BK0001"},
@@ -51,10 +58,11 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
     )
     assert set(counts) == {
         "index_000001", "index_399001", "index_399006",
-        "index_000688", "index_000300", "industry_membership",
+        "index_000688", "index_000300", "industry_membership", "market_breadth",
     }
     assert all(counts[f"index_{code}"] == 1 for code in ("000001", "399001", "399006", "000688", "000300"))
     assert counts["industry_membership"] == 4  # two symbols across two industries
+    assert counts["market_breadth"] == 1
     index_file = tmp_path / "index_daily" / "000001.jsonl"
     index_row = json.loads(index_file.read_text(encoding="utf-8").splitlines()[0])
     assert index_row["historical_pit_eligible"] is False
@@ -68,6 +76,14 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
         "current_membership_observation_only"
     }
     assert all("valid_from" not in row and "valid_to" not in row for row in industry_rows)
+
+    breadth_file = tmp_path / "market_breadth" / "2026-11-11.jsonl"
+    breadth_row = json.loads(breadth_file.read_text(encoding="utf-8").splitlines()[0])
+    assert breadth_row["advances"] == 1
+    assert breadth_row["declines"] == 1
+    assert breadth_row["unchanged"] == 1
+    assert breadth_row["snapshot_scope"] == "current_provider_snapshot_only"
+    assert breadth_row["historical_pit_eligible"] is False
 
 
 def test_collector_refuses_naive_capture_time(tmp_path):
