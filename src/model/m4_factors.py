@@ -94,15 +94,38 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
     return x
 
 
+def _pit_frame(frame: pd.DataFrame, decision_time, name: str) -> pd.DataFrame:
+    if "available_time" not in frame.columns:
+        raise ValueError(f"{name} requires available_time")
+    out = frame.copy()
+    available = pd.to_datetime(out["available_time"], errors="coerce")
+    if available.isna().any() or available.dt.tz is None:
+        raise ValueError(f"{name}.available_time must be valid and timezone-aware")
+    out["available_time"] = available.dt.tz_convert("UTC")
+    cutoff = pd.Timestamp(decision_time)
+    if cutoff.tzinfo is None:
+        raise ValueError("decision_time must be timezone-aware")
+    return out.loc[out["available_time"] <= cutoff.tz_convert("UTC")].copy()
+
+
 def industry_relative_strength(stock_industry_returns: pd.DataFrame,
-                               market_returns: pd.DataFrame) -> pd.DataFrame:
-    """Return 5d/20d industry excess returns; caller supplies PIT industry index returns."""
+                               market_returns: pd.DataFrame,
+                               decision_time=None) -> pd.DataFrame:
+    """Return 5d/20d industry excess returns with PIT-validated source rows."""
     required = {"trade_date", "industry_code", "return_5", "return_20"}
     if required - set(stock_industry_returns.columns):
         raise ValueError("industry returns missing required columns")
     if {"trade_date", "market_return_5", "market_return_20"} - set(market_returns.columns):
         raise ValueError("market returns missing required columns")
-    x = stock_industry_returns.merge(market_returns, on="trade_date", how="left", validate="many_to_one")
+    if decision_time is None:
+        raise ValueError("decision_time is required for PIT industry strength")
+    ind = _pit_frame(stock_industry_returns, decision_time, "industry returns")
+    market = _pit_frame(market_returns, decision_time, "market returns")
+    if ind.duplicated(["trade_date", "industry_code"]).any():
+        raise ValueError("duplicate point-in-time industry rows")
+    if market.duplicated(["trade_date"]).any():
+        raise ValueError("duplicate point-in-time market rows")
+    x = ind.merge(market, on="trade_date", how="left", validate="many_to_one")
     x["industry_excess_5"] = x["return_5"] - x["market_return_5"]
     x["industry_excess_20"] = x["return_20"] - x["market_return_20"]
     return x
@@ -110,34 +133,48 @@ def industry_relative_strength(stock_industry_returns: pd.DataFrame,
 
 def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
                       industry_returns: pd.DataFrame, window: int = 60,
-                      min_periods: int = 40) -> pd.DataFrame:
-    """Rolling two-factor OLS residuals; beta estimation excludes the target session."""
-    required = {"symbol", "trade_date", "industry_code", "return_5"}
+                      min_periods: int = 40, decision_time=None) -> pd.DataFrame:
+    """Compute 5d residual return using beta fitted on prior daily returns.
+
+    Beta regression uses non-overlapping one-session observations from dates
+    strictly before the target date; target residual applies those betas to
+    the target's 5-session stock, market and industry returns.
+    """
+    required = {"symbol", "trade_date", "industry_code", "return_5", "daily_return"}
     if required - set(stock_returns.columns):
         raise ValueError("stock_returns missing required columns")
-    for frame, cols in ((market_returns, {"trade_date", "market_return"}),
-                        (industry_returns, {"trade_date", "industry_return", "industry_code"})):
+    for frame, cols in ((market_returns, {"trade_date", "market_return", "market_return_5"}),
+                        (industry_returns, {"trade_date", "industry_return", "industry_return_5", "industry_code"})):
         if cols - set(frame.columns):
             raise ValueError("benchmark return frame missing required columns")
-    x = stock_returns.merge(market_returns, on="trade_date", how="left", validate="many_to_one")
-    x = x.merge(industry_returns, on=["trade_date", "industry_code"], how="left", validate="many_to_one")
+    if decision_time is None:
+        raise ValueError("decision_time is required for PIT residual strength")
+    stocks = _pit_frame(stock_returns, decision_time, "stock returns")
+    markets = _pit_frame(market_returns, decision_time, "market returns")
+    industries = _pit_frame(industry_returns, decision_time, "industry returns")
+    if markets.duplicated(["trade_date"]).any():
+        raise ValueError("duplicate point-in-time market rows")
+    if industries.duplicated(["trade_date", "industry_code"]).any():
+        raise ValueError("duplicate point-in-time industry rows")
+    x = stocks.merge(markets, on="trade_date", how="left", validate="many_to_one")
+    x = x.merge(industries, on=["trade_date", "industry_code"], how="left", validate="many_to_one")
     x = x.sort_values(["symbol", "trade_date"])
     output = []
     for symbol, group in x.groupby("symbol"):
         g = group.copy()
         residual = []
         for i, row in enumerate(g.itertuples(index=False)):
-            hist = g.iloc[max(0, i-window):i][["market_return", "industry_return", "return_5"]].dropna()
-            if len(hist) < min_periods or pd.isna(row.return_5) or pd.isna(row.market_return) or pd.isna(row.industry_return):
+            hist = g.iloc[max(0, i-window):i][["market_return", "industry_return", "daily_return"]].dropna()
+            current = [row.return_5, row.market_return_5, row.industry_return_5]
+            if len(hist) < min_periods or not np.isfinite(current).all():
                 residual.append(np.nan)
                 continue
             design = np.column_stack([np.ones(len(hist)), hist.market_return, hist.industry_return])
-            beta = np.linalg.lstsq(design, hist.return_5.to_numpy(), rcond=None)[0]
-            residual.append(float(row.return_5 - beta[0] - beta[1]*row.market_return - beta[2]*row.industry_return))
+            beta = np.linalg.lstsq(design, hist.daily_return.to_numpy(), rcond=None)[0]
+            residual.append(float(row.return_5 - beta[0]*5 - beta[1]*row.market_return_5 - beta[2]*row.industry_return_5))
         g["residual_return_5"] = residual
         output.append(g)
     return pd.concat(output, ignore_index=True) if output else x.assign(residual_return_5=np.nan)
-
 
 def rank_factor(values: pd.Series, higher_is_better: bool = True) -> pd.Series:
     """Cross-sectional percentile rank; NaN remains missing and is never imputed."""
