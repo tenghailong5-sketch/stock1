@@ -1,0 +1,81 @@
+name: CNEquity Bounded Demo Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Comma-separated A-share symbols (keep this to a small sample)"
+        required: true
+        default: "600519.SH,000001.SZ,000858.SZ"
+      days:
+        description: "Approximate recent trading days"
+        required: true
+        default: "10"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cnequity-demo-validation
+  cancel-in-progress: false
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install FHM and CNEquity dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install cnequity
+      - name: Record CNEquity version and initialize isolated real-data demo
+        env:
+          DEMO_SYMBOLS: ${{ inputs.symbols }}
+          DEMO_DAYS: ${{ inputs.days }}
+        run: |
+          mkdir -p validation/cnequity-demo
+          cne --version | tee validation/cnequity-demo/cne-version.txt
+          cne init --profile demo --symbols "$DEMO_SYMBOLS" --days "$DEMO_DAYS" --data-root "$RUNNER_TEMP/cnequity-demo-lake" --config-out "$RUNNER_TEMP/cnequity-demo.toml" --json 2>&1 | tee validation/cnequity-demo/init.log
+      - name: Validate loaded daily bars and produce bounded evidence report
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+          from cnequity.query import load
+          from src.providers.cnequity import normalize_daily_bars
+
+          symbols = [s.strip() for s in "${{ inputs.symbols }}".split(",") if s.strip()]
+          raw = load("daily_bars", symbols=symbols, adjust=None)
+          bars = normalize_daily_bars(raw)
+          report = {
+              "row_count": int(len(bars)),
+              "symbols": sorted(bars["symbol"].unique().tolist()),
+              "trade_date_min": str(bars["trade_date"].min().date()),
+              "trade_date_max": str(bars["trade_date"].max().date()),
+              "volume_unit": "shares (CNEquity daily_bars v2 contract)",
+              "data_versions": sorted(bars["data_version"].astype(str).unique().tolist()),
+              "sources": sorted(bars["source"].astype(str).unique().tolist()),
+              "fetched_at_min": str(bars["fetched_at"].min()),
+              "fetched_at_max": str(bars["fetched_at"].max()),
+              "historical_pit_eligible": False,
+              "pit_exclusion_reason": "retrieval_time_is_not_historical_availability",
+          }
+          Path("validation/cnequity-demo/data-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cnequity-demo-evidence
+          path: validation/cnequity-demo/
+          if-no-files-found: warn
+          retention-days: 14
