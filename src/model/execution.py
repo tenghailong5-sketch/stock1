@@ -77,6 +77,11 @@ def simulate_daily_fill(
         raise ValueError("trade_date and entry_date must be dates")
     if not isinstance(costs, ExecutionCosts):
         raise ValueError("costs must be an ExecutionCosts instance")
+    for flag_name, flag_value in (("suspended", suspended),
+                                  ("limit_up_locked", limit_up_locked),
+                                  ("limit_down_locked", limit_down_locked)):
+        if not isinstance(flag_value, bool):
+            raise ValueError(flag_name + " must be an explicit boolean")
     if (isinstance(max_participation, bool) or not isinstance(max_participation, Real)
             or not math.isfinite(float(max_participation))
             or not 0 < float(max_participation) <= 1):
