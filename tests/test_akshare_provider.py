@@ -145,6 +145,20 @@ def test_market_breadth_snapshot_counts_valid_quotes_without_limit_inference():
     assert result["snapshot_scope"] == "current_provider_snapshot_only"
 
 
+
+def test_market_breadth_snapshot_excludes_infinite_quotes_from_coverage():
+    raw = pd.DataFrame([
+        {"代码": "000001", "最新价": float("inf"), "涨跌幅": 1.0},
+        {"代码": "600000", "最新价": 8.0, "涨跌幅": float("-inf")},
+        {"代码": "000002", "最新价": 9.0, "涨跌幅": 0.0},
+    ])
+    result = normalize_market_breadth_snapshot(raw).iloc[0]
+    assert result["valid_quote_count"] == 1
+    assert result["missing_quote_count"] == 2
+    assert result["advances"] == 0
+    assert result["unchanged"] == 1
+
+
 def test_market_breadth_snapshot_rejects_duplicate_symbols():
     raw = pd.DataFrame([
         {"代码": "000001", "最新价": 10, "涨跌幅": 1},
