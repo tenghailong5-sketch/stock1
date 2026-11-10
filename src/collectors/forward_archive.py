@@ -119,6 +119,12 @@ def collect(ak_module, archive_root: Path, *, captured_at=None) -> dict[str, int
         ak_module.stock_zh_a_spot_em(), fetched_at=captured
     )
     breadth_records = _records(breadth)
+    limit_pools = fetch_limit_pool_snapshots(
+        ak_module,
+        trade_date=captured.tz_convert("Asia/Shanghai").strftime("%Y%m%d"),
+        captured_at=captured,
+    )
+    limit_pool_records = _records(limit_pools)
 
     counts: dict[str, int] = {}
     for code in INDEXES:
@@ -139,6 +145,11 @@ def collect(ak_module, archive_root: Path, *, captured_at=None) -> dict[str, int
         archive_root / "market_breadth" / f"{day}.jsonl",
         breadth_records,
         ("snapshot_time", "source_revision"),
+    )
+    counts["limit_pools"] = append_jsonl_atomic(
+        archive_root / "limit_pools" / f"{day}.jsonl",
+        limit_pool_records,
+        ("event_type", "trade_date", "source_revision"),
     )
     return counts
 
