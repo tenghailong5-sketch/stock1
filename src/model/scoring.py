@@ -22,12 +22,12 @@ class StrategyResult:
 
 
 def _finite_number(value: Any) -> bool:
-    # bool is an int subclass; a gate flag must never become a numeric score.
+    # bool is an int subclass in Python, but a gate flag must never become a factor score.
     if isinstance(value, bool):
         return False
     try:
         number = float(value)
-        return value is not None and number == number and abs(number) != float("inf")
+        return number == number and abs(number) != float("inf")
     except (TypeError, ValueError, OverflowError):
         return False
 
@@ -47,9 +47,12 @@ def _score(strategy: str, weights: Mapping[str, int],
            factors: Mapping[str, Any], *, stage: str) -> StrategyResult:
     reasons: list[str] = []
     if strategy == "B" and stage != "next_day":
+        # Next-day price action is not knowable at the previous close.
         if "next_day_price_action" in factors:
             reasons.append("lookahead_forbidden:next_day_price_action")
         return StrategyResult(strategy, None, False, tuple(reasons or ["B_requires_next_day_stage"]), stage)
+    if strategy == "B" and stage == "next_day" and "next_day_price_action" not in factors:
+        reasons.append("missing:next_day_price_action")
     missing = [k for k in weights if k not in factors or not _finite_number(factors.get(k))]
     if missing:
         reasons.extend(f"missing_or_invalid_factor:{k}" for k in missing)
@@ -64,10 +67,10 @@ def _score(strategy: str, weights: Mapping[str, int],
 def score_a(factors: Mapping[str, Any], gates: Mapping[str, Any],
             *, market_state: MarketState, stage: str = "close") -> StrategyResult:
     """A: trend continuation; threshold rules are independent of weighted score."""
+    reasons: list[str] = []
     scored = _score("A", A_WEIGHTS, factors, stage=stage)
     if not scored.eligible:
         return scored
-    reasons: list[str] = []
     if market_state == MarketState.RISK_OFF:
         reasons.append("market_risk_off")
     for key in ("industry_top_30pct", "stock_residual_top_20pct",
@@ -99,7 +102,10 @@ def score_b(factors: Mapping[str, Any], gates: Mapping[str, Any],
         reasons.append("market_risk_off")
     for key in ("event_data_verified", "liquidity_and_risk_pass",
                 "announcement_risk_pass"):
-        _require_bool(gates, key, reasons)
+        if not _require_bool(gates, key, reasons):
+            continue
+        if gates[key] is False:
+            reasons.append(f"hard_gate_failed:{key}")
     return StrategyResult("B", scored.score, not reasons, tuple(reasons), stage)
 
 
@@ -116,7 +122,10 @@ def score_c(factors: Mapping[str, Any], gates: Mapping[str, Any],
                 "pullback_volume_le_80pct_prior5d", "stop_or_reversal_confirmed",
                 "industry_not_weak", "no_material_negative_event",
                 "liquidity_and_risk_pass"):
-        _require_bool(gates, key, reasons)
+        if not _require_bool(gates, key, reasons):
+            continue
+        if gates[key] is False:
+            reasons.append(f"hard_gate_failed:{key}")
     return StrategyResult("C", scored.score, not reasons, tuple(reasons), stage)
 
 
@@ -133,8 +142,23 @@ def candidate_band(score: float) -> str:
     return "below_threshold"
 
 
+def score_factor_bundle(frame, factor_map, *, date_col="trade_date"):
+    """Rank raw factors within each trading date; missing values stay missing."""
+    from .m4_factors import rank_factor_by_date
+    out = frame.copy()
+    for output_name, spec in factor_map.items():
+        if not isinstance(spec, tuple) or len(spec) != 2:
+            raise ValueError("invalid factor mapping for " + output_name)
+        raw_col, higher_is_better = spec
+        if raw_col not in out:
+            raise ValueError("missing raw factor column: " + raw_col)
+        out[output_name] = rank_factor_by_date(out, raw_col, date_col=date_col,
+                                               higher_is_better=bool(higher_is_better))
+    return out
+
+
 def qualify_candidate(result: StrategyResult, *, minimum_score: float = 80.0) -> StrategyResult:
-    """Apply the non-negotiable FHM candidate floor after all strategy hard gates.
+    """Apply the mandatory FHM candidate floor after all strategy hard gates.
 
     The configured floor may be raised but never lowered below 80. A high score
     cannot override failed/missing hard gates, and a missing score never qualifies.
@@ -151,18 +175,3 @@ def qualify_candidate(result: StrategyResult, *, minimum_score: float = 80.0) ->
                               result.reasons + (f"below_minimum_score:{minimum_score:g}",),
                               result.stage)
     return result
-
-
-def score_factor_bundle(frame, factor_map, *, date_col="trade_date"):
-    """Rank raw factors within each trading date; missing values stay missing."""
-    from .m4_factors import rank_factor_by_date
-    out = frame.copy()
-    for output_name, spec in factor_map.items():
-        if not isinstance(spec, tuple) or len(spec) != 2:
-            raise ValueError("invalid factor mapping for " + output_name)
-        raw_col, higher_is_better = spec
-        if raw_col not in out:
-            raise ValueError("missing raw factor column: " + raw_col)
-        out[output_name] = rank_factor_by_date(out, raw_col, date_col=date_col,
-                                               higher_is_better=bool(higher_is_better))
-    return out
