@@ -116,3 +116,33 @@ def test_non_finite_factor_values_are_rejected():
         assert result.score is None
         with pytest.raises(ValueError):
             weighted_score(A_WEIGHTS, values)
+
+
+def test_candidate_floor_is_hard_and_cannot_be_configured_below_80():
+    from src.model.scoring import qualify_candidate
+    gates = all_true([
+        "industry_top_30pct", "stock_residual_top_20pct", "amount_ma20_ge_100m",
+        "breakout_or_confirmed_retest", "no_high_volume_stall_or_repeated_rejection",
+    ])
+    result = score_a(factors(A_WEIGHTS), gates, market_state=MarketState.RISK_ON)
+    assert qualify_candidate(result).eligible
+    below = result.__class__(result.strategy, 79.99, True, (), result.stage)
+    rejected = qualify_candidate(below)
+    assert not rejected.eligible
+    assert rejected.score == pytest.approx(79.99)
+    assert "below_minimum_score:80" in rejected.reasons
+    with pytest.raises(ValueError):
+        qualify_candidate(result, minimum_score=79)
+
+
+def test_candidate_floor_never_overrides_failed_hard_gate():
+    from src.model.scoring import qualify_candidate
+    gates = all_true([
+        "industry_top_30pct", "stock_residual_top_20pct", "amount_ma20_ge_100m",
+        "breakout_or_confirmed_retest", "no_high_volume_stall_or_repeated_rejection",
+    ])
+    gates["industry_top_30pct"] = False
+    result = score_a(factors(A_WEIGHTS), gates, market_state=MarketState.RISK_ON)
+    qualified = qualify_candidate(result)
+    assert not qualified.eligible
+    assert "hard_gate_failed:industry_top_30pct" in qualified.reasons
