@@ -105,9 +105,17 @@ def run_portfolio_backtest(
         for symbol in sorted(list(positions)):
             position = positions[symbol]
             bar = day_bars.get(symbol)
-            if bar is None or float(bar["low"]) > position["stop_price"]:
+            if bar is None:
                 continue
-            reference = min(float(bar["open"]), position["stop_price"])
+            was_already_triggered = position.get("stop_triggered", False)
+            stop_hit_today = float(bar["low"]) <= position["stop_price"]
+            if not was_already_triggered and not stop_hit_today:
+                continue
+            # Once triggered, an unfilled protective stop remains a pending
+            # market exit. Retry on later sessions even if price rebounds.
+            position["stop_triggered"] = True
+            reference = (float(bar["open"]) if was_already_triggered
+                         else min(float(bar["open"]), position["stop_price"]))
             result = simulate_daily_fill(
                 side="sell", quantity=position["shares"], reference_price=reference,
                 trade_date=day, entry_date=position["entry_date"],
