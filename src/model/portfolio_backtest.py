@@ -36,7 +36,10 @@ def _risk(position: dict[str, Any], costs: ExecutionCosts) -> float:
     shares = position["shares"]
     entry = position["entry_price"]
     stop = position["stop_price"]
-    expected_exit = stop * (1.0 - costs.slippage_bps / 10000.0)
+    # If the stop has already triggered but could not be fully executed,
+    # use the worse of the stop and latest mark as the pending-exit reference.
+    exit_reference = min(stop, position.get("last_close", stop)) if position.get("stop_triggered", False) else stop
+    expected_exit = exit_reference * (1.0 - costs.slippage_bps / 10000.0)
     sell_turnover = shares * expected_exit
     sell_commission = max(costs.minimum_commission, sell_turnover * costs.commission_bps / 10000.0)
     sell_stamp = sell_turnover * costs.sell_stamp_duty_bps / 10000.0
