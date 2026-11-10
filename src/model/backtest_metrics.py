@@ -124,7 +124,7 @@ def calculate_backtest_metrics(
         "ending_equity": round(ending_equity, 2),
         "total_return_pct": round((ending_equity / starting_capital - 1.0) * 100.0, 4),
         "max_drawdown_pct": round(max_drawdown * 100.0, 4),
-        "max_drawdown_peak_date": max_drawdown_peak_date.date().isoformat(),
+        "max_drawdown_peak_date": max_drawdown_peak_date.date().isoformat() if max_drawdown_peak_date is not None else None,
         "max_drawdown_trough_date": max_drawdown_trough_date.date().isoformat(),
         "trade_count": trade_count,
         "wins": len(wins),
