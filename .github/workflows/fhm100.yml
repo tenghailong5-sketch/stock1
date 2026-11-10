@@ -1,7 +1,7 @@
 name: FHM-100 Daily Research
 on:
   pull_request:
-    branches: [main]
+    branches: [main, fix/numeric-factor-validation]
   push:
     branches: [main]
   workflow_dispatch:
