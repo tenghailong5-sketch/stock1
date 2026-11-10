@@ -38,7 +38,7 @@ def test_loss_streak_is_chronological_and_break_even_resets_it():
         {"exit_date": "2026-01-02", "realized_pnl": -1},
         {"exit_date": "2026-01-03", "realized_pnl": 0},
         {"exit_date": "2026-01-05", "realized_pnl": -2},
-        {"exit_date": "2026-01-06", "realized_pnl": -4},
+        {"exit_date": "2026-01-06", "realized_pnl": 4},
     ]
     result = calculate_backtest_metrics(equity(100, 95), trades, 100)
     assert result["max_consecutive_losses"] == 2
