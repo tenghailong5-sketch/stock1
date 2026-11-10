@@ -33,7 +33,7 @@ class FakeArchiveAkshare:
     def stock_zt_pool_previous_em(self, date):
         return pd.DataFrame([{"代码": "000002", "名称": "昨日涨停"}])
 
-    def stock_board_industry_name_em(self):
+    def stock_zt_pool_strong_em(self, date):\n        return pd.DataFrame([{"代码": "000003", "名称": "强势股"}])\n\n    def stock_board_industry_name_em(self):
         return pd.DataFrame([
             {"板块名称": "电子", "板块代码": "BK0001"},
             {"板块名称": "计算机", "板块代码": "BK0002"},
