@@ -82,6 +82,23 @@ def test_locked_limit_down_keeps_stopped_position_open():
     assert result["fills"][-1]["reason"] == "limit_down_locked_no_sell_fill"
 
 
+def test_triggered_stop_retries_after_limit_down_block_even_if_price_rebounds():
+    candidates = frame([candidate()])
+    bars = frame([
+        bar("000001", "2026-01-06"),
+        bar("000001", "2026-01-07", open_=9.4, high=9.5, low=9.2, close=9.3, limit_down=True),
+        bar("000001", "2026-01-08", open_=9.8, high=10.0, low=9.7, close=9.9),
+    ])
+    result = run_portfolio_backtest(candidates, bars)
+    assert len(result["trades"]) == 1
+    assert result["trades"][0]["exit_date"] == "2026-01-08"
+    assert result["fills"][-1]["side"] == "sell"
+    assert result["fills"][-1]["filled"] is True
+    # The pending market exit uses the next session's opening price, not
+    # the old stop trigger price, when the market has rebounded.
+    assert result["fills"][-1]["fill_price"] > 9.5
+
+
 def test_retrieval_time_only_dataset_is_blocked_before_simulation():
     candidates = frame([candidate()])
     bars = frame([bar("000001", "2026-01-06")])
