@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from src.providers.akshare_pit import (
+from src.providers.akshare_limit_pools import fetch_limit_pool_snapshots\nfrom src.providers.akshare_pit import (
     fetch_current_industry_membership_snapshot,
     normalize_index_history_snapshot,
     normalize_market_breadth_snapshot,
