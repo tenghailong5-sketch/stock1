@@ -47,3 +47,11 @@ def test_state_switch_requires_two_consecutive_sessions_and_applies_next_day():
 
 def test_market_score_missing_state_is_nan():
     assert pd.isna(market_environment_score({"StateScore": .7, "market_state": "INSUFFICIENT_DATA"}))
+
+
+def test_risk_on_market_mapping_reaches_100_at_max_attainable_score():
+    assert market_environment_score({"StateScore": .9, "market_state": "RISK_ON"}) == pytest.approx(100)
+
+
+def test_neutral_market_mapping_uses_neutral_interval():
+    assert market_environment_score({"StateScore": .475, "market_state": "NEUTRAL"}) == pytest.approx(57.5)
