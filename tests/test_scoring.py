@@ -49,8 +49,9 @@ def test_b_refuses_previous_close_lookahead_and_requires_next_day_fields():
     close_result = score_b(factors(B_WEIGHTS), {}, market_state=MarketState.NEUTRAL, stage="close")
     assert close_result.score is None
     assert not close_result.eligible
-    gates = all_true(["event_data_verified", "event_subtype_supported",
+    gates = all_true(["event_data_verified",
                       "liquidity_and_risk_pass", "announcement_risk_pass"])
+    gates["event_subtype"] = "close_up_sealed"
     next_day = score_b(factors(B_WEIGHTS), gates, market_state=MarketState.NEUTRAL, stage="next_day")
     assert next_day.score == pytest.approx(80)
     assert next_day.eligible
@@ -76,3 +77,21 @@ def test_candidate_bands_are_not_buy_signals():
     assert candidate_band(69) == "below_threshold"
     with pytest.raises(ValueError):
         candidate_band(101)
+
+
+def test_factor_percentiles_are_scoped_to_each_date_and_preserve_missing():
+    import pandas as pd
+    from src.model.scoring import score_factor_bundle
+    frame = pd.DataFrame({"trade_date": ["2026-01-01", "2026-01-01", "2026-01-02", "2026-01-02"], "raw": [10.0, 20.0, 100.0, None]})
+    out = score_factor_bundle(frame, {"industry_relative_strength": ("raw", True)})
+    assert out.loc[0, "industry_relative_strength"] == 50.0
+    assert out.loc[1, "industry_relative_strength"] == 100.0
+    assert out.loc[2, "industry_relative_strength"] == 100.0
+    assert pd.isna(out.loc[3, "industry_relative_strength"])
+
+
+def test_b_requires_one_of_four_distinct_event_subtypes():
+    gates = {"event_data_verified": True, "liquidity_and_risk_pass": True, "announcement_risk_pass": True, "event_subtype": "unknown_event"}
+    result = score_b(factors(B_WEIGHTS), gates, market_state=MarketState.NEUTRAL, stage="next_day")
+    assert not result.eligible
+    assert result.score is None
