@@ -89,7 +89,7 @@ def _records(frame: pd.DataFrame) -> list[dict]:
     return json.loads(payload)
 
 
-def collect(ak_module, archive_root: Path, *, captured_at=None) -> dict[str, int]:
+def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True) -> dict[str, int]:
     captured = pd.Timestamp(
         captured_at if captured_at is not None else datetime.now(ZoneInfo("Asia/Shanghai"))
     )
@@ -126,6 +126,14 @@ def collect(ak_module, archive_root: Path, *, captured_at=None) -> dict[str, int
     )
     limit_pool_records = _records(limit_pools)
 
+    if not write:
+        return {
+            **{f"index_{code}": sum(1 for row in index_records if row["index_symbol"] == code) for code in INDEXES},
+            "industry_membership": len(industry_records),
+            "market_breadth": len(breadth_records),
+            "limit_pools": len(limit_pool_records),
+        }
+
     counts: dict[str, int] = {}
     for code in INDEXES:
         rows = [row for row in index_records if row["index_symbol"] == code]
@@ -156,12 +164,12 @@ def collect(ak_module, archive_root: Path, *, captured_at=None) -> dict[str, int
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Capture forward-only A-share market data")
-    parser.add_argument("--output", default="data/forward_archive")
+    parser.add_argument("--output", default="data/forward_archive")\n    parser.add_argument("--dry-run", action="store_true", help="fetch and validate all sources without writing archive files")
     args = parser.parse_args()
     import akshare as ak
 
-    counts = collect(ak, Path(args.output))
-    print(json.dumps(counts, ensure_ascii=False, sort_keys=True))
+    counts = collect(ak, Path(args.output), write=not args.dry_run)
+    print(json.dumps({"mode": "dry_run" if args.dry_run else "archive", "validated_rows": counts}, ensure_ascii=False, sort_keys=True))
 
 
 if __name__ == "__main__":
