@@ -102,6 +102,18 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
     assert breadth_row["historical_pit_eligible"] is False
 
 
+def test_collector_dry_run_validates_without_writing(tmp_path):
+    counts = collect(
+        FakeArchiveAkshare(),
+        tmp_path,
+        captured_at="2026-11-11T16:30:00+08:00",
+        write=False,
+    )
+    assert counts["limit_pools"] == 5
+    assert counts["market_breadth"] == 1
+    assert list(tmp_path.rglob("*.jsonl")) == []
+
+
 def test_collector_refuses_naive_capture_time(tmp_path):
     with pytest.raises(ValueError, match="timezone-aware"):
         collect(FakeArchiveAkshare(), tmp_path, captured_at="2026-11-11T08:30:00")
