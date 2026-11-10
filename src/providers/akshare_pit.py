@@ -150,3 +150,56 @@ def fetch_current_industry_membership_snapshot(
     if result.duplicated(["symbol", "industry_code", "observed_at"]).any():
         raise ValueError("duplicate symbol/industry membership in one snapshot")
     return result
+
+
+def normalize_market_breadth_snapshot(frame: pd.DataFrame, *, fetched_at=None) -> pd.DataFrame:
+    """Summarize one current A-share quote snapshot; never infer historical limit events."""
+    required = {"代码", "最新价", "涨跌幅"}
+    missing = required - set(frame.columns)
+    if frame is None or frame.empty or missing:
+        raise ValueError(
+            "AKShare spot snapshot is empty or missing: " + ",".join(sorted(missing))
+        )
+    captured = _utc(fetched_at)
+    out = frame[["代码", "最新价", "涨跌幅"]].copy()
+    out["symbol"] = out["代码"].astype(str).str.zfill(6)
+    if out["symbol"].duplicated().any():
+        raise ValueError("AKShare spot snapshot contains duplicate symbols")
+    out["last_price"] = pd.to_numeric(out["最新价"], errors="coerce")
+    out["change_pct"] = pd.to_numeric(out["涨跌幅"], errors="coerce")
+    valid = (
+        out["last_price"].notna()
+        & out["change_pct"].notna()
+        & out["last_price"].gt(0)
+        & out["change_pct"].map(lambda value: pd.notna(value) and abs(float(value)) != float("inf"))
+    )
+    valid_rows = out.loc[valid]
+    advances = int(valid_rows["change_pct"].gt(0).sum())
+    declines = int(valid_rows["change_pct"].lt(0).sum())
+    unchanged = int(valid_rows["change_pct"].eq(0).sum())
+    valid_count = int(valid.sum())
+    total_count = int(len(out))
+    summary = {
+        "snapshot_time": captured,
+        "provider_row_count": total_count,
+        "valid_quote_count": valid_count,
+        "missing_quote_count": total_count - valid_count,
+        "advances": advances,
+        "declines": declines,
+        "unchanged": unchanged,
+        "breadth_coverage": valid_count / total_count,
+        "snapshot_scope": "current_provider_snapshot_only",
+        "historical_pit_eligible": False,
+    }
+    summary["source_revision"] = hashlib.sha256(
+        json_dumps_stable({k: v for k, v in summary.items() if k != "snapshot_time"}).encode("utf-8")
+    ).hexdigest()
+    summary["available_time"] = captured
+    summary["source_id"] = "akshare.stock_zh_a_spot_em"
+    return pd.DataFrame([summary])
+
+
+def json_dumps_stable(value: dict) -> str:
+    """Serialize summary values deterministically for revision hashing."""
+    import json
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
