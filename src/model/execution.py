@@ -107,6 +107,9 @@ def simulate_daily_fill(
     if reason:
         return FillResult(False, side, 0, float(reference_price), None, 0, 0, 0, 0, reason)
 
+    quantity = int(quantity)
+    lot_size = int(lot_size)
+    available_volume = int(available_volume)
     cap = math.floor((available_volume * max_participation) / lot_size) * lot_size
     filled_qty = min(quantity, cap)
     if filled_qty <= 0:
