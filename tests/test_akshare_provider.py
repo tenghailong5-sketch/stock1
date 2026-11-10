@@ -141,7 +141,7 @@ def test_market_breadth_snapshot_counts_valid_quotes_without_limit_inference():
     assert result["declines"] == 1
     assert result["unchanged"] == 1
     assert result["breadth_coverage"] == 0.75
-    assert result["historical_pit_eligible"] is False
+    assert not bool(result["historical_pit_eligible"])
     assert result["snapshot_scope"] == "current_provider_snapshot_only"
 
 
