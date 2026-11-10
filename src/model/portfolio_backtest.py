@@ -237,6 +237,7 @@ def run_portfolio_backtest(
         "open_positions": [
             {"symbol": symbol, "shares": p["shares"], "entry_date": p["entry_date"].isoformat(),
              "entry_price": p["entry_price"], "stop_price": p["stop_price"],
+             "stop_exit_pending": bool(p.get("stop_triggered", False)),
              "last_close": p["last_close"]}
             for symbol, p in sorted(positions.items())
         ],
