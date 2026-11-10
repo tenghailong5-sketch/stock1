@@ -53,7 +53,8 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
         "index_000001", "index_399001", "index_399006",
         "index_000688", "index_000300", "industry_membership",
     }
-    assert all(count == 1 for count in counts.values())
+    assert all(counts[f"index_{code}"] == 1 for code in ("000001", "399001", "399006", "000688", "000300"))
+    assert counts["industry_membership"] == 4  # two symbols across two industries
     index_file = tmp_path / "index_daily" / "000001.jsonl"
     index_row = json.loads(index_file.read_text(encoding="utf-8").splitlines()[0])
     assert index_row["historical_pit_eligible"] is False
