@@ -15,7 +15,7 @@ Entry point: `src/model/portfolio_backtest.py::run_portfolio_backtest`.
 
 The result contains the audit status, initial and ending cash/equity, total return, realized/unrealized P&L, open positions, fills, completed trades, skipped-entry reasons, and daily equity observations.
 
-## Assumptions and limitations
+## Performance metrics\n\n- Maximum drawdown is measured from the running peak of daily marked-to-market equity to the subsequent trough. The output includes the peak and trough dates.\n- Win rate is winning completed trade records divided by all completed trade records; break-even records remain in the denominator. Partial exit fills currently appear as separate completed trade records.\n- Profit factor is gross realized profit divided by absolute gross realized loss. It is `null` when there are no losing records rather than being reported as infinity. Payoff ratio is average win divided by the absolute average loss and is `null` unless both sides exist.\n- Maximum consecutive losses is calculated in exit-date order; a break-even or winning record resets the streak.\n- Empty trade history yields `null` for trade-dependent ratios and averages. Invalid/non-finite equity or P&L values and non-increasing equity dates are rejected.\n\n## Assumptions and limitations
 
 - Candidate rows must include an explicit `stop_price`; the engine will not invent one.
 - The event engine is long-only and uses daily bars. Intraday order sequencing, queue priority, partial stop execution paths, corporate-action cash/stock adjustments, dividends, delisting settlement, taxes by historical effective date, and borrow/shorting are not modeled.
