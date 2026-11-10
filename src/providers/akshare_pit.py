@@ -26,6 +26,12 @@ def _revision(frame: pd.DataFrame) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _row_revision(row: pd.Series) -> str:
+    """Hash one provider observation so rolling-window changes do not re-version every row."""
+    payload = row.to_frame().T.to_json(orient="records", date_format="iso", force_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def normalize_daily_history_snapshot(
     frame: pd.DataFrame, *, symbol: str, fetched_at=None
 ) -> pd.DataFrame:
@@ -52,9 +58,9 @@ def normalize_daily_history_snapshot(
         raise ValueError("AKShare daily history contains invalid date or OHLC values")
     if out.duplicated(["symbol", "trade_date"]).any():
         raise ValueError("AKShare daily history contains duplicate symbol/trade_date")
-    # Hash only provider payload fields: retrieval metadata must not make an
-    # unchanged historical response look like a new source revision.
-    out["source_revision"] = _revision(out)
+    # Hash each provider row: a rolling request window must not re-version
+    # every unchanged historical observation on every daily retrieval.
+    out["source_revision"] = out.apply(_row_revision, axis=1)
     out["available_time"] = captured
     out["source_id"] = "akshare.stock_zh_a_hist"
     out["availability_basis"] = "retrieval_time_only"
@@ -90,7 +96,9 @@ def normalize_index_history_snapshot(
             or (out["high"] < out[["open", "low", "close"]].max(axis=1)).any()
             or (out["low"] > out[["open", "high", "close"]].min(axis=1)).any()):
         raise ValueError("AKShare index history contains invalid OHLC/volume/amount values")
-    out["source_revision"] = _revision(out)
+    # Per-row hashes prevent a rolling 180-day request window from causing
+    # unchanged historical index bars to be appended again every day.
+    out["source_revision"] = out.apply(_row_revision, axis=1)
     out["available_time"] = captured
     out["source_id"] = "akshare.index_zh_a_hist"
     out["availability_basis"] = "retrieval_time_only"
