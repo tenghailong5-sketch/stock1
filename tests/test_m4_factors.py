@@ -68,6 +68,9 @@ def test_price_structure_point_in_time_cutoff():
     assert len(out) == 24
     with pytest.raises(ValueError):
         price_structure(x, decision_time="2026-11-10T08:30:00")
+    x["available_time"] = "2026-11-10 08:00:00"
+    with pytest.raises(ValueError):
+        price_structure(x)
 
 
 def test_residual_requires_historical_industry_key():
