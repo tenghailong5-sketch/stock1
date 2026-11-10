@@ -31,11 +31,18 @@ def _volume(value: Any) -> int:
     return int(number)
 
 
-def _risk(position: dict[str, Any]) -> float:
+def _risk(position: dict[str, Any], costs: ExecutionCosts) -> float:
+    """Estimate loss to the stop using actual paid buy fees and modeled exit costs."""
     shares = position["shares"]
     entry = position["entry_price"]
     stop = position["stop_price"]
-    return max(0.0, shares * (entry - stop) + shares * entry * 30.0 / 10000.0)
+    expected_exit = stop * (1.0 - costs.slippage_bps / 10000.0)
+    sell_turnover = shares * expected_exit
+    sell_commission = max(costs.minimum_commission, sell_turnover * costs.commission_bps / 10000.0)
+    sell_stamp = sell_turnover * costs.sell_stamp_duty_bps / 10000.0
+    sell_transfer = sell_turnover * costs.transfer_fee_bps / 10000.0
+    return max(0.0, shares * (entry - expected_exit) + position["buy_cost"]
+               + sell_commission + sell_stamp + sell_transfer)
 
 
 def run_portfolio_backtest(
@@ -154,7 +161,7 @@ def run_portfolio_backtest(
             if float(stop) >= expected_entry:
                 skipped.append({"symbol": symbol, "date": day.isoformat(), "reason": "stop_not_below_entry"})
                 continue
-            portfolio_risk = sum(_risk(p) for p in positions.values())
+            portfolio_risk = sum(_risk(p, costs) for p in positions.values())
             sizing = size_long_position(
                 entry_price=expected_entry, stop_price=float(stop), available_cash=cash,
                 open_position_count=len(positions), open_portfolio_risk=portfolio_risk,
