@@ -13,6 +13,7 @@ from typing import Any
 import pandas as pd
 
 from .backtest_audit import require_backtest_ready
+from .backtest_metrics import calculate_backtest_metrics
 from .execution import ExecutionCosts, simulate_daily_fill
 from .position_sizing import size_long_position
 
@@ -200,6 +201,7 @@ def run_portfolio_backtest(
         })
 
     ending_equity = daily_equity[-1]["equity"] if daily_equity else cash
+    metrics = calculate_backtest_metrics(daily_equity, trades, float(initial_cash)) if daily_equity else None
     return {
         "audit_passed": True,
         "initial_cash": round(float(initial_cash), 2),
@@ -221,4 +223,5 @@ def run_portfolio_backtest(
         "trades": trades,
         "skipped": skipped,
         "daily_equity": daily_equity,
+        "metrics": metrics,
     }
