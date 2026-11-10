@@ -1,0 +1,74 @@
+import json
+
+import pandas as pd
+import pytest
+
+from src.collectors.forward_archive import append_jsonl_atomic, collect
+
+
+class FakeArchiveAkshare:
+    def index_zh_a_hist(self, symbol, period, start_date, end_date):
+        return pd.DataFrame([{
+            "日期": "2026-11-10", "开盘": 3000, "最高": 3050, "最低": 2990,
+            "收盘": 3030, "成交量": 100000, "成交额": 200000000,
+        }])
+
+    def stock_board_industry_name_em(self):
+        return pd.DataFrame([
+            {"板块名称": "电子", "板块代码": "BK0001"},
+            {"板块名称": "计算机", "板块代码": "BK0002"},
+        ])
+
+    def stock_board_industry_cons_em(self, symbol):
+        return pd.DataFrame({"代码": ["000001", "600000"]})
+
+
+def test_append_jsonl_is_idempotent_and_preserves_existing_rows(tmp_path):
+    path = tmp_path / "archive.jsonl"
+    first = {"symbol": "000001", "trade_date": "2026-11-10", "revision": "a"}
+    second = {"symbol": "000002", "trade_date": "2026-11-10", "revision": "b"}
+    assert append_jsonl_atomic(path, [first], ("symbol", "trade_date", "revision")) == 1
+    assert append_jsonl_atomic(
+        path, [first, second], ("symbol", "trade_date", "revision")
+    ) == 1
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert rows == [first, second]
+
+
+def test_corrupt_archive_is_rejected_without_overwriting(tmp_path):
+    path = tmp_path / "archive.jsonl"
+    path.write_text("{broken\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="corrupt archive"):
+        append_jsonl_atomic(path, [{"id": 1}], ("id",))
+    assert path.read_text(encoding="utf-8") == "{broken\n"
+
+
+def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
+    counts = collect(
+        FakeArchiveAkshare(),
+        tmp_path,
+        captured_at="2026-11-11T16:30:00+08:00",
+    )
+    assert set(counts) == {
+        "index_000001", "index_399001", "index_399006",
+        "index_000688", "index_000300", "industry_membership",
+    }
+    assert all(count == 1 for count in counts.values())
+    index_file = tmp_path / "index_daily" / "000001.jsonl"
+    index_row = json.loads(index_file.read_text(encoding="utf-8").splitlines()[0])
+    assert index_row["historical_pit_eligible"] is False
+    assert index_row["availability_basis"] == "retrieval_time_only"
+    assert index_row["available_time"] == "2026-11-11T08:30:00.000Z"
+
+    industry_file = tmp_path / "industry_membership" / "2026-11-11.jsonl"
+    industry_rows = [json.loads(line) for line in industry_file.read_text(encoding="utf-8").splitlines()]
+    assert len(industry_rows) == 4
+    assert {row["snapshot_scope"] for row in industry_rows} == {
+        "current_membership_observation_only"
+    }
+    assert all("valid_from" not in row and "valid_to" not in row for row in industry_rows)
+
+
+def test_collector_refuses_naive_capture_time(tmp_path):
+    with pytest.raises(ValueError, match="timezone-aware"):
+        collect(FakeArchiveAkshare(), tmp_path, captured_at="2026-11-11T08:30:00")
