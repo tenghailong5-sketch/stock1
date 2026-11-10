@@ -42,7 +42,7 @@ def test_state_switch_requires_two_consecutive_sessions_and_applies_next_day():
         "raw_market_state": ["RISK_ON", "RISK_ON", "RISK_OFF", "RISK_ON", "RISK_ON"],
     })
     out = apply_state_cooldown(x)
-    assert out.market_state.tolist() == ["NEUTRAL", "RISK_ON", "RISK_ON", "RISK_ON", "RISK_ON"]
+    assert out.market_state.tolist() == ["NEUTRAL", "NEUTRAL", "RISK_ON", "RISK_ON", "RISK_ON"]
 
 
 def test_market_score_missing_state_is_nan():
