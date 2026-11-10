@@ -39,7 +39,10 @@ def validate_daily_bars(frame: pd.DataFrame, decision_time) -> tuple[pd.DataFram
         return frame.iloc[0:0].copy(), DataQuality(False, "missing:" + ",".join(sorted(missing)), 0)
     cutoff = _utc(decision_time)
     x = frame.copy()
-    x["available_time"] = pd.to_datetime(x["available_time"], utc=True, errors="coerce")
+    raw_available = pd.to_datetime(x["available_time"], errors="coerce")
+    if raw_available.isna().any() or raw_available.dt.tz is None:
+        return frame.iloc[0:0].copy(), DataQuality(False, "available_time_must_be_timezone_aware", 0)
+    x["available_time"] = raw_available.dt.tz_convert("UTC")
     x["trade_date"] = pd.to_datetime(x["trade_date"], errors="coerce")
     for col in ("open", "high", "low", "close", "volume", "amount"):
         x[col] = pd.to_numeric(x[col], errors="coerce")
