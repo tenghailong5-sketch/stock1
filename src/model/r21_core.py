@@ -87,17 +87,8 @@ def weighted_score(weights: Mapping[str, float], factors: Mapping[str, float]) -
     return sum(weights[k] * float(factors[k]) for k in weights) / 100.0
 
 
-def market_state(state_score: float, s_trend: float, s_limit: float,
-                 limit_down_count: int, limit_up_count: int) -> MarketState:
-    """R1 initial thresholds; state switching cooldown is handled by orchestration."""
-    if not all(0 <= x <= 1 for x in (s_trend, s_limit)):
-        raise ValueError("market percentiles must be in [0,1]")
-    if state_score <= 0.35 or s_limit <= 0.20 or limit_down_count > 0.5 * limit_up_count:
-        return MarketState.RISK_OFF
-    if state_score >= 0.60 and s_trend >= 0.5:
-        return MarketState.RISK_ON
-    return MarketState.NEUTRAL
-
+# Market-state thresholds are deliberately not hard-coded: the model requires
+# point-in-time calibration on historical data before M3 can classify states.
 
 def position_risk_budget(q_rank: int, first_used: float = 0.0,
                          same_industry_or_corr_gt_06: bool = False) -> float:
