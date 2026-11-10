@@ -3,7 +3,7 @@ import pytest
 
 from src.providers.akshare_pit import (
     fetch_current_industry_membership_snapshot,
-    normalize_daily_history_snapshot,
+    normalize_daily_history_snapshot,\n    normalize_index_history_snapshot,
 )
 
 
@@ -69,3 +69,37 @@ def test_industry_membership_fails_closed_on_provider_schema_change():
 
     with pytest.raises(ValueError, match="schema changed"):
         fetch_current_industry_membership_snapshot(Broken())
+
+ 
+
+def test_daily_history_revision_hash_ignores_retrieval_timestamp():
+    raw = pd.DataFrame([{
+        "日期": "2024-01-02", "开盘": 10, "最高": 11, "最低": 9,
+        "收盘": 10.5, "成交量": 100, "成交额": 1000, "换手率": 1.2,
+    }])
+    first = normalize_daily_history_snapshot(raw, symbol="000001", fetched_at="2026-11-11T08:00:00Z")
+    second = normalize_daily_history_snapshot(raw, symbol="000001", fetched_at="2026-11-12T08:00:00Z")
+    assert first.iloc[0].source_revision == second.iloc[0].source_revision
+
+
+def test_index_history_is_normalized_and_never_claims_historical_pit():
+    raw = pd.DataFrame([{
+        "日期": "2026-11-10", "开盘": 3000, "最高": 3050, "最低": 2990,
+        "收盘": 3030, "成交量": 100000, "成交额": 200000000,
+    }])
+    out = normalize_index_history_snapshot(
+        raw, symbol="000001", fetched_at="2026-11-11T08:00:00Z"
+    )
+    assert out.iloc[0].index_symbol == "000001"
+    assert out.iloc[0].source_id == "akshare.index_zh_a_hist"
+    assert out.iloc[0].historical_pit_eligible == False
+    assert out.iloc[0].available_time == pd.Timestamp("2026-11-11T08:00:00Z")
+
+
+def test_index_history_rejects_invalid_schema_and_ohlc():
+    raw = pd.DataFrame([{
+        "日期": "2026-11-10", "开盘": 3000, "最高": 2990, "最低": 2995,
+        "收盘": 3030, "成交量": 100000, "成交额": 200000000,
+    }])
+    with pytest.raises(ValueError, match="invalid OHLC"):
+        normalize_index_history_snapshot(raw, symbol="000001")
