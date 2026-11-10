@@ -120,7 +120,7 @@ def market_environment_score(row) -> float:
     if pd.isna(score) or state not in {"RISK_ON", "NEUTRAL", "RISK_OFF"}:
         return float("nan")
     if state == "RISK_ON":
-        z = (score - 0.60) / (1.0 - 0.60)
+        z = (score - 0.60) / (0.90 - 0.60)
         value = 75 + 25*z
     elif state == "NEUTRAL":
         z = (score - 0.35) / (0.60 - 0.35)
