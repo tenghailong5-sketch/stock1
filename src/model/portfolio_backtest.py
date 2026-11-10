@@ -167,6 +167,12 @@ def run_portfolio_backtest(
                 open_position_count=len(positions), open_portfolio_risk=portfolio_risk,
                 per_trade_risk_limit=per_trade_risk_limit,
                 portfolio_risk_limit=portfolio_risk_limit, max_positions=max_positions,
+                estimated_round_trip_cost_bps=(2 * costs.slippage_bps + 2 * costs.commission_bps
+                                                + costs.sell_stamp_duty_bps + 2 * costs.transfer_fee_bps),
+                estimated_round_trip_fixed_cost=2 * costs.minimum_commission,
+                estimated_buy_commission_bps=costs.commission_bps,
+                estimated_buy_minimum_commission=costs.minimum_commission,
+                estimated_buy_transfer_fee_bps=costs.transfer_fee_bps,
             )
             if not sizing.approved:
                 skipped.append({"symbol": symbol, "date": day.isoformat(), "reason": "position_sizing_rejected", "details": list(sizing.reasons)})
