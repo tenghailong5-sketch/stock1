@@ -187,7 +187,7 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
 
 def rank_factor(values: pd.Series, higher_is_better: bool = True) -> pd.Series:
     """Cross-sectional percentile rank; NaN remains missing and is never imputed."""
-    return values.rank(pct=True, ascending=not higher_is_better, method="average") * 100
+    return values.rank(pct=True, ascending=higher_is_better, method="average") * 100
 
 
 
