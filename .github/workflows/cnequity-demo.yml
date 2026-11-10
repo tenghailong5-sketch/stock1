@@ -53,15 +53,18 @@ jobs:
           printf '{"cne_check_exit_code": %s, "cne_status_exit_code": %s}\\n' "$check_status" "$status_status" > validation/cnequity-demo/audit-exit-codes.json
           exit 0
       - name: Validate loaded daily bars and produce bounded evidence report
+        env:
+          DEMO_SYMBOLS: ${{ inputs.symbols }}
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
           import pandas as pd
           from cnequity.query import load
           from src.providers.cnequity import normalize_daily_bars
 
-          symbols = [s.strip() for s in "${{ inputs.symbols }}".split(",") if s.strip()]
+          symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
           raw = load("daily_bars", symbols=symbols, adjust=None)
           bars = normalize_daily_bars(raw)
           report = {
