@@ -74,3 +74,12 @@ def test_invalid_lot_size_is_rejected(lot_size):
 def test_execution_costs_reject_non_numeric_values_at_construction():
     with pytest.raises(ValueError):
         ExecutionCosts(slippage_bps="10")
+
+@pytest.mark.parametrize("flag_name,bad_value", [
+    ("suspended", None), ("suspended", "false"),
+    ("limit_up_locked", None), ("limit_up_locked", "false"),
+    ("limit_down_locked", None), ("limit_down_locked", "false"),
+])
+def test_execution_state_flags_must_be_explicit_booleans(flag_name, bad_value):
+    with pytest.raises(ValueError, match="explicit boolean"):
+        call(**{flag_name: bad_value})
