@@ -84,14 +84,20 @@ def score_a(factors: Mapping[str, Any], gates: Mapping[str, Any],
 def score_b(factors: Mapping[str, Any], gates: Mapping[str, Any],
             *, market_state: MarketState, stage: str) -> StrategyResult:
     """B: event strategy; next-day component is only scored after it exists."""
+    if stage != "next_day":
+        return StrategyResult("B", None, False, ("B_requires_next_day_stage",), stage)
+    event_type = gates.get("event_subtype")
+    supported_events = {"hit_up_unsealed", "close_up_sealed", "hit_down_unsealed", "close_down_sealed"}
+    if event_type not in supported_events:
+        return StrategyResult("B", None, False, ("missing_or_unsupported_event_subtype",), stage)
     scored = _score("B", B_WEIGHTS, factors, stage=stage)
     if not scored.eligible:
         return scored
     reasons: list[str] = []
     if market_state == MarketState.RISK_OFF:
         reasons.append("market_risk_off")
-    for key in ("event_data_verified", "event_subtype_supported",
-                "liquidity_and_risk_pass", "announcement_risk_pass"):
+    for key in ("event_data_verified", "liquidity_and_risk_pass",
+                "announcement_risk_pass"):
         if not _require_bool(gates, key, reasons):
             continue
         if gates[key] is False:
@@ -130,3 +136,18 @@ def candidate_band(score: float) -> str:
     if score >= 70:
         return "watch"
     return "below_threshold"
+
+
+def score_factor_bundle(frame, factor_map, *, date_col="trade_date"):
+    """Rank raw factors within each trading date; missing values stay missing."""
+    from .m4_factors import rank_factor_by_date
+    out = frame.copy()
+    for output_name, spec in factor_map.items():
+        if not isinstance(spec, tuple) or len(spec) != 2:
+            raise ValueError("invalid factor mapping for " + output_name)
+        raw_col, higher_is_better = spec
+        if raw_col not in out:
+            raise ValueError("missing raw factor column: " + raw_col)
+        out[output_name] = rank_factor_by_date(out, raw_col, date_col=date_col,
+                                               higher_is_better=bool(higher_is_better))
+    return out
