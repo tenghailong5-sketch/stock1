@@ -22,6 +22,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run R2.1 regression tests
         run: pytest -q
+      - name: Run regression tests
+        run: pytest -q
       - name: Run research scan
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
