@@ -20,13 +20,25 @@ def _numeric(frame: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     return out
 
 
-def price_structure(bars: pd.DataFrame) -> pd.DataFrame:
-    """Compute CLV, BodyStrength, 5/10/20d returns, breakout, wick and drawdown."""
+def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
+    """Compute price factors using only bars available by decision_time.
+
+    If decision_time is omitted, bars must still carry timezone-aware
+    available_time values; the caller is responsible for upstream PIT filtering.
+    """
     missing = REQUIRED_BARS - set(bars.columns)
     if missing:
         raise ValueError("bars missing: " + ",".join(sorted(missing)))
     x = _numeric(bars, ["open", "high", "low", "close", "volume", "amount"])
     x["trade_date"] = pd.to_datetime(x["trade_date"], errors="coerce")
+    x["available_time"] = pd.to_datetime(x["available_time"], errors="coerce", utc=True)
+    if x["trade_date"].isna().any() or x["available_time"].isna().any():
+        raise ValueError("invalid trade_date or available_time")
+    if decision_time is not None:
+        cutoff = pd.Timestamp(decision_time)
+        if cutoff.tzinfo is None:
+            raise ValueError("decision_time must be timezone-aware")
+        x = x.loc[x["available_time"] <= cutoff.tz_convert("UTC")].copy()
     x = x.sort_values(["symbol", "trade_date"]).copy()
     if x[["open", "high", "low", "close"]].isna().any().any():
         raise ValueError("invalid OHLC values")
@@ -41,9 +53,22 @@ def price_structure(bars: pd.DataFrame) -> pd.DataFrame:
     x["upper_shadow_ratio"] = (x["high"] - x[["open", "close"]].max(axis=1)) / span
     x["recent_high20"] = grouped["high"].transform(lambda s: s.rolling(20, min_periods=20).max())
     x["Pullback"] = x["close"] / x["recent_high20"] - 1
-    x["pullback_duration"] = grouped["close"].transform(
-        lambda s: s.groupby((s == s.cummax()).cumsum()).cumcount()
-    )
+    # Sessions elapsed since the most recent rolling-20-session high-water
+    # close. Zero means the current close is at a new rolling peak.
+    def _duration_since_peak(s: pd.Series) -> pd.Series:
+        values = s.to_numpy(dtype=float)
+        out = np.full(len(values), np.nan)
+        for i in range(len(values)):
+            start = max(0, i - 19)
+            window = values[start:i + 1]
+            if not np.isfinite(window).all():
+                continue
+            peak_value = np.max(window)
+            peak_positions = np.flatnonzero(window == peak_value)
+            last_peak = start + int(peak_positions[-1])
+            out[i] = i - last_peak
+        return pd.Series(out, index=s.index)
+    x["pullback_duration"] = grouped["close"].transform(_duration_since_peak)
     x["amount_ma20"] = grouped["amount"].transform(lambda s: s.rolling(20, min_periods=20).mean())
     x["amount_ma5"] = grouped["amount"].transform(lambda s: s.rolling(5, min_periods=5).mean())
     x["LQ"] = x["amount"] / x["amount_ma20"]
@@ -113,4 +138,4 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
 
 def rank_factor(values: pd.Series, higher_is_better: bool = True) -> pd.Series:
     """Cross-sectional percentile rank; NaN remains missing and is never imputed."""
-    return values.rank(pct=True, ascending=higher_is_better, method="average") * 100
+    return values.rank(pct=True, ascending=not higher_is_better, method="average") * 100
