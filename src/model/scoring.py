@@ -22,9 +22,13 @@ class StrategyResult:
 
 
 def _finite_number(value: Any) -> bool:
+    # bool is an int subclass; a gate flag must never become a numeric score.
+    if isinstance(value, bool):
+        return False
     try:
-        return value is not None and float(value) == float(value) and abs(float(value)) != float("inf")
-    except (TypeError, ValueError):
+        number = float(value)
+        return value is not None and number == number and abs(number) != float("inf")
+    except (TypeError, ValueError, OverflowError):
         return False
 
 
