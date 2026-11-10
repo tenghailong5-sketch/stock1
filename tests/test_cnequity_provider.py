@@ -55,10 +55,20 @@ def test_load_requires_bounded_symbols_and_uses_dataset_contract():
 
     result = load_daily_bars(["600000.SH"], loader=fake_loader)
 
-    assert calls == [("daily_bars", {"symbols": ["600000.SH"]})]
+    assert calls == [("daily_bars", {"symbols": ["600000.SH"], "adjust": None})]
     assert len(result) == 1
 
 
 def test_load_rejects_empty_symbols():
     with pytest.raises(ValueError, match="at least one"):
         load_daily_bars([])
+
+
+
+def test_polars_like_result_is_converted_without_arrow_bridge():
+    class FakePolarsFrame:
+        def to_dicts(self):
+            return sample().to_dict(orient="records")
+
+    result = normalize_daily_bars(FakePolarsFrame())
+    assert result.loc[0, "symbol"] == "600000.SH"
