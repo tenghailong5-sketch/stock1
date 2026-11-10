@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import date
 import math
+from numbers import Real
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,15 @@ class ExecutionCosts:
     sell_stamp_duty_bps: float = 5.0
     slippage_bps: float = 10.0
     transfer_fee_bps: float = 0.1
+
+    def __post_init__(self):
+        values = (self.commission_bps, self.minimum_commission,
+                  self.sell_stamp_duty_bps, self.slippage_bps,
+                  self.transfer_fee_bps)
+        if any(isinstance(value, bool) or not isinstance(value, Real)
+               or not math.isfinite(float(value)) or float(value) < 0
+               for value in values):
+            raise ValueError("execution costs must be finite non-negative numbers")
 
 
 @dataclass(frozen=True)
@@ -36,7 +46,11 @@ class FillResult:
 
 
 def _finite_positive(value: float) -> bool:
-    return not isinstance(value, bool) and math.isfinite(float(value)) and float(value) > 0
+    try:
+        return (not isinstance(value, bool) and isinstance(value, Real)
+                and math.isfinite(float(value)) and float(value) > 0)
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def simulate_daily_fill(
@@ -61,12 +75,14 @@ def simulate_daily_fill(
         raise ValueError("reference_price must be finite and positive")
     if not isinstance(trade_date, date) or (entry_date is not None and not isinstance(entry_date, date)):
         raise ValueError("trade_date and entry_date must be dates")
-    numeric_costs = (costs.commission_bps, costs.minimum_commission,
-                     costs.sell_stamp_duty_bps, costs.slippage_bps, costs.transfer_fee_bps)
-    if any(isinstance(x, bool) or not math.isfinite(float(x)) or float(x) < 0 for x in numeric_costs):
-        raise ValueError("execution costs must be finite and non-negative")
-    if not 0 < max_participation <= 1:
-        raise ValueError("max_participation must be in (0, 1]")
+    if not isinstance(costs, ExecutionCosts):
+        raise ValueError("costs must be an ExecutionCosts instance")
+    if (isinstance(max_participation, bool) or not isinstance(max_participation, Real)
+            or not math.isfinite(float(max_participation))
+            or not 0 < float(max_participation) <= 1):
+        raise ValueError("max_participation must be a finite number in (0, 1]")
+    if isinstance(lot_size, bool) or not isinstance(lot_size, int) or lot_size <= 0:
+        raise ValueError("lot_size must be a positive integer")
     if quantity % lot_size:
         raise ValueError("quantity must be a board-lot multiple")
     reason = None
