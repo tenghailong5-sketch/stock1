@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import date
 import math
-from numbers import Real
+from numbers import Integral, Real
 
 
 @dataclass(frozen=True)
@@ -69,7 +69,7 @@ def simulate_daily_fill(
     """
     if side not in ("buy", "sell"):
         raise ValueError("side must be buy or sell")
-    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0:
+    if isinstance(quantity, bool) or not isinstance(quantity, Integral) or quantity <= 0:
         raise ValueError("quantity must be a positive integer")
     if not _finite_positive(reference_price):
         raise ValueError("reference_price must be finite and positive")
@@ -80,13 +80,14 @@ def simulate_daily_fill(
     for flag_name, flag_value in (("suspended", suspended),
                                   ("limit_up_locked", limit_up_locked),
                                   ("limit_down_locked", limit_down_locked)):
-        if not isinstance(flag_value, bool):
+        if not (isinstance(flag_value, bool) or
+                (type(flag_value).__module__ == "numpy" and type(flag_value).__name__ == "bool_")):
             raise ValueError(flag_name + " must be an explicit boolean")
     if (isinstance(max_participation, bool) or not isinstance(max_participation, Real)
             or not math.isfinite(float(max_participation))
             or not 0 < float(max_participation) <= 1):
         raise ValueError("max_participation must be a finite number in (0, 1]")
-    if isinstance(lot_size, bool) or not isinstance(lot_size, int) or lot_size <= 0:
+    if isinstance(lot_size, bool) or not isinstance(lot_size, Integral) or lot_size <= 0:
         raise ValueError("lot_size must be a positive integer")
     if quantity % lot_size:
         raise ValueError("quantity must be a board-lot multiple")
@@ -101,7 +102,7 @@ def simulate_daily_fill(
         reason = "t_plus_one_not_sellable"
     elif available_volume is None:
         reason = "missing_volume_fail_closed"
-    elif isinstance(available_volume, bool) or not isinstance(available_volume, int) or available_volume < 0:
+    elif isinstance(available_volume, bool) or not isinstance(available_volume, Integral) or available_volume < 0:
         reason = "invalid_volume_fail_closed"
     if reason:
         return FillResult(False, side, 0, float(reference_price), None, 0, 0, 0, 0, reason)
