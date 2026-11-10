@@ -41,3 +41,12 @@ def test_cash_limit_is_applied_after_risk_limit():
                            open_position_count=0, open_portfolio_risk=0)
     assert r.approved and r.shares == 100
     assert r.cash_required == 1000
+
+
+def test_sizing_reserves_fixed_minimum_round_trip_commissions():
+    r = size_long_position(entry_price=10, stop_price=9, available_cash=100000,
+                           open_position_count=0, open_portfolio_risk=0,
+                           per_trade_risk_limit=2000)
+    assert r.approved
+    assert r.estimated_loss == pytest.approx(r.shares * (1 + 10 * 30 / 10000) + 10)
+    assert r.estimated_loss <= 2000
