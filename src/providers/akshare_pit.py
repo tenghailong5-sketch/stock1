@@ -155,8 +155,10 @@ def fetch_current_industry_membership_snapshot(
 def normalize_market_breadth_snapshot(frame: pd.DataFrame, *, fetched_at=None) -> pd.DataFrame:
     """Summarize one current A-share quote snapshot; never infer historical limit events."""
     required = {"代码", "最新价", "涨跌幅"}
+    if frame is None:
+        raise ValueError("AKShare spot snapshot is empty or missing: 代码,最新价,涨跌幅")
     missing = required - set(frame.columns)
-    if frame is None or frame.empty or missing:
+    if frame.empty or missing:
         raise ValueError(
             "AKShare spot snapshot is empty or missing: " + ",".join(sorted(missing))
         )
