@@ -84,7 +84,7 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
                       industry_returns: pd.DataFrame, window: int = 60,
                       min_periods: int = 40) -> pd.DataFrame:
     """Rolling two-factor OLS residuals; beta estimation excludes the target session."""
-    required = {"symbol", "trade_date", "return_5"}
+    required = {"symbol", "trade_date", "industry_code", "return_5"}
     if required - set(stock_returns.columns):
         raise ValueError("stock_returns missing required columns")
     for frame, cols in ((market_returns, {"trade_date", "market_return"}),
