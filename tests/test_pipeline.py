@@ -8,7 +8,7 @@ from src.model.pipeline import evaluate_candidates, evaluate_row
 def make_row(state="RISK_ON"):
     row = {"symbol": "000001", "market_state": state}
     for weights in (A_WEIGHTS, B_WEIGHTS, C_WEIGHTS):
-        row.update({key: 90.0 for key in weights})
+        row.update({key: 90.0 for key in weights if key != "next_day_price_action"})
     row.update({
         "industry_top_30pct": True,
         "stock_residual_top_20pct": True,
