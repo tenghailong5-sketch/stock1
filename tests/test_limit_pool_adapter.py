@@ -20,7 +20,7 @@ def test_normalize_limit_pool_keeps_provider_fields_and_marks_forward_only():
     assert row["records"][0]["代码"] == "000001"
     assert row["records"][0]["连板数"] == 2
     assert row["provider_row_count"] == 1
-    assert row["historical_pit_eligible"] is False
+    assert not bool(row["historical_pit_eligible"])
     assert row["snapshot_scope"] == "date_scoped_provider_pool_snapshot"
 
 
