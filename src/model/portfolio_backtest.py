@@ -222,7 +222,17 @@ def run_portfolio_backtest(
         })
 
     ending_equity = daily_equity[-1]["equity"] if daily_equity else cash
-    metrics = calculate_backtest_metrics(daily_equity, trades, float(initial_cash)) if daily_equity else None
+    # Partial exit fills are realized cash flows, but they are not a
+    # completed round trip while any shares from that entry remain open.
+    open_entry_keys = {
+        (symbol, position["entry_date"].isoformat())
+        for symbol, position in positions.items()
+    }
+    completed_trades = [
+        trade for trade in trades
+        if (str(trade["symbol"]), str(trade["entry_date"])) not in open_entry_keys
+    ]
+    metrics = calculate_backtest_metrics(daily_equity, completed_trades, float(initial_cash)) if daily_equity else None
     return {
         "audit_passed": True,
         "initial_cash": round(float(initial_cash), 2),
