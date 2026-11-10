@@ -119,7 +119,7 @@ def audit_backtest_dataset(candidates: pd.DataFrame, bars: pd.DataFrame) -> Back
     if scores.isna().any() or ((scores < 80) | (scores > 100)).any():
         errors.append("eligible_candidate_score_outside_80_100")
 
-    if candidates["ruleset_version"].isna().any():
+    if candidates["ruleset_version"].isna().any() or candidates["ruleset_version"].astype(str).str.strip().eq("").any():
         errors.append("candidate_missing_ruleset_version")
 
     return BacktestAudit(not errors, len(candidates), len(bars), tuple(errors))
