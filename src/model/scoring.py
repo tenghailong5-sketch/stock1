@@ -1,0 +1,132 @@
+"""FHM-100 M5 independent strategy scoring and hard gates.
+
+Scores are only valid when every weighted percentile is observed. Hard gates are
+evaluated separately and can never be offset by a high score. This module does
+not invent factor values or infer missing event/turnover/news data.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Mapping, Any
+
+from .r21_core import A_WEIGHTS, B_WEIGHTS, C_WEIGHTS, MarketState, weighted_score
+
+
+@dataclass(frozen=True)
+class StrategyResult:
+    strategy: str
+    score: float | None
+    eligible: bool
+    reasons: tuple[str, ...]
+    stage: str
+
+
+def _finite_number(value: Any) -> bool:
+    try:
+        return value is not None and float(value) == float(value) and abs(float(value)) != float("inf")
+    except (TypeError, ValueError):
+        return False
+
+
+def _require_bool(data: Mapping[str, Any], key: str, reasons: list[str]) -> bool:
+    value = data.get(key)
+    if not isinstance(value, bool):
+        reasons.append(f"missing_or_invalid:{key}")
+        return False
+    return value
+
+
+def _score(strategy: str, weights: Mapping[str, int],
+           factors: Mapping[str, Any], *, stage: str) -> StrategyResult:
+    reasons: list[str] = []
+    if strategy == "B" and stage != "next_day":
+        # Next-day price action is not knowable at the previous close.
+        if "next_day_price_action" in factors:
+            reasons.append("lookahead_forbidden:next_day_price_action")
+        return StrategyResult(strategy, None, False, tuple(reasons or ["B_requires_next_day_stage"]), stage)
+    if strategy == "B" and stage == "next_day" and "next_day_price_action" not in factors:
+        reasons.append("missing:next_day_price_action")
+    missing = [k for k in weights if k not in factors or not _finite_number(factors.get(k))]
+    if missing:
+        reasons.extend(f"missing_or_invalid_factor:{k}" for k in missing)
+        return StrategyResult(strategy, None, False, tuple(reasons), stage)
+    try:
+        score = weighted_score(weights, factors)
+    except (TypeError, ValueError) as exc:
+        return StrategyResult(strategy, None, False, (f"score_error:{exc}",), stage)
+    return StrategyResult(strategy, score, True, (), stage)
+
+
+def score_a(factors: Mapping[str, Any], gates: Mapping[str, Any],
+            *, market_state: MarketState, stage: str = "close") -> StrategyResult:
+    """A: trend continuation; threshold rules are independent of weighted score."""
+    reasons: list[str] = []
+    scored = _score("A", A_WEIGHTS, factors, stage=stage)
+    if not scored.eligible:
+        return scored
+    if market_state == MarketState.RISK_OFF:
+        reasons.append("market_risk_off")
+    for key in ("industry_top_30pct", "stock_residual_top_20pct",
+                "amount_ma20_ge_100m", "breakout_or_confirmed_retest",
+                "no_high_volume_stall_or_repeated_rejection"):
+        if not _require_bool(gates, key, reasons):
+            continue
+        if gates[key] is False:
+            reasons.append(f"hard_gate_failed:{key}")
+    if gates.get("next_open_gap_pct") is not None:
+        if not _finite_number(gates["next_open_gap_pct"]):
+            reasons.append("invalid:next_open_gap_pct")
+        elif float(gates["next_open_gap_pct"]) > 3.0:
+            reasons.append("hard_gate_failed:next_open_gap_gt_3pct")
+    return StrategyResult("A", scored.score, not reasons, tuple(reasons), stage)
+
+
+def score_b(factors: Mapping[str, Any], gates: Mapping[str, Any],
+            *, market_state: MarketState, stage: str) -> StrategyResult:
+    """B: event strategy; next-day component is only scored after it exists."""
+    scored = _score("B", B_WEIGHTS, factors, stage=stage)
+    if not scored.eligible:
+        return scored
+    reasons: list[str] = []
+    if market_state == MarketState.RISK_OFF:
+        reasons.append("market_risk_off")
+    for key in ("event_data_verified", "event_subtype_supported",
+                "liquidity_and_risk_pass", "announcement_risk_pass"):
+        if not _require_bool(gates, key, reasons):
+            continue
+        if gates[key] is False:
+            reasons.append(f"hard_gate_failed:{key}")
+    return StrategyResult("B", scored.score, not reasons, tuple(reasons), stage)
+
+
+def score_c(factors: Mapping[str, Any], gates: Mapping[str, Any],
+            *, market_state: MarketState, stage: str = "close") -> StrategyResult:
+    """C: strong-stock pullback reversal with explicit structural gates."""
+    scored = _score("C", C_WEIGHTS, factors, stage=stage)
+    if not scored.eligible:
+        return scored
+    reasons: list[str] = []
+    if market_state == MarketState.RISK_OFF:
+        reasons.append("market_risk_off")
+    for key in ("pre_pullback_residual_positive", "pullback_between_0_5_and_4pct",
+                "pullback_volume_le_80pct_prior5d", "stop_or_reversal_confirmed",
+                "industry_not_weak", "no_material_negative_event",
+                "liquidity_and_risk_pass"):
+        if not _require_bool(gates, key, reasons):
+            continue
+        if gates[key] is False:
+            reasons.append(f"hard_gate_failed:{key}")
+    return StrategyResult("C", scored.score, not reasons, tuple(reasons), stage)
+
+
+def candidate_band(score: float) -> str:
+    """Descriptive research band only; never an order instruction."""
+    if not _finite_number(score) or not 0 <= float(score) <= 100:
+        raise ValueError("score must be finite and within [0,100]")
+    if score >= 90:
+        return "priority_research"
+    if score >= 80:
+        return "candidate"
+    if score >= 70:
+        return "watch"
+    return "below_threshold"
