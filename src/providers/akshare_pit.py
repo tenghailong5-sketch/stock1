@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from math import isfinite
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -173,7 +174,8 @@ def normalize_market_breadth_snapshot(frame: pd.DataFrame, *, fetched_at=None) -
         out["last_price"].notna()
         & out["change_pct"].notna()
         & out["last_price"].gt(0)
-        & out["change_pct"].map(lambda value: pd.notna(value) and abs(float(value)) != float("inf"))
+        & out["last_price"].map(lambda value: pd.notna(value) and isfinite(float(value)))
+        & out["change_pct"].map(lambda value: pd.notna(value) and isfinite(float(value)))
     )
     valid_rows = out.loc[valid]
     advances = int(valid_rows["change_pct"].gt(0).sum())
