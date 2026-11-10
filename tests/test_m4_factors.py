@@ -23,7 +23,7 @@ def bars():
 def test_price_structure_computes_core_factors_and_flat_range_missing():
     x = bars()
     x.loc[24, ["open", "high", "low", "close"]] = [34, 34, 34, 34]
-    out = price_structure(x)
+    out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
     assert pd.isna(out.CLV.iloc[-1])
     assert pd.notna(out.return_5.iloc[-1])
     assert out.amount_ma20.iloc[-1] == pytest.approx(2e8)
@@ -107,3 +107,17 @@ def test_industry_relative_strength_rejects_future_and_naive_availability():
     industry["available_time"] = "2026-01-02 08:00:00"
     with pytest.raises(ValueError):
         industry_relative_strength(industry, market, "2026-01-02T09:00:00Z")
+
+
+
+def test_price_structure_requires_cutoff_and_rejects_duplicate_or_invalid_bars():
+    x = bars()
+    with pytest.raises(ValueError, match="decision_time"):
+        price_structure(x)
+    duplicate = pd.concat([x, x.iloc[[0]]], ignore_index=True)
+    with pytest.raises(ValueError, match="duplicate"):
+        price_structure(duplicate, decision_time="2026-11-10T09:00:00Z")
+    bad = x.copy()
+    bad.loc[0, "high"] = 1.0
+    with pytest.raises(ValueError, match="inconsistent OHLC"):
+        price_structure(bad, decision_time="2026-11-10T09:00:00Z")
