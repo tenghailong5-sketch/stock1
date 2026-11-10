@@ -32,6 +32,7 @@ def size_long_position(
     portfolio_risk_limit: float = 3000.0,
     max_positions: int = 2, lot_size: int = 100,
     estimated_round_trip_cost_bps: float = 30.0,
+    estimated_round_trip_fixed_cost: float = 10.0,
 ) -> SizingResult:
     """Size the largest board-lot long position within cash and loss limits.
 
@@ -44,6 +45,7 @@ def size_long_position(
         "per_trade_risk_limit": per_trade_risk_limit,
         "portfolio_risk_limit": portfolio_risk_limit,
         "estimated_round_trip_cost_bps": estimated_round_trip_cost_bps,
+        "estimated_round_trip_fixed_cost": estimated_round_trip_fixed_cost,
     }
     reasons = []
     for name, value in values.items():
@@ -68,9 +70,10 @@ def size_long_position(
     existing_risk = float(open_portfolio_risk)
     trade_limit, portfolio_limit = float(per_trade_risk_limit), float(portfolio_risk_limit)
     cost_bps = float(estimated_round_trip_cost_bps)
+    fixed_cost = float(estimated_round_trip_fixed_cost)
     if entry <= 0 or stop <= 0 or stop >= entry:
         reasons.append("invalid_long_entry_or_stop")
-    if cash < 0 or existing_risk < 0 or trade_limit <= 0 or portfolio_limit <= 0 or cost_bps < 0:
+    if cash < 0 or existing_risk < 0 or trade_limit <= 0 or portfolio_limit <= 0 or cost_bps < 0 or fixed_cost < 0:
         reasons.append("negative_or_nonpositive_risk_input")
     if open_position_count >= max_positions:
         reasons.append("maximum_open_positions_reached")
@@ -83,10 +86,12 @@ def size_long_position(
     budget = min(trade_limit, remaining)
     cost_per_share = entry * cost_bps / 10000.0
     loss_per_share = (entry - stop) + cost_per_share
-    risk_shares = math.floor((budget / loss_per_share) / lot_size) * lot_size
+    risk_after_fixed = max(0.0, budget - fixed_cost)
+    risk_shares = math.floor((risk_after_fixed / loss_per_share) / lot_size) * lot_size
     cash_shares = math.floor((cash / entry) / lot_size) * lot_size
     shares = max(0, min(risk_shares, cash_shares))
-    loss, required_cash = shares * loss_per_share, shares * entry
+    loss = shares * loss_per_share + (fixed_cost if shares else 0.0)
+    required_cash = shares * entry
     reasons.append("sized_within_trade_portfolio_and_cash_limits" if shares else
                    "no_affordable_board_lot_within_risk_budget")
     return SizingResult(
