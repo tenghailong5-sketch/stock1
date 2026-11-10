@@ -8,6 +8,7 @@ historical rows as unsuitable for historical point-in-time backtests.
 from __future__ import annotations
 
 import hashlib
+import time
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -96,7 +97,9 @@ def normalize_index_history_snapshot(
     out["historical_pit_eligible"] = False
     return out
 
-def fetch_current_industry_membership_snapshot(ak_module, *, clock=None) -> pd.DataFrame:
+def fetch_current_industry_membership_snapshot(
+    ak_module, *, clock=None, pause_seconds: float = 0.15, sleep_fn=time.sleep
+) -> pd.DataFrame:
     """Capture current Eastmoney industry constituents as a dated snapshot only.
 
     No valid_from/valid_to is fabricated. Repeated daily snapshots can support
@@ -113,6 +116,8 @@ def fetch_current_industry_membership_snapshot(ak_module, *, clock=None) -> pd.D
     for industry in industries[["板块名称", "板块代码"]].drop_duplicates().itertuples(index=False):
         name, code = str(industry[0]), str(industry[1])
         members = ak_module.stock_board_industry_cons_em(symbol=name)
+        if pause_seconds > 0:
+            sleep_fn(pause_seconds)
         required_members = {"代码"}
         if members is None or required_members - set(members.columns):
             raise ValueError(f"AKShare constituents schema changed for {code}")
