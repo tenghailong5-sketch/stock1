@@ -16,7 +16,7 @@ def sample():
 def test_normalize_daily_bars_keeps_retrieval_time_out_of_pit():
     result = normalize_daily_bars(sample())
 
-    assert result.loc[0, "historical_pit_eligible"] is False
+    assert not bool(result.loc[0, "historical_pit_eligible"])
     assert pd.isna(result.loc[0, "available_time"])
     assert result.loc[0, "pit_exclusion_reason"] == (
         "retrieval_time_is_not_historical_availability"
