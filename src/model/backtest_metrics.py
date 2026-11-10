@@ -58,8 +58,11 @@ def calculate_backtest_metrics(
             raise ValueError("daily_equity dates must be strictly increasing")
         points.append((stamp, equity))
 
-    peak = points[0][1]
-    peak_date = points[0][0]
+    # Initial capital is the equity high-water mark before the first session.
+    # If the first observed equity is already below it, the peak predates the
+    # dataset and therefore has no fabricated calendar date.
+    peak = starting_capital
+    peak_date = points[0][0] if points[0][1] >= starting_capital else None
     max_drawdown = 0.0
     max_drawdown_peak_date = peak_date
     max_drawdown_trough_date = points[0][0]
@@ -73,13 +76,29 @@ def calculate_backtest_metrics(
             max_drawdown_peak_date = peak_date
             max_drawdown_trough_date = stamp
 
-    completed: list[tuple[pd.Timestamp, int, float]] = []
+    # A position may be liquidated through multiple partial fills. Aggregate
+    # those fills by symbol + entry date so win rate and streaks count round trips,
+    # not individual execution fragments. Generic trade rows without those keys
+    # remain independent completed trades.
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    independent: list[tuple[pd.Timestamp, int, float]] = []
     for index, trade in enumerate(trades):
         if not isinstance(trade, dict) or "realized_pnl" not in trade or "exit_date" not in trade:
             raise ValueError(f"trades[{index}] requires exit_date and realized_pnl")
         stamp = _timestamp(trade["exit_date"], f"trades[{index}].exit_date")
         pnl = _finite_number(trade["realized_pnl"], f"trades[{index}].realized_pnl")
-        completed.append((stamp, index, pnl))
+        if trade.get("symbol") is not None and trade.get("entry_date") is not None:
+            key = (str(trade["symbol"]), str(_timestamp(trade["entry_date"], f"trades[{index}].entry_date")))
+            if key not in grouped:
+                grouped[key] = {"exit_date": stamp, "pnl": pnl, "first_index": index}
+            else:
+                grouped[key]["exit_date"] = max(grouped[key]["exit_date"], stamp)
+                grouped[key]["pnl"] += pnl
+        else:
+            independent.append((stamp, index, pnl))
+    completed = independent + [
+        (item["exit_date"], item["first_index"], item["pnl"]) for item in grouped.values()
+    ]
     completed.sort(key=lambda item: (item[0], item[1]))
 
     pnls = [item[2] for item in completed]
