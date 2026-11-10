@@ -18,6 +18,7 @@ import pandas as pd
 from src.providers.akshare_pit import (
     fetch_current_industry_membership_snapshot,
     normalize_index_history_snapshot,
+    normalize_market_breadth_snapshot,
 )
 
 INDEXES = {
@@ -113,6 +114,10 @@ def collect(ak_module, archive_root: Path, *, captured_at=None) -> dict[str, int
         ak_module, clock=lambda: captured, pause_seconds=0.15
     )
     industry_records = _records(industry)
+    breadth = normalize_market_breadth_snapshot(
+        ak_module.stock_zh_a_spot_em(), fetched_at=captured
+    )
+    breadth_records = _records(breadth)
 
     counts: dict[str, int] = {}
     for code in INDEXES:
@@ -128,6 +133,11 @@ def collect(ak_module, archive_root: Path, *, captured_at=None) -> dict[str, int
         archive_root / "industry_membership" / f"{day}.jsonl",
         industry_records,
         ("symbol", "industry_code", "source_revision"),
+    )
+    counts["market_breadth"] = append_jsonl_atomic(
+        archive_root / "market_breadth" / f"{day}.jsonl",
+        breadth_records,
+        ("snapshot_time", "source_revision"),
     )
     return counts
 
