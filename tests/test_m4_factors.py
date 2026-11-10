@@ -57,7 +57,7 @@ def test_pullback_duration_counts_sessions_since_latest_peak():
     x.loc[22, "close"] = 32.0
     x.loc[23, "close"] = 31.0
     x.loc[24, "close"] = 30.0
-    out = price_structure(x)
+    out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
     assert out.pullback_duration.iloc[22] == 0
     assert out.pullback_duration.iloc[23] == 1
     assert out.pullback_duration.iloc[24] == 2
