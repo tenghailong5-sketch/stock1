@@ -1,4 +1,5 @@
 from datetime import date
+import numpy as np
 import pytest
 
 from src.model.execution import ExecutionCosts, simulate_daily_fill
@@ -83,3 +84,20 @@ def test_execution_costs_reject_non_numeric_values_at_construction():
 def test_execution_state_flags_must_be_explicit_booleans(flag_name, bad_value):
     with pytest.raises(ValueError, match="explicit boolean"):
         call(**{flag_name: bad_value})
+
+
+def test_numpy_scalar_market_data_is_accepted_without_weakening_validation():
+    r = call(
+        quantity=np.int64(1000),
+        available_volume=np.int64(100000),
+        suspended=np.bool_(False),
+        limit_up_locked=np.bool_(False),
+        limit_down_locked=np.bool_(False),
+        lot_size=np.int64(100),
+    )
+    assert r.filled and r.quantity == 1000
+
+
+def test_numpy_boolean_true_still_enforces_execution_gate():
+    r = call(suspended=np.bool_(True))
+    assert not r.filled and r.reason == "suspended_no_fill"
