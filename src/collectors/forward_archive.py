@@ -126,6 +126,9 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         captured_at=captured,
     )
     limit_pool_records = _records(limit_pools)
+    sentiment = summarize_limit_pool_sentiment(limit_pools)
+    sentiment["trade_date"] = captured.tz_convert("Asia/Shanghai").strftime("%Y-%m-%d")
+    sentiment["capture_time"] = captured.isoformat()
 
     if not write:
         return {
