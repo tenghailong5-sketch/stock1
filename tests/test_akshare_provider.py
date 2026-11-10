@@ -5,6 +5,7 @@ from src.providers.akshare_pit import (
     fetch_current_industry_membership_snapshot,
     normalize_daily_history_snapshot,
     normalize_index_history_snapshot,
+    normalize_market_breadth_snapshot,
 )
 
 
