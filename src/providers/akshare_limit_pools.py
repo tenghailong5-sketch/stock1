@@ -18,7 +18,7 @@ POOL_APIS = {
     "limit_up": "stock_zt_pool_em",
     "limit_down": "stock_zt_pool_dtgc_em",
     "limit_up_opened": "stock_zt_pool_zbgc_em",
-    "previous_limit_up": "stock_zt_pool_previous_em",
+    "previous_limit_up": "stock_zt_pool_previous_em",\n    "strong": "stock_zt_pool_strong_em",
 }
 
 
