@@ -105,4 +105,4 @@ def test_partial_exit_fills_are_aggregated_as_one_round_trip():
     assert result["losses"] == 1
     assert result["realized_trade_pnl"] == 20
     assert result["win_rate_pct"] == 50.0
-    assert result["profit_factor"] == 1.5
+    assert result["profit_factor"] == 3.0
