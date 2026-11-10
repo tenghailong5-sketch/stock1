@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date
 import math
-from numbers import Integral, Real
+from numbers import Real
 from typing import Any
 
 import pandas as pd
@@ -67,7 +67,6 @@ def run_portfolio_backtest(
     bars_work["_date"] = bars_work["trade_date"].map(_as_date)
     bars_work["_volume"] = bars_work["volume"].map(_volume)
     dates = sorted(bars_work["_date"].unique())
-    date_index = {day: i for i, day in enumerate(dates)}
     bars_by_day = {
         day: {str(row["symbol"]): row for row in group.to_dict(orient="records")}
         for day, group in bars_work.groupby("_date", sort=True)
@@ -150,12 +149,13 @@ def run_portfolio_backtest(
                 skipped.append({"symbol": symbol, "date": day.isoformat(), "reason": "invalid_stop_price"})
                 continue
             entry_reference = float(bar["open"])
-            if float(stop) >= entry_reference:
+            expected_entry = entry_reference * (1.0 + costs.slippage_bps / 10000.0)
+            if float(stop) >= expected_entry:
                 skipped.append({"symbol": symbol, "date": day.isoformat(), "reason": "stop_not_below_entry"})
                 continue
             portfolio_risk = sum(_risk(p) for p in positions.values())
             sizing = size_long_position(
-                entry_price=entry_reference, stop_price=float(stop), available_cash=cash,
+                entry_price=expected_entry, stop_price=float(stop), available_cash=cash,
                 open_position_count=len(positions), open_portfolio_risk=portfolio_risk,
                 per_trade_risk_limit=per_trade_risk_limit,
                 portfolio_risk_limit=portfolio_risk_limit, max_positions=max_positions,
