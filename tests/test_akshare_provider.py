@@ -104,3 +104,20 @@ def test_index_history_rejects_invalid_schema_and_ohlc():
     }])
     with pytest.raises(ValueError, match="invalid OHLC"):
         normalize_index_history_snapshot(raw, symbol="000001")
+
+
+def test_daily_history_revision_is_per_row_not_per_rolling_window():
+    raw = pd.DataFrame([
+        {"日期": "2024-01-02", "开盘": 10, "最高": 11, "最低": 9,
+         "收盘": 10.5, "成交量": 100, "成交额": 1000, "换手率": 1.2},
+        {"日期": "2024-01-03", "开盘": 10.5, "最高": 12, "最低": 10,
+         "收盘": 11.5, "成交量": 120, "成交额": 1300, "换手率": 1.4},
+    ])
+    first = normalize_daily_history_snapshot(raw, symbol="000001")
+    changed = raw.copy()
+    changed.loc[1, "收盘"] = 11.6
+    second = normalize_daily_history_snapshot(changed, symbol="000001")
+    first_hashes = dict(zip(first.trade_date.dt.strftime("%Y-%m-%d"), first.source_revision))
+    second_hashes = dict(zip(second.trade_date.dt.strftime("%Y-%m-%d"), second.source_revision))
+    assert first_hashes["2024-01-02"] == second_hashes["2024-01-02"]
+    assert first_hashes["2024-01-03"] != second_hashes["2024-01-03"]
