@@ -111,11 +111,39 @@ def build_total_return_index(prices: pd.DataFrame, actions: pd.DataFrame) -> pd.
         total_return_index=np.nan, corporate_action_status="NO_DATA")
 
 
+def _pit_filter(frame: pd.DataFrame, decision_time, name: str) -> pd.DataFrame:
+    """Reject naive/malformed availability timestamps; retain only known rows."""
+    if "available_time" not in frame.columns:
+        raise ValueError(f"{name} requires available_time")
+    cutoff = _utc(decision_time)
+    out = frame.copy()
+    available = pd.to_datetime(out["available_time"], errors="coerce")
+    if available.isna().any() or available.dt.tz is None:
+        raise ValueError(f"{name}.available_time must be valid and timezone-aware")
+    out["available_time"] = available.dt.tz_convert("UTC")
+    return out.loc[out["available_time"] <= cutoff].copy()
+
+
 def industry_relative_strength(industry_returns: pd.DataFrame,
                                market_returns: pd.DataFrame,
-                               periods=(5, 20)) -> pd.DataFrame:
-    """Returns are decimal cumulative returns keyed by trade_date."""
-    x = industry_returns.merge(market_returns, on="trade_date", suffixes=("_industry", "_market"))
+                               periods=(5, 20), decision_time=None) -> pd.DataFrame:
+    """PIT-validated industry excess returns; duplicate keys are rejected."""
+    if decision_time is None:
+        raise ValueError("decision_time is required for PIT industry strength")
+    ind = _pit_filter(industry_returns, decision_time, "industry returns")
+    market = _pit_filter(market_returns, decision_time, "market returns")
+    if "industry_code" not in ind:
+        raise ValueError("industry_code is required")
+    if ind.duplicated(["trade_date", "industry_code"]).any():
+        raise ValueError("duplicate point-in-time industry rows")
+    if market.duplicated(["trade_date"]).any():
+        raise ValueError("duplicate point-in-time market rows")
+    required_ind = {f"return_{h}" for h in periods}
+    required_market = {f"return_{h}" for h in periods}
+    if required_ind - set(ind.columns) or required_market - set(market.columns):
+        raise ValueError("industry/market return columns incomplete")
+    x = ind.merge(market, on="trade_date", how="left", suffixes=("_industry", "_market"),
+                  validate="many_to_one")
     for h in periods:
         x[f"rs_industry_{h}"] = x[f"return_{h}_industry"] - x[f"return_{h}_market"]
     return x
@@ -149,13 +177,27 @@ def cross_sectional_percentile(values: pd.Series, higher_is_better=True) -> pd.S
     return ranked * 100 if higher_is_better else (1-ranked) * 100
 
 
-def assert_historical_industry_membership(membership: pd.DataFrame) -> None:
+def assert_historical_industry_membership(membership: pd.DataFrame,
+                                            decision_time=None) -> pd.DataFrame:
+    """Validate SCD-2 membership intervals and optionally return PIT-known rows."""
     required = {"symbol", "industry_code", "valid_from", "valid_to", "available_time", "source_id"}
     missing = required - set(membership.columns)
     if missing:
         raise ValueError("historical industry membership required; missing " + ",".join(sorted(missing)))
-    if membership[["valid_from", "available_time"]].isna().any().any():
-        raise ValueError("industry membership dates cannot be missing")
+    x = membership.copy()
+    if x[["symbol", "industry_code", "valid_from", "available_time", "source_id"]].isna().any().any():
+        raise ValueError("industry membership key/date fields cannot be missing")
+    x["valid_from"] = pd.to_datetime(x["valid_from"], errors="coerce")
+    x["valid_to"] = pd.to_datetime(x["valid_to"], errors="coerce")
+    if x["valid_from"].isna().any() or x["valid_to"].notna().any() and x.loc[x["valid_to"].notna(), "valid_to"].isna().any():
+        raise ValueError("invalid industry membership validity dates")
+    if (x["valid_to"].notna() & (x["valid_to"] < x["valid_from"])).any():
+        raise ValueError("industry membership valid_to precedes valid_from")
+    if x.duplicated(["symbol", "industry_code", "valid_from", "available_time", "source_id"]).any():
+        raise ValueError("duplicate industry membership version")
+    if decision_time is not None:
+        x = _pit_filter(x, decision_time, "industry membership")
+    return x
 
 
 def decision_snapshot_id(parts: Iterable[str]) -> str:
