@@ -133,3 +133,7 @@ Actions → FHM-100 Daily Research → Run workflow。完成后在运行详情�
 ### M4 数据源映射审计（2026-11-11）
 
 新增 `docs/M4_DATA_SOURCE_MAPPING.md`，逐项映射 FHM-100 M4 因子所需字段、当前 AkShare/工程接口、点时与历史覆盖限制及准入状态。审计结论：现有日线仅支持部分技术观察；历史行业成员、市场广度/涨跌停历史、公司行为账本、资金流、公告事件和盘中涨跌停路径尚未形成合格数据链路。不能将当前快照或今天下载的历史数据伪装成历史决策时可见数据，也不能将 M4/M5 原语当作正式信号。详见 `docs/M4_DATA_SOURCE_MAPPING.md`。
+
+### AKShare 前瞻数据留档适配器
+
+新增 `src/providers/akshare_pit.py`：日线数据以实际抓取时间标记可用性，并明确禁止作为历史 PIT 回测输入；行业成分只保存当前观测快照，不伪造历史生效区间。新增离线 schema/时间戳契约测试。适配器尚未接入每日生产扫描，详见 `docs/M4_DATA_SOURCE_MAPPING.md`。
