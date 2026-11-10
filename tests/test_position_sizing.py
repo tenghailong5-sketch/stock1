@@ -50,3 +50,13 @@ def test_sizing_reserves_fixed_minimum_round_trip_commissions():
     assert r.approved
     assert r.estimated_loss == pytest.approx(r.shares * (1 + 10 * 30 / 10000) + 10)
     assert r.estimated_loss <= 2000
+
+
+def test_cash_limit_reserves_buy_fees_and_keeps_smaller_affordable_lot():
+    r = size_long_position(entry_price=10, stop_price=9, available_cash=2005,
+                           open_position_count=0, open_portfolio_risk=0,
+                           per_trade_risk_limit=2000)
+    assert r.approved
+    assert r.shares == 100
+    buy_fees = max(5.0, r.shares * r.entry_price * 2.5 / 10000) + r.shares * r.entry_price * 0.1 / 10000
+    assert r.cash_required + buy_fees <= 2005
