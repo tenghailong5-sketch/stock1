@@ -71,7 +71,8 @@ def scan(u):
               "20日收益%":z.ret20*100 if pd.notna(z.ret20) else np.nan,
               "CLV":z.clv,"20日高点回撤%":z.pullback*100 if pd.notna(z.pullback) else np.nan,
               "流动性观察通过":bool(liq),"技术观察通过":bool(trend and structure and pullback),
-              "未通过项":"；".join(flags) if flags else "基础观察条件通过",\n              "公司行为口径":"未接入点时公司行为账本；原始价格观察值，不可作为正式收益因子"})
+              "未通过项":"；".join(flags) if flags else "基础观察条件通过",
+              "公司行为口径":"未接入点时公司行为账本；原始价格观察值，不可作为正式收益因子"})
         except Exception as e: errors.append({"代码":s.code,"原因":str(e)[:220]})
     return pd.DataFrame(rows),pd.DataFrame(errors)
 
@@ -106,7 +107,8 @@ def main():
       f"- 基础技术观察名单：{len(c)}","",
       "## 模型状态（重要）",
       "**本次不是正式FHM-100信号。** 行业相对强度、市场/行业滚动Beta残差、完整涨跌停事件、经样本外校准的M6收益预测、M8组合风险及M9回测尚未完成。",
-      "不输出A/B/C正式评分、P_up、预期收益或买入指令；观察名单不等于达到80分门槛。AI仅作文字点评，不参与评分、不放宽硬门槛。",\n      "价格口径：本扫描仅用未复权原始日线；尚无点时公司行为账本，分红送转附近的跨日收益/均线可能失真，相关观察值不得进入正式模型评分或回测标签。",
+      "不输出A/B/C正式评分、P_up、预期收益或买入指令；观察名单不等于达到80分门槛。AI仅作文字点评，不参与评分、不放宽硬门槛。",
+      "价格口径：本扫描仅用未复权原始日线；尚无点时公司行为账本，分红送转附近的跨日收益/均线可能失真，相关观察值不得进入正式模型评分或回测标签。",
       "## 技术观察名单（非买入信号）",
       c.head(30).to_markdown(index=False) if len(c) else "暂无满足基础技术观察条件的股票。",
       "## 数据异常",e.head(30).to_markdown(index=False) if len(e) else "无记录"]
