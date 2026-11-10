@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from src.model.market_sentiment import summarize_limit_pool_sentiment
 from src.providers.akshare_limit_pools import fetch_limit_pool_snapshots
 from src.providers.akshare_pit import (
     fetch_current_industry_membership_snapshot,
@@ -132,6 +133,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             "industry_membership": len(industry_records),
             "market_breadth": len(breadth_records),
             "limit_pools": len(limit_pool_records),
+            "market_sentiment": 1,
         }
 
     counts: dict[str, int] = {}
@@ -158,6 +160,11 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         archive_root / "limit_pools" / f"{day}.jsonl",
         limit_pool_records,
         ("event_type", "trade_date", "source_revision"),
+    )
+    counts["market_sentiment"] = append_jsonl_atomic(
+        archive_root / "market_sentiment" / f"{day}.jsonl",
+        [sentiment],
+        ("trade_date", "capture_time"),
     )
     return counts
 
