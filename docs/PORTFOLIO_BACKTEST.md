@@ -27,3 +27,11 @@ The result contains the audit status, initial and ending cash/equity, total retu
 
 ### Risk-budget cost treatment
 New position sizing reserves an additional fixed 10 currency units for round-trip minimum commissions, on top of its conservative 30 bps variable-cost allowance. Existing-position risk is recalculated from the actual recorded buy-side fees and modeled stop-exit slippage, sell commission (including the minimum), stamp duty, and transfer fee. This is a conservative estimate, not a guarantee of realized maximum loss; gaps, partial fills, suspensions, and locked limit-down exits can still exceed the planned stop risk.
+
+## Pending protective exits and partial fills
+
+- Once a protective stop is triggered, the position remains marked as `stop_exit_pending` until all remaining shares are sold. If a suspension, locked limit-down state, or participation cap prevents a full exit, the simulator retries the pending market exit on subsequent sessions; a rebound does not silently cancel the exit.
+- Each partial fill realizes its own proceeds and costs, with the original buy-side cost allocated pro rata to the shares sold. Remaining shares and their remaining allocated buy cost stay in the open position.
+- Partial realized P&L is included in portfolio cash/equity accounting, but a position with any shares still open is excluded from completed-trade win-rate, profit-factor, payoff, expectancy, and loss-streak statistics. It becomes one completed round trip only after its remaining shares are fully closed.
+- The pending-exit state is exposed on each open-position record as `stop_exit_pending`.
+
