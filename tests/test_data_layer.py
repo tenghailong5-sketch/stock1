@@ -62,3 +62,13 @@ def test_percentile_preserves_missing():
     s = cross_sectional_percentile(pd.Series([1.,2.,np.nan]))
     assert pd.isna(s.iloc[2])
     assert s.iloc[1] > s.iloc[0]
+
+
+
+def test_daily_data_rejects_timezone_naive_availability():
+    x = sample_bars()
+    x["available_time"] = ["2026-11-09 08:00:00", "2026-11-10 09:00:00"]
+    clean, quality = validate_daily_bars(x, "2026-11-11T00:00:00Z")
+    assert clean.empty
+    assert not quality.accepted
+    assert quality.reason == "available_time_must_be_timezone_aware"
