@@ -8,7 +8,6 @@ historical rows as unsuitable for historical point-in-time backtests.
 from __future__ import annotations
 
 import hashlib
-import json
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -52,9 +51,11 @@ def normalize_daily_history_snapshot(
         raise ValueError("AKShare daily history contains invalid date or OHLC values")
     if out.duplicated(["symbol", "trade_date"]).any():
         raise ValueError("AKShare daily history contains duplicate symbol/trade_date")
+    # Hash only provider payload fields: retrieval metadata must not make an
+    # unchanged historical response look like a new source revision.
+    out["source_revision"] = _revision(out)
     out["available_time"] = captured
     out["source_id"] = "akshare.stock_zh_a_hist"
-    out["source_revision"] = _revision(out)
     out["availability_basis"] = "retrieval_time_only"
     out["historical_pit_eligible"] = False
     return out
