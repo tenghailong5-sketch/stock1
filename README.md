@@ -30,3 +30,12 @@ GitHub Actions 工作日北京时间 16:00 自动运行，也支持手动运行�
 Actions → FHM-100 Daily Research → Run workflow。完成后在运行详情的 Artifacts 下载报告包，包含 report.md、watchlist.csv、data_errors.csv、run_status.json。
 
 不保存密钥到代码，不自动下单，不承诺收益。数据缺失时明确降级。
+
+## R2.1 工程化进度
+
+已新增：
+- `src/model/r21_core.py`：A/B/C 原始权重常量、缺失因子拒绝评分、决策时点数据过滤、市场状态基础判定、组合风险预算、RISK_OFF/关键数据缺失时禁止开仓、日线止盈止损双触发保守处理、退出状态与部分成交记账。
+- `tests/test_r21_core.py`：对应回归测试。
+- 依赖增加 `tabulate`（修复报告 `to_markdown()` 的运行依赖缺失）和 `pytest`。
+
+**重要：这些是 R2.1 安全基础组件，尚未接入每日扫描器，也不代表正式 A/B/C 评分或完整回测已经完成。** 目前的 AkShare 扫描仍只是观察名单；在公司行为账本、点时数据和执行撮合完成前，不得将其当作交易信号。
