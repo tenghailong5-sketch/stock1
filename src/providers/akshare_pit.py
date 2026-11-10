@@ -61,6 +61,41 @@ def normalize_daily_history_snapshot(
     return out
 
 
+
+def normalize_index_history_snapshot(
+    frame: pd.DataFrame, *, symbol: str, fetched_at=None
+) -> pd.DataFrame:
+    """Normalize index_zh_a_hist output as retrieval-time-only observations."""
+    columns = {
+        "日期": "trade_date", "开盘": "open", "最高": "high", "最低": "low",
+        "收盘": "close", "成交量": "volume", "成交额": "amount",
+    }
+    missing = set(columns) - set(frame.columns)
+    if missing:
+        raise ValueError("AKShare index history schema missing: " + ",".join(sorted(missing)))
+    captured = _utc(fetched_at)
+    out = frame[list(columns)].rename(columns=columns).copy()
+    out.insert(0, "index_symbol", str(symbol).zfill(6))
+    out["trade_date"] = pd.to_datetime(out["trade_date"], errors="coerce")
+    for col in ("open", "high", "low", "close", "volume", "amount"):
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+    if out["trade_date"].isna().any() or out.duplicated(["index_symbol", "trade_date"]).any():
+        raise ValueError("AKShare index history contains invalid or duplicate dates")
+    numeric = out[["open", "high", "low", "close", "volume", "amount"]]
+    if numeric.isna().any().any() or not numeric.apply(lambda c: c.map(pd.notna)).all().all():
+        raise ValueError("AKShare index history contains non-numeric values")
+    if ((out[["open", "high", "low", "close"]] <= 0).any().any()
+            or (out[["volume", "amount"]] < 0).any().any()
+            or (out["high"] < out[["open", "low", "close"]].max(axis=1)).any()
+            or (out["low"] > out[["open", "high", "close"]].min(axis=1)).any()):
+        raise ValueError("AKShare index history contains invalid OHLC/volume/amount values")
+    out["source_revision"] = _revision(out)
+    out["available_time"] = captured
+    out["source_id"] = "akshare.index_zh_a_hist"
+    out["availability_basis"] = "retrieval_time_only"
+    out["historical_pit_eligible"] = False
+    return out
+
 def fetch_current_industry_membership_snapshot(ak_module, *, clock=None) -> pd.DataFrame:
     """Capture current Eastmoney industry constituents as a dated snapshot only.
 
