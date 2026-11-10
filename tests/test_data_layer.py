@@ -3,7 +3,8 @@ import pandas as pd
 import pytest
 
 from src.model.data_layer import (
-    build_total_return_index, cross_sectional_percentile,
+    assert_historical_industry_membership, build_total_return_index,
+    cross_sectional_percentile, industry_relative_strength,
     rolling_residual_strength, validate_daily_bars,
 )
 
@@ -72,3 +73,47 @@ def test_daily_data_rejects_timezone_naive_availability():
     assert clean.empty
     assert not quality.accepted
     assert quality.reason == "available_time_must_be_timezone_aware"
+
+
+def test_industry_relative_strength_is_point_in_time_and_validates_unique_keys():
+    industry = pd.DataFrame([
+        {"trade_date":"2026-11-09","industry_code":"BK001","return_5":0.05,
+         "return_20":0.10,"available_time":"2026-11-10T07:00:00Z"},
+        {"trade_date":"2026-11-09","industry_code":"BK001","return_5":0.99,
+         "return_20":0.99,"available_time":"2026-11-10T10:00:00Z"},
+    ])
+    market = pd.DataFrame([
+        {"trade_date":"2026-11-09","return_5":0.02,"return_20":0.04,
+         "available_time":"2026-11-10T07:00:00Z"}
+    ])
+    out = industry_relative_strength(industry, market, decision_time="2026-11-10T08:00:00Z")
+    assert len(out) == 1
+    assert out.iloc[0].rs_industry_5 == pytest.approx(0.03)
+
+
+def test_industry_relative_strength_rejects_duplicate_known_rows():
+    industry = pd.DataFrame([
+        {"trade_date":"2026-11-09","industry_code":"BK001","return_5":0.05,
+         "return_20":0.10,"available_time":"2026-11-10T07:00:00Z"},
+        {"trade_date":"2026-11-09","industry_code":"BK001","return_5":0.06,
+         "return_20":0.11,"available_time":"2026-11-10T07:30:00Z"},
+    ])
+    market = pd.DataFrame([
+        {"trade_date":"2026-11-09","return_5":0.02,"return_20":0.04,
+         "available_time":"2026-11-10T07:00:00Z"}
+    ])
+    with pytest.raises(ValueError, match="duplicate"):
+        industry_relative_strength(industry, market, decision_time="2026-11-10T08:00:00Z")
+
+
+def test_industry_membership_rejects_naive_availability_and_bad_interval():
+    base = pd.DataFrame([{
+        "symbol":"000001","industry_code":"BK001","valid_from":"2026-01-01",
+        "valid_to":"2025-12-31","available_time":"2026-01-01T00:00:00Z","source_id":"x"
+    }])
+    with pytest.raises(ValueError, match="valid_to"):
+        assert_historical_industry_membership(base)
+    base.loc[0, "valid_to"] = None
+    base.loc[0, "available_time"] = "2026-01-01 00:00:00"
+    with pytest.raises(ValueError, match="timezone-aware"):
+        assert_historical_industry_membership(base, "2026-02-01T00:00:00Z")
