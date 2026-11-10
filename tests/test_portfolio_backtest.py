@@ -52,6 +52,9 @@ def test_signal_at_close_enters_next_session_and_stops_next_day():
     assert result["trades"][0]["exit_date"] == "2026-01-07"
     assert result["trades"][0]["exit_reason"] == "protective_stop"
     assert result["ending_equity"] < result["initial_cash"]
+    assert result["metrics"]["trade_count"] == 1
+    assert result["metrics"]["losses"] == 1
+    assert result["metrics"]["max_drawdown_pct"] > 0
 
 
 def test_t1_prevents_same_session_stop_exit():
