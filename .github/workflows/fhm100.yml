@@ -1,5 +1,7 @@
 name: FHM-100 Daily Research
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: "0 8 * * 1-5" # 16:00 Beijing time
