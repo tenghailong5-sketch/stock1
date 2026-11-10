@@ -58,3 +58,19 @@ def test_invalid_quantity_rejected(quantity):
 def test_invalid_costs_rejected():
     with pytest.raises(ValueError):
         call(costs=ExecutionCosts(slippage_bps=float("nan")))
+
+@pytest.mark.parametrize("participation", [True, False, float("nan"), float("inf"), "0.5"])
+def test_invalid_participation_is_rejected(participation):
+    with pytest.raises(ValueError):
+        call(max_participation=participation)
+
+
+@pytest.mark.parametrize("lot_size", [True, False, 0, -100, 100.0])
+def test_invalid_lot_size_is_rejected(lot_size):
+    with pytest.raises(ValueError):
+        call(lot_size=lot_size)
+
+
+def test_execution_costs_reject_non_numeric_values_at_construction():
+    with pytest.raises(ValueError):
+        ExecutionCosts(slippage_bps="10")
