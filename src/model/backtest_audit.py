@@ -67,7 +67,9 @@ def audit_backtest_dataset(candidates: pd.DataFrame, bars: pd.DataFrame) -> Back
         errors.append("bar_dataset_empty")
 
     for label, frame in (("candidate", candidates), ("bar", bars)):
-        if frame[["symbol", "source_revision"]].isna().any().any():
+        identity = frame[["symbol", "source_revision"]]
+        if identity.isna().any().any() or identity.astype(str).apply(
+                lambda col: col.str.strip().eq("").any()).any():
             errors.append(label + "_missing_identity_or_revision")
         natural_key = (["symbol", "decision_time", "strategy"]
                        if label == "candidate" else ["symbol", "trade_date"])
@@ -107,6 +109,11 @@ def audit_backtest_dataset(candidates: pd.DataFrame, bars: pd.DataFrame) -> Back
 
     if not candidates["eligible"].map(lambda x: isinstance(x, bool)).all():
         errors.append("candidate_eligibility_must_be_boolean")
+    if not candidates["strategy"].isin(["A", "B", "C"]).all():
+        errors.append("candidate_contains_unknown_strategy")
+    for col in ("suspended", "limit_up_locked", "limit_down_locked"):
+        if not bars[col].map(lambda x: isinstance(x, bool)).all():
+            errors.append("bar_invalid_boolean:" + col)
     eligible = candidates.loc[candidates["eligible"] == True]  # noqa: E712
     scores = pd.to_numeric(eligible["score"], errors="coerce")
     if scores.isna().any() or ((scores < 80) | (scores > 100)).any():
