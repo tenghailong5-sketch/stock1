@@ -121,3 +121,33 @@ def test_daily_history_revision_is_per_row_not_per_rolling_window():
     second_hashes = dict(zip(second.trade_date.dt.strftime("%Y-%m-%d"), second.source_revision))
     assert first_hashes["2024-01-02"] == second_hashes["2024-01-02"]
     assert first_hashes["2024-01-03"] != second_hashes["2024-01-03"]
+
+
+def test_market_breadth_snapshot_counts_valid_quotes_without_limit_inference():
+    raw = pd.DataFrame([
+        {"代码": "000001", "最新价": 10, "涨跌幅": 2.5},
+        {"代码": "600000", "最新价": 8, "涨跌幅": -1.2},
+        {"代码": "000002", "最新价": 9, "涨跌幅": 0},
+        {"代码": "300001", "最新价": None, "涨跌幅": None},
+    ])
+    result = normalize_market_breadth_snapshot(
+        raw, fetched_at="2026-11-11T16:30:00+08:00"
+    ).iloc[0]
+    assert result["provider_row_count"] == 4
+    assert result["valid_quote_count"] == 3
+    assert result["missing_quote_count"] == 1
+    assert result["advances"] == 1
+    assert result["declines"] == 1
+    assert result["unchanged"] == 1
+    assert result["breadth_coverage"] == 0.75
+    assert result["historical_pit_eligible"] is False
+    assert result["snapshot_scope"] == "current_provider_snapshot_only"
+
+
+def test_market_breadth_snapshot_rejects_duplicate_symbols():
+    raw = pd.DataFrame([
+        {"代码": "000001", "最新价": 10, "涨跌幅": 1},
+        {"代码": "000001", "最新价": 11, "涨跌幅": 2},
+    ])
+    with pytest.raises(ValueError, match="duplicate symbols"):
+        normalize_market_breadth_snapshot(raw)
