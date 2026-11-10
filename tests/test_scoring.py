@@ -1,7 +1,7 @@
 import pytest
 
 from src.model.r21_core import A_WEIGHTS, B_WEIGHTS, C_WEIGHTS, MarketState
-from src.model.scoring import candidate_band, score_a, score_b, score_c
+from src.model.scoring import candidate_band, qualify_candidate, score_a, score_b, score_c
 
 
 def factors(weights):
@@ -49,8 +49,7 @@ def test_b_refuses_previous_close_lookahead_and_requires_next_day_fields():
     close_result = score_b(factors(B_WEIGHTS), {}, market_state=MarketState.NEUTRAL, stage="close")
     assert close_result.score is None
     assert not close_result.eligible
-    gates = all_true(["event_data_verified",
-                      "liquidity_and_risk_pass", "announcement_risk_pass"])
+    gates = all_true(["event_data_verified", "liquidity_and_risk_pass", "announcement_risk_pass"])
     gates["event_subtype"] = "close_up_sealed"
     next_day = score_b(factors(B_WEIGHTS), gates, market_state=MarketState.NEUTRAL, stage="next_day")
     assert next_day.score == pytest.approx(80)
@@ -95,3 +94,31 @@ def test_b_requires_one_of_four_distinct_event_subtypes():
     result = score_b(factors(B_WEIGHTS), gates, market_state=MarketState.NEUTRAL, stage="next_day")
     assert not result.eligible
     assert result.score is None
+
+
+def test_candidate_floor_is_hard_and_cannot_be_configured_below_80():
+    gates = all_true([
+        "industry_top_30pct", "stock_residual_top_20pct", "amount_ma20_ge_100m",
+        "breakout_or_confirmed_retest", "no_high_volume_stall_or_repeated_rejection",
+    ])
+    result = score_a(factors(A_WEIGHTS), gates, market_state=MarketState.RISK_ON)
+    assert qualify_candidate(result).eligible
+    below = result.__class__(result.strategy, 79.99, True, (), result.stage)
+    rejected = qualify_candidate(below)
+    assert not rejected.eligible
+    assert rejected.score == pytest.approx(79.99)
+    assert "below_minimum_score:80" in rejected.reasons
+    with pytest.raises(ValueError):
+        qualify_candidate(result, minimum_score=79)
+
+
+def test_candidate_floor_never_overrides_failed_hard_gate():
+    gates = all_true([
+        "industry_top_30pct", "stock_residual_top_20pct", "amount_ma20_ge_100m",
+        "breakout_or_confirmed_retest", "no_high_volume_stall_or_repeated_rejection",
+    ])
+    gates["industry_top_30pct"] = False
+    result = score_a(factors(A_WEIGHTS), gates, market_state=MarketState.RISK_ON)
+    qualified = qualify_candidate(result)
+    assert not qualified.eligible
+    assert "hard_gate_failed:industry_top_30pct" in qualified.reasons
