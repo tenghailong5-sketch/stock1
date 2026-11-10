@@ -74,11 +74,12 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
     )
     assert set(counts) == {
         "index_000001", "index_399001", "index_399006",
-        "index_000688", "index_000300", "industry_membership", "market_breadth", "limit_pools",
+        "index_000688", "index_000300", "industry_membership", "market_breadth", "limit_pools", "market_sentiment",
     }
     assert all(counts[f"index_{code}"] == 1 for code in ("000001", "399001", "399006", "000688", "000300"))
     assert counts["industry_membership"] == 4  # two symbols across two industries
     assert counts["market_breadth"] == 1
+    assert counts["market_sentiment"] == 1
     index_file = tmp_path / "index_daily" / "000001.jsonl"
     index_row = json.loads(index_file.read_text(encoding="utf-8").splitlines()[0])
     assert index_row["historical_pit_eligible"] is False
@@ -92,6 +93,13 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
         "current_membership_observation_only"
     }
     assert all("valid_from" not in row and "valid_to" not in row for row in industry_rows)
+
+    sentiment_file = tmp_path / "market_sentiment" / "2026-11-11.jsonl"
+    sentiment_row = json.loads(sentiment_file.read_text(encoding="utf-8").splitlines()[0])
+    assert sentiment_row["highest_observed_limit_up_streak"] == 2
+    assert sentiment_row["limit_up_count"] == 1
+    assert sentiment_row["opened_rate"] is None
+    assert sentiment_row["scoring_eligible"] is False
 
     breadth_file = tmp_path / "market_breadth" / "2026-11-11.jsonl"
     breadth_row = json.loads(breadth_file.read_text(encoding="utf-8").splitlines()[0])
@@ -110,6 +118,7 @@ def test_collector_dry_run_validates_without_writing(tmp_path):
         write=False,
     )
     assert counts["limit_pools"] == 5
+    assert counts["market_sentiment"] == 1
     assert counts["market_breadth"] == 1
     assert list(tmp_path.rglob("*.jsonl")) == []
 
