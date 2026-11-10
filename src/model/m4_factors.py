@@ -179,3 +179,15 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
 def rank_factor(values: pd.Series, higher_is_better: bool = True) -> pd.Series:
     """Cross-sectional percentile rank; NaN remains missing and is never imputed."""
     return values.rank(pct=True, ascending=not higher_is_better, method="average") * 100
+
+
+
+def rank_factor_by_date(frame: pd.DataFrame, value_col: str,
+                        date_col: str = "trade_date",
+                        higher_is_better: bool = True) -> pd.Series:
+    """Rank a factor only among peers sharing the same decision date."""
+    if date_col not in frame or value_col not in frame:
+        raise ValueError("date and factor columns are required")
+    return frame.groupby(date_col, sort=False)[value_col].transform(
+        lambda values: rank_factor(values, higher_is_better=higher_is_better)
+    )
