@@ -109,3 +109,22 @@ def test_invalid_volume_fraction_is_rejected():
     bars = frame([bar("000001", "2026-01-06", volume=100.5)])
     with pytest.raises(ValueError, match="bar volume"):
         run_portfolio_backtest(candidates, bars)
+
+
+
+def test_portfolio_never_opens_more_than_two_positions():
+    candidates = frame([
+        candidate(symbol="000001", score=93.0),
+        candidate(symbol="000002", score=92.0),
+        candidate(symbol="000003", score=91.0),
+    ])
+    bars = frame([
+        bar("000001", "2026-01-06"),
+        bar("000002", "2026-01-06"),
+        bar("000003", "2026-01-06"),
+    ])
+    result = run_portfolio_backtest(candidates, bars)
+    buys = [fill for fill in result["fills"] if fill["side"] == "buy" and fill["filled"]]
+    assert len(buys) == 2
+    assert len(result["open_positions"]) == 2
+    assert result["skipped"][-1]["reason"] == "position_sizing_rejected"
