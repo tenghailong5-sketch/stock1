@@ -75,7 +75,7 @@ def normalize_limit_pool_snapshot(
 
 
 def fetch_limit_pool_snapshots(ak_module, *, trade_date: str, captured_at=None) -> pd.DataFrame:
-    """Fetch all four date-scoped pools; any API/schema error aborts the batch."""
+    """Fetch all configured date-scoped pools; any API/schema error aborts the batch."""
     frames = []
     for event_type, api_name in POOL_APIS.items():
         api = getattr(ak_module, api_name, None)
