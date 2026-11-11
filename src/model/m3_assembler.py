@@ -145,8 +145,12 @@ def assemble_m3_history(
     # Without index warm-up predating the archive, that means 119 consecutive
     # aligned daily market snapshots. Never skip a missing session in the window.
     last_index_days = idx.trade_date.tail(119).tolist()
-    complete_days = set(complete.trade_date.tolist())
-    missing_days = [day for day in last_index_days if day not in complete_days]
+    snapshot_complete = merged.dropna(subset=[
+        "breadth", "amount", "limit_up_cnt", "limit_down_cnt",
+        "snapshot_available_time",
+    ])
+    snapshot_complete_days = set(snapshot_complete.trade_date.tolist())
+    missing_days = [day for day in last_index_days if day not in snapshot_complete_days]
     if len(idx) < 119 or missing_days:
         return {
             "status": "INSUFFICIENT_DATA",
