@@ -89,8 +89,9 @@ jobs:
           PY
       - name: Plan and backfill confirmed delisted-security daily bars
         run: |
-          cne backfill daily_bars --profile delisted --start 2016-01-01 --end 2026-11-10 --plan 2>&1 | tee validation/cnequity-demo/delisted-bars-plan.log
-          cne backfill daily_bars --profile delisted --start 2016-01-01 --end 2026-11-10 2>&1 | tee validation/cnequity-demo/delisted-bars-backfill.log
+          set -euo pipefail
+          cne backfill daily_bars --profile delisted --start 2016-01-01 --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/delisted-bars-plan.log
+          cne backfill daily_bars --profile delisted --start 2016-01-01 --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-bars-backfill.log
           python - <<'PY'
           import json
           import re
