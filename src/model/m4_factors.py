@@ -42,12 +42,25 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
     if raw_available.dt.tz is None:
         raise ValueError("available_time must be timezone-aware")
     x["available_time"] = raw_available.dt.tz_convert("UTC")
-    x = x.loc[x["available_time"] <= cutoff.tz_convert("UTC")].copy()
+    cutoff_utc = cutoff.tz_convert("UTC")
+    x = x.loc[x["available_time"] <= cutoff_utc].copy()
     x = x.sort_values(["symbol", "trade_date"]).copy()
+    if x["symbol"].isna().any() or x["symbol"].astype(str).str.strip().eq("").any():
+        raise ValueError("invalid symbol values")
+    x["symbol"] = x["symbol"].astype(str).str.strip()
     if x.duplicated(["symbol", "trade_date"]).any():
         raise ValueError("duplicate symbol/trade_date bars")
-    if x[["open", "high", "low", "close"]].isna().any().any():
-        raise ValueError("invalid OHLC values")
+    # A row dated after the exchange-local decision date is a future observation,
+    # even if a malformed provider timestamp claims it was already available.
+    decision_date = cutoff.tz_convert("Asia/Shanghai").date()
+    if (x["trade_date"].dt.date > decision_date).any():
+        raise ValueError("future trade_date relative to decision_time")
+    if x[["open", "high", "low", "close", "volume", "amount"]].isna().any().any():
+        raise ValueError("invalid OHLCV/amount values")
+    if not np.isfinite(x[["open", "high", "low", "close", "volume", "amount"]].to_numpy(dtype=float)).all():
+        raise ValueError("non-finite OHLCV/amount values")
+    if (x[["volume", "amount"]] < 0).any().any():
+        raise ValueError("negative volume or amount")
     if ((x[["open", "high", "low", "close"]] <= 0).any(axis=1)
         | (x["high"] < x[["open", "low", "close"]].max(axis=1))
         | (x["low"] > x[["open", "high", "close"]].min(axis=1))).any():
