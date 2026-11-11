@@ -14,7 +14,7 @@ def write_jsonl(path, rows):
 
 
 def make_archive(root, *, omit_breadth_day=None):
-    dates = pd.bdate_range("2026-07-01", periods=80)
+    dates = pd.bdate_range("2026-07-01", periods=140)
     index_rows = []
     for i, day in enumerate(dates):
         day_text = day.strftime("%Y-%m-%d")
@@ -51,21 +51,22 @@ def make_archive(root, *, omit_breadth_day=None):
 def test_m3_assembler_builds_state_only_after_60_complete_sessions(tmp_path):
     dates = make_archive(tmp_path)
     result = assemble_m3_history(
-        tmp_path, index_symbol="000001", decision_time="2026-12-31T12:00:00Z"
+        tmp_path, index_symbol="000001", decision_time="2026-11-01T12:00:00Z"
     )
     assert result["status"] == "READY"
     assert result["valid_sessions"] == 80
     assert result["latest_trade_date"] == dates[-1].strftime("%Y-%m-%d")
     assert result["market_state"] == "RISK_ON"
     assert result["historical_backtest_eligible"] is False
+    assert result["valid_sessions"] == 81  # first 59 days warm up MA60/volatility
 
 
 def test_m3_assembler_fails_closed_when_one_recent_daily_snapshot_is_missing(tmp_path):
-    dates = pd.bdate_range("2026-07-01", periods=80)
+    dates = pd.bdate_range("2026-07-01", periods=140)
     missing_day = dates[-10].strftime("%Y-%m-%d")
     make_archive(tmp_path, omit_breadth_day=missing_day)
     result = assemble_m3_history(
-        tmp_path, index_symbol="000001", decision_time="2026-12-31T12:00:00Z"
+        tmp_path, index_symbol="000001", decision_time="2026-11-01T12:00:00Z"
     )
     assert result["status"] == "INSUFFICIENT_DATA"
     assert result["reason"] == "fewer_than_60_complete_consecutive_sessions"
@@ -78,3 +79,27 @@ def test_m3_assembler_rejects_decision_before_archive_capture(tmp_path):
         tmp_path, index_symbol="000001", decision_time="2026-07-01T08:00:00Z"
     )
     assert result["status"] == "INSUFFICIENT_DATA"
+
+
+
+def test_m3_assembler_does_not_confuse_60_raw_days_with_60_scored_observations(tmp_path):
+    make_archive(tmp_path)
+    # Keep only the first 80 aligned sessions; MA60 warm-up leaves only 21
+    # feature rows, so the 60-observation percentile window is not ready.
+    index_path = tmp_path / "index_daily" / "000001.jsonl"
+    rows = [json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()]
+    keep_days = {row["trade_date"] for row in rows[:80]}
+    index_path.write_text(
+        "".join(json.dumps(row) + "\\n" for row in rows[:80]),
+        encoding="utf-8",
+    )
+    for folder in ("market_breadth", "market_sentiment"):
+        for path in (tmp_path / folder).glob("*.jsonl"):
+            if path.stem not in keep_days:
+                path.unlink()
+    result = assemble_m3_history(
+        tmp_path, index_symbol="000001", decision_time="2026-11-01T12:00:00Z"
+    )
+    assert result["status"] == "INSUFFICIENT_DATA"
+    assert result["reason"] == "fewer_than_60_scored_feature_observations"
+    assert result["valid_sessions"] == 21
