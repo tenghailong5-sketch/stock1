@@ -7,6 +7,7 @@ from src.model.m4_industry_observations import select_latest_observed_industry_s
 def rows(snapshot_id="batch-a", captured="2026-11-12T08:30:00Z"):
     common = {
         "snapshot_id": snapshot_id,
+        "expected_industry_count": 2,
         "observed_at": captured,
         "available_time": captured,
         "source_id": "akshare.stock_board_industry_cons_em",
@@ -97,3 +98,24 @@ def test_historical_pit_rows_are_rejected():
         select_latest_observed_industry_snapshot(
             frame, ["000001", "600000"], decision_time="2026-11-12T09:00:00Z"
         )
+
+
+
+def test_batch_missing_an_expected_industry_is_rejected_even_if_universe_is_covered():
+    frame = rows()
+    frame = frame.loc[frame["industry_code"] == "BK01"].copy()
+    selected, audit = select_latest_observed_industry_snapshot(
+        frame, ["000001", "600000"], decision_time="2026-11-12T09:00:00Z"
+    )
+    assert selected.empty
+    assert audit["status"] == "incomplete_industry_batch"
+
+
+def test_inconsistent_batch_manifest_is_rejected():
+    frame = rows()
+    frame.loc[0, "expected_industry_count"] = 3
+    selected, audit = select_latest_observed_industry_snapshot(
+        frame, ["000001", "600000"], decision_time="2026-11-12T09:00:00Z"
+    )
+    assert selected.empty
+    assert audit["status"] == "invalid_batch_manifest"
