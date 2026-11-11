@@ -125,6 +125,9 @@ def fetch_current_industry_membership_snapshot(
     # One immutable identifier binds every industry response fetched by this call.
     # Per-industry observed_at/available_time remain the actual retrieval times.
     snapshot_id = str(uuid.uuid4())
+    expected_industry_count = int(
+        industries[["板块名称", "板块代码"]].drop_duplicates()["板块代码"].nunique()
+    )
     rows = []
     for industry in industries[["板块名称", "板块代码"]].drop_duplicates().itertuples(index=False):
         name, code = str(industry[0]), str(industry[1])
@@ -140,6 +143,7 @@ def fetch_current_industry_membership_snapshot(
         clean["industry_code"] = code
         clean["industry_name"] = name
         clean["snapshot_id"] = snapshot_id
+        clean["expected_industry_count"] = expected_industry_count
         clean["observed_at"] = captured
         clean["available_time"] = captured
         clean["availability_basis"] = "retrieval_time_only"
@@ -151,7 +155,7 @@ def fetch_current_industry_membership_snapshot(
         rows.append(clean.drop(columns=["代码"]))
     if not rows:
         return pd.DataFrame(columns=[
-            "symbol", "industry_code", "industry_name", "snapshot_id", "observed_at",
+            "symbol", "industry_code", "industry_name", "snapshot_id", "expected_industry_count", "observed_at",
             "available_time", "source_id", "snapshot_scope", "source_revision",
         ])
     result = pd.concat(rows, ignore_index=True)
