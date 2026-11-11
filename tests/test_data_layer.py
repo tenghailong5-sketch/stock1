@@ -137,3 +137,21 @@ def test_total_return_rejects_duplicate_actions_on_same_ex_date():
     out = build_total_return_index(p,a,complete_symbols={"000001"})
     assert out.total_return_index.isna().all()
     assert set(out.corporate_action_status) == {"INVALID_ACTION_LEDGER"}
+
+
+
+@pytest.mark.parametrize("ex_date", ["2025-12-31", "2026-01-01", "2026-01-03"])
+def test_total_return_rejects_actions_without_prior_price_coverage(ex_date):
+    p = pd.DataFrame({
+        "symbol": ["000001", "000001"],
+        "trade_date": pd.to_datetime(["2026-01-01", "2026-01-02"]),
+        "close": [10.0, 9.0],
+    })
+    a = pd.DataFrame({
+        "symbol": ["000001"], "ex_date": [ex_date],
+        "action_type": ["cash_dividend"], "cash_per_share": [1.0],
+        "share_factor": [1.0], "verified_status": ["VERIFIED"],
+    })
+    out = build_total_return_index(p, a, complete_symbols={"000001"})
+    assert out.total_return_index.isna().all()
+    assert set(out.corporate_action_status) == {"ACTION_DATE_OUTSIDE_PRICE_COVERAGE"}
