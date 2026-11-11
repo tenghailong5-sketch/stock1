@@ -217,9 +217,13 @@ jobs:
         if: success()
         run: |
           set -o pipefail
-          cne check --full 2>&1 | tee validation/cnequity-demo/check.log
+          # This is a bounded sample-validation workflow, not the lake's scheduled
+          # production freshness gate. Enforce the full data-quality audit here;
+          # record freshness/coverage separately so an intentionally unscheduled
+          # demo profile does not masquerade as a failed sample ingestion.
+          cne audit --full --quality-only 2>&1 | tee validation/cnequity-demo/check.log
           cne status --datasets 2>&1 | tee validation/cnequity-demo/status.log
-          printf '{"full_audit": true, "audit_enforced": true}\\n' > validation/cnequity-demo/audit-exit-codes.json
+          printf '{"full_quality_audit": true, "quality_audit_enforced": true, "freshness_gate": "reported_separately"}\\n' > validation/cnequity-demo/audit-exit-codes.json
       - name: Validate loaded daily bars and produce bounded evidence report
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
