@@ -7,6 +7,8 @@ import akshare as ak
 import numpy as np
 import pandas as pd
 import requests
+from src.model.m4_factors import price_structure
+from src.model.pipeline import evaluate_candidates
 
 OUT=Path("output"); OUT.mkdir(exist_ok=True)
 MIN_AMOUNT=100_000_000
@@ -55,8 +57,15 @@ def scan(u):
         try:
             h=history(s.code,start)
             if h is None: raise ValueError("insufficient history or schema mismatch")
+            # M4 price primitives use the raw bars captured in this run.
+            # Retrieval timestamps do not certify historical PIT availability.
+            available_at = datetime.now(timezone.utc)
+            m4_bars = h.rename(columns={"date": "trade_date"}).copy()
+            m4_bars["symbol"] = s.code
+            m4_bars["available_time"] = available_at
+            m4 = price_structure(m4_bars, decision_time=available_at.isoformat()).iloc[-1]
             z=features(h).iloc[-1]
-            liq=pd.notna(z.amount_ma20) and z.amount_ma20>=MIN_AMOUNT
+            liq=pd.notna(m4.amount_ma20) and m4.amount_ma20>=MIN_AMOUNT
             trend=pd.notna(z.ret5) and pd.notna(z.ret20) and z.ret5>0 and z.ret20>0
             structure=pd.notna(z.clv) and z.clv>=.60
             pullback=pd.notna(z.pullback) and z.pullback>-.12
@@ -66,10 +75,16 @@ def scan(u):
             if not structure: flags.append("CLV收盘结构未确认")
             if not pullback: flags.append("回撤过深/缺失")
             rows.append({"代码":s.code,"名称":s["name"],"最新价":s.price,"涨跌幅%":s.pct_chg,
-              "当日成交额":s.amount,"20日平均成交额":z.amount_ma20,
-              "5日收益%":z.ret5*100 if pd.notna(z.ret5) else np.nan,
-              "20日收益%":z.ret20*100 if pd.notna(z.ret20) else np.nan,
-              "CLV":z.clv,"20日高点回撤%":z.pullback*100 if pd.notna(z.pullback) else np.nan,
+              "当日成交额":s.amount,"20日平均成交额":m4.amount_ma20,
+              "5日收益%":m4.return_5*100 if pd.notna(m4.return_5) else np.nan,
+              "20日收益%":m4.return_20*100 if pd.notna(m4.return_20) else np.nan,
+              "CLV":m4.CLV,"20日高点回撤%":m4.Pullback*100 if pd.notna(m4.Pullback) else np.nan,
+              "M4突破20日高点%":m4.breakout20*100 if pd.notna(m4.breakout20) else np.nan,
+              "M4量比5日/20日":m4.volume_ma5_to_ma20,
+              "M4距20日高点交易日":m4.pullback_duration,
+              "M4高量滞涨":bool(m4.high_volume_stall) if pd.notna(m4.high_volume_stall) else None,
+              "M4缩量回撤":bool(m4.low_volume_pullback) if pd.notna(m4.low_volume_pullback) else None,
+              "M4数据口径":"原始日线+本次抓取时间戳；仅当前观察，不具备历史PIT资格",
               "流动性观察通过":bool(liq),"技术观察通过":bool(trend and structure and pullback),
               "未通过项":"；".join(flags) if flags else "基础观察条件通过",
               "公司行为口径":"未接入点时公司行为账本；原始价格观察值，不可作为正式收益因子"})
@@ -104,14 +119,22 @@ def push(report):
 def main():
     now=datetime.now(timezone.utc).astimezone(); u=universe(); w,e=scan(u)
     w=w.sort_values(["技术观察通过","流动性观察通过","当日成交额"],ascending=[False,False,False])
+    # M5 is executed in diagnostic mode only: no guessed market state, ranks or gates.
+    m5_input = pd.DataFrame([{"symbol": str(code), "market_state": None} for code in w["代码"]])
+    m5 = evaluate_candidates(m5_input, stage="close") if not m5_input.empty else pd.DataFrame(
+        columns=["symbol","strategy","stage","score","eligible","candidate_band","minimum_score","reasons"])
+    m5.to_csv(OUT/"m5_diagnostics.csv",index=False,encoding="utf-8-sig")
     w.to_csv(OUT/"watchlist.csv",index=False,encoding="utf-8-sig")
     e.to_csv(OUT/"data_errors.csv",index=False,encoding="utf-8-sig")
     c=w[w["技术观察通过"]&w["流动性观察通过"]]
     lines=["# FHM-100 自动研究扫描报告",f"- 运行时间：{now.isoformat()}",
       f"- 快照股票池：{len(u)}",f"- 历史数据成功：{len(w)}",f"- 数据异常：{len(e)}",
-      f"- 基础技术观察名单：{len(c)}","",
+      f"- 基础技术观察名单：{len(c)}",
+      f"- M4价格/流动性观察因子已计算：{len(w)}",
+      f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）","",
       "## 模型状态（重要）",
       "**本次不是正式FHM-100信号。** 行业相对强度、市场/行业滚动Beta残差、完整涨跌停事件、经样本外校准的M6收益预测、M8组合风险及M9回测尚未完成。",
+      "M4价格结构和流动性观察已进入扫描输出；M5已逐股运行缺失输入诊断。历史行业/残差分位、市场状态及策略硬门槛尚未全部接入，M5当前按缺失项拒绝，不填充假值。详见m5_diagnostics.csv。",
       "不输出A/B/C正式评分、P_up、预期收益或买入指令；观察名单不等于达到80分门槛。AI仅作文字点评，不参与评分、不放宽硬门槛。",
       "价格口径：本扫描仅用未复权原始日线；尚无点时公司行为账本，分红送转附近的跨日收益/均线可能失真，相关观察值不得进入正式模型评分或回测标签。",
       "## 技术观察名单（非买入信号）",
