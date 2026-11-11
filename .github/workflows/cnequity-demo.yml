@@ -40,6 +40,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install cnequity
+      - name: Prepare resumable delisted-discovery checkpoint
+        run: mkdir -p "$RUNNER_TEMP/cnequity-demo-lake/meta/state"
+      - name: Restore delisted-discovery checkpoint
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cnequity-demo-lake/meta/state/delisted_catalog.json
+          key: cnequity-delisted-catalog-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            cnequity-delisted-catalog-${{ github.event.pull_request.head.ref || github.ref_name }}-
       - name: Record CNEquity version and initialize isolated real-data demo
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
@@ -126,6 +135,11 @@ jobs:
               json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
           print(json.dumps({k:v for k,v in report.items() if k != "log_tail"}, ensure_ascii=False, indent=2))
           PY
+      - name: Extend trading calendar over recovered delisted history
+        run: |
+          set -euo pipefail
+          cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/trading-calendar-plan.log
+          cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/trading-calendar-backfill.log
       - name: Derive and validate adjustment factors
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
