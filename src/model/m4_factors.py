@@ -114,9 +114,12 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
     return x
 
 
-def _pit_frame(frame: pd.DataFrame, decision_time, name: str) -> pd.DataFrame:
-    if "available_time" not in frame.columns:
-        raise ValueError(f"{name} requires available_time")
+def _pit_frame(frame: pd.DataFrame, decision_time, name: str,
+               identity_cols: tuple[str, ...] = ()) -> pd.DataFrame:
+    required = {"available_time", "trade_date", *identity_cols}
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(f"{name} missing required columns: " + ",".join(sorted(missing)))
     out = frame.copy()
     available = pd.to_datetime(out["available_time"], errors="coerce")
     if available.isna().any() or available.dt.tz is None:
@@ -125,7 +128,21 @@ def _pit_frame(frame: pd.DataFrame, decision_time, name: str) -> pd.DataFrame:
     cutoff = pd.Timestamp(decision_time)
     if cutoff.tzinfo is None:
         raise ValueError("decision_time must be timezone-aware")
-    return out.loc[out["available_time"] <= cutoff.tz_convert("UTC")].copy()
+    # First discard rows not yet known. Then validate the dates and identifiers
+    # of every row that could actually enter this decision snapshot.
+    out = out.loc[out["available_time"] <= cutoff.tz_convert("UTC")].copy()
+    out["trade_date"] = pd.to_datetime(out["trade_date"], errors="coerce")
+    if out["trade_date"].isna().any():
+        raise ValueError(f"{name} contains invalid trade_date")
+    decision_date = cutoff.tz_convert("Asia/Shanghai").date()
+    if (out["trade_date"].dt.date > decision_date).any():
+        raise ValueError(f"{name} contains future trade_date relative to decision_time")
+    for column in identity_cols:
+        values = out[column]
+        if values.isna().any() or values.astype(str).str.strip().eq("").any():
+            raise ValueError(f"{name} contains invalid {column}")
+        out[column] = values.astype(str).str.strip()
+    return out
 
 
 def industry_relative_strength(stock_industry_returns: pd.DataFrame,
@@ -139,7 +156,7 @@ def industry_relative_strength(stock_industry_returns: pd.DataFrame,
         raise ValueError("market returns missing required columns")
     if decision_time is None:
         raise ValueError("decision_time is required for PIT industry strength")
-    ind = _pit_frame(stock_industry_returns, decision_time, "industry returns")
+    ind = _pit_frame(stock_industry_returns, decision_time, "industry returns", ("industry_code",))
     market = _pit_frame(market_returns, decision_time, "market returns")
     if ind.duplicated(["trade_date", "industry_code"]).any():
         raise ValueError("duplicate point-in-time industry rows")
@@ -169,9 +186,9 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
             raise ValueError("benchmark return frame missing required columns")
     if decision_time is None:
         raise ValueError("decision_time is required for PIT residual strength")
-    stocks = _pit_frame(stock_returns, decision_time, "stock returns")
+    stocks = _pit_frame(stock_returns, decision_time, "stock returns", ("symbol", "industry_code"))
     markets = _pit_frame(market_returns, decision_time, "market returns")
-    industries = _pit_frame(industry_returns, decision_time, "industry returns")
+    industries = _pit_frame(industry_returns, decision_time, "industry returns", ("industry_code",))
     if stocks.duplicated(["symbol", "trade_date"]).any():
         raise ValueError("duplicate point-in-time stock rows")
     if markets.duplicated(["trade_date"]).any():
