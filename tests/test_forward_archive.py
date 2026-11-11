@@ -3,7 +3,7 @@ import json
 import pandas as pd
 import pytest
 
-from src.collectors.forward_archive import append_jsonl_atomic, collect
+from src.collectors.forward_archive import append_jsonl_atomic, collect, _call_with_network_retry
 
 
 class FakeArchiveAkshare:
@@ -129,3 +129,50 @@ def test_collector_dry_run_validates_without_writing(tmp_path):
 def test_collector_refuses_naive_capture_time(tmp_path):
     with pytest.raises(ValueError, match="timezone-aware"):
         collect(FakeArchiveAkshare(), tmp_path, captured_at="2026-11-11T08:30:00")
+
+
+
+def test_forward_archive_retries_transient_provider_timeout(tmp_path):
+    provider = FakeArchiveAkshare()
+    original = provider.index_zh_a_hist
+    calls = {"count": 0}
+
+    def flaky_index(**kwargs):
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise __import__("requests").exceptions.ReadTimeout("temporary TLS timeout")
+        return original(**kwargs)
+
+    provider.index_zh_a_hist = flaky_index
+    counts = collect(
+        provider, tmp_path, captured_at="2026-11-11T16:30:00+08:00",
+        retry_sleep=lambda _: None,
+    )
+    assert calls["count"] == 7  # two failures plus success, then four remaining indexes
+    assert counts["index_000001"] == 1
+
+
+def test_forward_archive_does_not_retry_schema_or_data_errors():
+    calls = {"count": 0}
+
+    def invalid_provider():
+        calls["count"] += 1
+        raise ValueError("provider schema changed")
+
+    with pytest.raises(ValueError, match="schema changed"):
+        _call_with_network_retry(invalid_provider, sleep_fn=lambda _: None)
+    assert calls["count"] == 1
+
+
+def test_forward_archive_retries_only_up_to_configured_attempts():
+    calls = {"count": 0}
+
+    def unavailable_provider():
+        calls["count"] += 1
+        raise __import__("requests").exceptions.ReadTimeout("still unavailable")
+
+    with pytest.raises(__import__("requests").exceptions.ReadTimeout):
+        _call_with_network_retry(
+            unavailable_provider, attempts=3, sleep_fn=lambda _: None
+        )
+    assert calls["count"] == 3
