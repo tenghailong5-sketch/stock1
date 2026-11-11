@@ -44,6 +44,49 @@ jobs:
           python -c "from importlib.metadata import version; print('cnequity', version('cnequity'))" | tee validation/cnequity-demo/cne-version.txt
           cne init --profile demo --symbols "$DEMO_SYMBOLS" --days "$DEMO_DAYS" --data-root "$RUNNER_TEMP/cnequity-demo-lake" --config-out "$RUNNER_TEMP/cnequity-demo.toml" 2>&1 | tee validation/cnequity-demo/init.log
           echo "CNE_CONFIG=$RUNNER_TEMP/cnequity-demo.toml" >> "$GITHUB_ENV"
+      - name: Backfill bounded corporate-action history
+        env:
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SH,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
+        run: |
+          cne backfill corporate_actions --start 2023-01-01 --end 2026-11-10 --symbols "$DEMO_SYMBOLS" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-plan.log
+          cne backfill corporate_actions --start 2023-01-01 --end 2026-11-10 --symbols "$DEMO_SYMBOLS" 2>&1 | tee validation/cnequity-demo/corporate-actions-backfill.log
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import pandas as pd
+          from cnequity.query import load
+
+          symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
+          actions = load("corporate_actions", symbols=symbols, start="2023-01-01", end="2026-11-10")
+          if hasattr(actions, "to_pandas"):
+              actions = actions.to_pandas()
+          required = {"symbol", "ex_date", "action_type", "source"}
+          missing = sorted(required - set(actions.columns))
+          if missing:
+              raise RuntimeError(f"Corporate-action schema missing fields: {missing}")
+          if actions.empty:
+              raise RuntimeError("No corporate-action rows returned for the bounded sample")
+          if actions.duplicated(["symbol", "ex_date", "action_type"]).any():
+              raise RuntimeError("Duplicate corporate-action primary keys")
+          if actions[list(required)].isna().any().any():
+              raise RuntimeError("Corporate-action identity/source fields contain nulls")
+          report = {
+              "requested_symbols": sorted(symbols),
+              "row_count": int(len(actions)),
+              "symbols_with_events": sorted(actions["symbol"].astype(str).unique().tolist()),
+              "symbols_with_events_count": int(actions["symbol"].nunique()),
+              "event_types": sorted(actions["action_type"].astype(str).unique().tolist()),
+              "sources": sorted(actions["source"].astype(str).unique().tolist()),
+              "ex_date_min": str(pd.to_datetime(actions["ex_date"]).min().date()),
+              "ex_date_max": str(pd.to_datetime(actions["ex_date"]).max().date()),
+              "historical_pit_eligible": False,
+              "note": "Backfilled event history; fetched_at is not proof of historical public availability."
+          }
+          Path("validation/cnequity-demo/corporate-actions-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
       - name: Derive and validate adjustment factors
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
