@@ -98,7 +98,9 @@ def assemble_m3_history(
     merged["amount"] = np.nan
     merged["limit_up_cnt"] = np.nan
     merged["limit_down_cnt"] = np.nan
-    merged["snapshot_available_time"] = pd.NaT
+    merged["snapshot_available_time"] = pd.Series(
+        pd.NaT, index=merged.index, dtype="datetime64[ns, UTC]"
+    )
     reasons = []
     for i, row in merged.iterrows():
         day = row.trade_date
