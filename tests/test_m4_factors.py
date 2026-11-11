@@ -121,3 +121,32 @@ def test_price_structure_requires_cutoff_and_rejects_duplicate_or_invalid_bars()
     bad.loc[0, "high"] = 1.0
     with pytest.raises(ValueError, match="inconsistent OHLC"):
         price_structure(bad, decision_time="2026-11-10T09:00:00Z")
+
+
+
+@pytest.mark.parametrize("column,value,error", [
+    ("volume", -1.0, "negative volume or amount"),
+    ("amount", -1.0, "negative volume or amount"),
+    ("amount", np.nan, "invalid OHLCV/amount"),
+    ("volume", np.inf, "non-finite OHLCV/amount"),
+])
+def test_price_structure_rejects_invalid_volume_and_amount(column, value, error):
+    x = bars()
+    x.loc[24, column] = value
+    with pytest.raises(ValueError, match=error):
+        price_structure(x, decision_time="2026-11-10T09:00:00Z")
+
+
+def test_price_structure_rejects_future_trade_date_even_if_timestamp_claims_available():
+    x = bars()
+    x.loc[24, "trade_date"] = pd.Timestamp("2026-11-11")
+    x.loc[24, "available_time"] = pd.Timestamp("2026-11-10T08:00:00Z")
+    with pytest.raises(ValueError, match="future trade_date"):
+        price_structure(x, decision_time="2026-11-10T09:00:00Z")
+
+
+def test_price_structure_rejects_blank_symbol():
+    x = bars()
+    x.loc[0, "symbol"] = "  "
+    with pytest.raises(ValueError, match="invalid symbol"):
+        price_structure(x, decision_time="2026-11-10T09:00:00Z")
