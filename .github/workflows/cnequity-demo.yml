@@ -41,11 +41,11 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install cnequity
       - name: Prepare resumable delisted-discovery checkpoint
-        run: mkdir -p "$RUNNER_TEMP/cnequity-demo-lake/meta/state"
+        run: mkdir -p "$RUNNER_TEMP/cnequity-delisted-lake/meta/state"
       - name: Restore delisted-discovery checkpoint
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/cnequity-demo-lake/meta/state/delisted_catalog.json
+          path: ${{ runner.temp }}/cnequity-delisted-lake/meta/state/delisted_catalog.json
           key: cnequity-delisted-catalog-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ github.sha }}
           restore-keys: |
             cnequity-delisted-catalog-${{ github.event.pull_request.head.ref || github.ref_name }}-
@@ -58,6 +58,12 @@ jobs:
           python -c "from importlib.metadata import version; print('cnequity', version('cnequity'))" | tee validation/cnequity-demo/cne-version.txt
           cne init --profile demo --symbols "$DEMO_SYMBOLS" --days "$DEMO_DAYS" --data-root "$RUNNER_TEMP/cnequity-demo-lake" --config-out "$RUNNER_TEMP/cnequity-demo.toml" 2>&1 | tee validation/cnequity-demo/init.log
           echo "CNE_CONFIG=$RUNNER_TEMP/cnequity-demo.toml" >> "$GITHUB_ENV"
+      - name: Initialize isolated delisted-history lake
+        env:
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
+        run: |
+          cne init --profile demo --symbols "$DEMO_SYMBOLS" --days 1 --data-root "$RUNNER_TEMP/cnequity-delisted-lake" --config-out "$RUNNER_TEMP/cnequity-delisted.toml" 2>&1 | tee validation/cnequity-demo/delisted-lake-init.log
+          echo "DELISTED_CONFIG=$RUNNER_TEMP/cnequity-delisted.toml" >> "$GITHUB_ENV"
       - name: Backfill bounded corporate-action history
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
@@ -104,14 +110,14 @@ jobs:
       - name: Discover confirmed delisted securities (resumable bounded sweep)
         run: |
           set -euo pipefail
-          python cnequity-source/scripts/delisted_ops.py --config "$CNE_CONFIG" discover --limit 500 2>&1 | tee validation/cnequity-demo/delisted-discovery.log
-          cne delisted status --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-before-backfill.log
+          python cnequity-source/scripts/delisted_ops.py --config "$DELISTED_CONFIG" discover --limit 500 2>&1 | tee validation/cnequity-demo/delisted-discovery.log
+          cne delisted status --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-before-backfill.log
       - name: Plan and backfill confirmed delisted-security daily bars
         run: |
           set -euo pipefail
-          cne backfill daily_bars --profile delisted --start 2016-01-01 --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/delisted-bars-plan.log
-          cne backfill daily_bars --profile delisted --start 2016-01-01 --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-bars-backfill.log
-          cne delisted status --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-after-backfill.log
+          cne backfill daily_bars --profile delisted --start 2016-01-01 --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/delisted-bars-plan.log
+          cne backfill daily_bars --profile delisted --start 2016-01-01 --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-bars-backfill.log
+          cne delisted status --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-after-backfill.log
           python - <<'PY'
           import json
           import re
@@ -138,8 +144,8 @@ jobs:
       - name: Extend trading calendar over recovered delisted history
         run: |
           set -euo pipefail
-          cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/trading-calendar-plan.log
-          cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/trading-calendar-backfill.log
+          cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/trading-calendar-plan.log
+          cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/trading-calendar-backfill.log
       - name: Derive and validate adjustment factors
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
