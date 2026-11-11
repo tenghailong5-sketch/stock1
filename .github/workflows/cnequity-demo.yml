@@ -97,6 +97,9 @@ jobs:
           else
             BAR_END="$(TZ=Asia/Shanghai date +%F)"
           fi
+          # Reuse the same Shanghai-local cutoff in downstream history/calendar
+          # evidence rather than leaving a stale hard-coded date in the workflow.
+          echo "BAR_END=$BAR_END" >> "$GITHUB_ENV"
           BAR_START="$(TZ=Asia/Shanghai date -d '180 days ago' +%F)"
           echo "Bounded daily-bar validation window: ${BAR_START}..${BAR_END} (Asia/Shanghai ${LOCAL_HHMM})"
           cne backfill daily_bars --start "$BAR_START" --end "$BAR_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/daily-bars-plan.log
@@ -253,7 +256,7 @@ jobs:
           report = {
               "profile": "delisted",
               "start": "2016-01-01",
-              "end": "2026-11-10",
+              "end": os.environ["BAR_END"],
               "rows_written_reported": rows[-1].replace(",", "") if rows else None,
               "symbol_count_reported": symbols[-1].replace(",", "") if symbols else None,
               "log_tail": log[-6000:],
@@ -267,7 +270,7 @@ jobs:
       - name: Extend trading calendar over recovered delisted history
         run: |
           set -euo pipefail
-          cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/trading-calendar-plan.log
+          cne backfill trading_calendar --start 2016-01-01 --end "$BAR_END" --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/trading-calendar-plan.log
           cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/trading-calendar-backfill.log
       - name: Derive and validate adjustment factors
         env:
