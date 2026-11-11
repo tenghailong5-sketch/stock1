@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import requests
 from src.model.m4_factors import price_structure
+from src.model.m4_observation import rank_price_observations
 from src.model.pipeline import evaluate_candidates
 from src.model.m3_assembler import assemble_m3_history
 
@@ -90,7 +91,11 @@ def scan(u):
             if not trend: flags.append("5日及20日趋势未同时确认")
             if not structure: flags.append("CLV收盘结构未确认")
             if not pullback: flags.append("回撤过深/缺失")
-            rows.append({"代码":s.code,"名称":s["name"],"最新价":s.price,"涨跌幅%":s.pct_chg,
+            rows.append({"symbol":s.code,"trade_date":m4.trade_date.strftime("%Y-%m-%d"),
+              "BodyStrength":m4.BodyStrength,"return_5":m4.return_5,"return_10":m4.return_10,
+              "return_20":m4.return_20,"breakout20":m4.breakout20,
+              "upper_shadow_ratio":m4.upper_shadow_ratio,
+              "代码":s.code,"名称":s["name"],"最新价":s.price,"涨跌幅%":s.pct_chg,
               "当日成交额":s.amount,"20日平均成交额":m4.amount_ma20,
               "5日收益%":m4.return_5*100 if pd.notna(m4.return_5) else np.nan,
               "20日收益%":m4.return_20*100 if pd.notna(m4.return_20) else np.nan,
@@ -183,10 +188,17 @@ def main():
     try:
         u=universe()
         w,e=scan(u)
+        if not w.empty:
+            w, observation_audit = rank_price_observations(
+                w, expected_universe_size=len(u), scope_id="top_350_turnover_snapshot"
+            )
+        else:
+            observation_audit = pd.DataFrame()
     except Exception as exc:
         # Provider outages/rate limits must produce an auditable report, not a false clean scan.
         u=pd.DataFrame()
         w,e=empty_scan_result(exc)
+        observation_audit = pd.DataFrame()
     w=w.sort_values(["技术观察通过","流动性观察通过","当日成交额"],ascending=[False,False,False])
     # M5 remains diagnostic-only: M3 state is supplied only when independently READY; factors and hard gates are still incomplete.
     m5_input = pd.DataFrame([{"symbol": str(code), "market_state": m3["market_state"]} for code in w["代码"]])
@@ -196,18 +208,20 @@ def main():
     (OUT/"m3_market_context.json").write_text(json.dumps(m3, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     w.to_csv(OUT/"watchlist.csv",index=False,encoding="utf-8-sig")
     e.to_csv(OUT/"data_errors.csv",index=False,encoding="utf-8-sig")
+    observation_audit.to_csv(OUT/"m4_observation_audit.csv",index=False,encoding="utf-8-sig")
     c=w[w["技术观察通过"]&w["流动性观察通过"]]
     lines=["# FHM-100 自动研究扫描报告",f"- 运行时间：{now.isoformat()}",
       f"- 快照股票池：{len(u)}",f"- 历史数据成功：{len(w)}",f"- 数据异常：{len(e)}",
       f"- 行情采集状态：{'正常' if len(u) else '失败/不可用；本次不产生候选'}",
       f"- 基础技术观察名单：{len(c)}",
       f"- M4价格/流动性观察因子已计算：{len(w)}",
+      f"- M4观察分位审计记录：{len(observation_audit)}条",
       f"- M3市场状态：{m3['status']}；状态={m3['market_state'] or '未确认'}；有效会话={m3['valid_sessions']}；最新日期={m3['latest_trade_date'] or '无'}",
       f"- M3仓位系数：{m3['position_scale'] if m3['position_scale'] is not None else '不可用'}；原因={m3['reason'] or '无'}",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）","",
       "## 模型状态（重要）",
       "**本次不是正式FHM-100信号。** 行业相对强度、市场/行业滚动Beta残差、完整涨跌停事件、经样本外校准的M6收益预测、M8组合风险及M9回测尚未完成。",
-      "M4价格结构和流动性观察已进入扫描输出；M3现已从前瞻归档读取市场状态，只有状态READY才传入M5，否则保持缺失并拒绝正式评分。M4尚未映射为M5加权因子，行业/残差分位及策略硬门槛也未全部接入，因此M5仍是诊断而非正式评分。详见m3_market_context.json和m5_diagnostics.csv。",
+      "M4已新增CLV、BodyStrength、5/10/20日收益、20日突破和上影线的横截面观察分位，并输出m4_observation_audit.csv。分位仅在同一交易日、声明的当前高成交额股票池完整覆盖且因子覆盖率达到95%时生成；不完整则全部留空。它们不是价格结构/成交质量复合分，也未接入M5。M3仅在前瞻归档状态READY时传入M5；行业/残差分位及策略硬门槛仍未全部接入，因此M5仍是诊断而非正式评分。",
       "不输出A/B/C正式评分、P_up、预期收益或买入指令；观察名单不等于达到80分门槛。AI仅作文字点评，不参与评分、不放宽硬门槛。",
       "价格口径：本扫描仅用未复权原始日线；尚无点时公司行为账本，分红送转附近的跨日收益/均线可能失真，相关观察值不得进入正式模型评分或回测标签。",
       "## 技术观察名单（非买入信号）",
