@@ -32,7 +32,7 @@ permissions:
 
 concurrency:
   group: cnequity-demo-validation-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   demo:
