@@ -299,6 +299,79 @@ jobs:
               json.dumps({"raw_rows": int(len(bars)), "strict_hfq_rows": int(len(adjusted)),
                           "strict_hfq_close_finite": True}, ensure_ascii=False, indent=2), encoding="utf-8")
           PY
+      - name: Derive and validate adjustment factors for recovered delisted history
+        run: |
+          set -euo pipefail
+          cne derive adj_factors --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-adj-factors.log
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import numpy as np
+          from cnequity.config import load_config
+          from cnequity.query import load
+
+          config = load_config(os.environ["DELISTED_CONFIG"])
+          bars = load("daily_bars", adjust=None, config=config)
+          factors = load("adj_factors", config=config)
+          if hasattr(bars, "to_pandas"):
+              bars = bars.to_pandas()
+          if hasattr(factors, "to_pandas"):
+              factors = factors.to_pandas()
+          if bars is None or bars.empty:
+              raise RuntimeError("No daily bars in isolated delisted-history lake")
+          if factors is None or factors.empty:
+              raise RuntimeError("No adjustment factors in isolated delisted-history lake")
+          required = {"symbol", "trade_date", "adjust_type", "factor", "source"}
+          missing = sorted(required - set(factors.columns))
+          if missing:
+              raise RuntimeError(f"Delisted adjustment-factor schema missing fields: {missing}")
+          if factors.duplicated(["symbol", "trade_date", "adjust_type"]).any():
+              raise RuntimeError("Duplicate delisted adjustment-factor primary keys")
+          values = factors["factor"].to_numpy(dtype=float)
+          if not np.isfinite(values).all() or (values <= 0).any():
+              raise RuntimeError("Delisted adjustment factors contain non-finite or non-positive values")
+          hfq = factors[factors["adjust_type"].astype(str).str.lower() == "hfq"]
+          if hfq.empty:
+              raise RuntimeError("No hfq adjustment factors for recovered delisted history")
+          keys = bars[["symbol", "trade_date"]].drop_duplicates()
+          matched = keys.merge(hfq[["symbol", "trade_date"]], on=["symbol", "trade_date"], how="left", indicator=True)
+          coverage = []
+          for symbol in sorted(keys["symbol"].astype(str).unique()):
+              subset = matched[matched["symbol"].astype(str) == symbol]
+              total = int(len(subset))
+              count = int((subset["_merge"] == "both").sum())
+              coverage.append({
+                  "symbol": symbol,
+                  "matched_sessions": count,
+                  "bar_sessions": total,
+                  "coverage": round(count / total, 4) if total else 0.0,
+              })
+          report = {
+              "bar_rows": int(len(bars)),
+              "factor_rows": int(len(factors)),
+              "hfq_factor_rows": int(len(hfq)),
+              "factor_sources": sorted(factors["source"].astype(str).unique().tolist()),
+              "factor_coverage": coverage,
+              "all_factors_finite_positive": True,
+              "primary_keys_unique": True,
+              "historical_pit_eligible": False,
+              "note": "Recovered historical bars and derived factors are not historical point-in-time certified.",
+          }
+          Path("validation/cnequity-demo/delisted-adj-factor-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          low = [x["symbol"] for x in coverage if x["coverage"] < 0.8]
+          if low:
+              raise RuntimeError(f"Insufficient delisted hfq factor coverage (<80%): {low[:50]}")
+          adjusted = load("daily_bars", adjust="hfq", strict_adj=True, config=config)
+          if hasattr(adjusted, "to_pandas"):
+              adjusted = adjusted.to_pandas()
+          if len(adjusted) != len(bars):
+              raise RuntimeError(f"Delisted strict hfq row count mismatch: raw={len(bars)}, adjusted={len(adjusted)}")
+          if adjusted["close"].isna().any() or not np.isfinite(adjusted["close"].to_numpy(dtype=float)).all():
+              raise RuntimeError("Delisted strict hfq adjusted close contains missing/non-finite values")
+          PY
       - name: Capture full CNEquity quality and coverage audit
         if: success()
         run: |
