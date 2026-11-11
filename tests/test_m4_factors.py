@@ -179,3 +179,44 @@ def test_industry_relative_strength_rejects_blank_historical_industry_code():
     })
     with pytest.raises(ValueError, match="invalid industry_code"):
         industry_relative_strength(industry, market, "2026-01-02T09:00:00Z")
+
+
+def test_residual_strength_matches_r21_formula_without_subtracting_regression_intercept():
+    dates = pd.bdate_range("2026-01-01", periods=45)
+    market_daily = np.linspace(-0.002, 0.002, len(dates))
+    industry_daily = np.sin(np.arange(len(dates)) * 0.7) * 0.001
+    alpha, beta_market, beta_industry = 0.0003, 1.7, 0.8
+    stock_daily = alpha + beta_market * market_daily + beta_industry * industry_daily
+    available = pd.Timestamp("2026-03-10T10:00:00Z")
+    stocks = pd.DataFrame({
+        "symbol": ["000001"] * len(dates),
+        "industry_code": ["I1"] * len(dates),
+        "trade_date": dates,
+        "daily_return": stock_daily,
+        "return_5": [0.02] * len(dates),
+        "available_time": [available] * len(dates),
+    })
+    market = pd.DataFrame({
+        "trade_date": dates,
+        "market_return": market_daily,
+        "market_return_5": [0.01] * len(dates),
+        "available_time": [available] * len(dates),
+    })
+    industry = pd.DataFrame({
+        "trade_date": dates,
+        "industry_code": ["I1"] * len(dates),
+        "industry_return": industry_daily,
+        "industry_return_5": [0.002] * len(dates),
+        "available_time": [available] * len(dates),
+    })
+    out = residual_strength(
+        stocks, market, industry, window=60, min_periods=40,
+        decision_time="2026-03-10T11:00:00Z",
+    )
+    # R2.1 defines residual return using only the two benchmark betas.
+    # The fitted intercept is a regression nuisance term, not a third
+    # benchmark component to subtract from the target 5-session return.
+    assert out["residual_return_5"].iloc[-1] == pytest.approx(
+        0.02 - beta_market * 0.01 - beta_industry * 0.002,
+        abs=1e-8,
+    )

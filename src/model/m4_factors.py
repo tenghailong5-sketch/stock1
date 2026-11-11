@@ -210,7 +210,7 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
                 continue
             design = np.column_stack([np.ones(len(hist)), hist.market_return, hist.industry_return])
             beta = np.linalg.lstsq(design, hist.daily_return.to_numpy(), rcond=None)[0]
-            residual.append(float(row.return_5 - beta[0]*5 - beta[1]*row.market_return_5 - beta[2]*row.industry_return_5))
+            residual.append(float(row.return_5 - beta[1]*row.market_return_5 - beta[2]*row.industry_return_5))
         g["residual_return_5"] = residual
         output.append(g)
     return pd.concat(output, ignore_index=True) if output else x.assign(residual_return_5=np.nan)
