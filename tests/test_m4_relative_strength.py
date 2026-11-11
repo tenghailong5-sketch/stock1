@@ -57,7 +57,7 @@ def test_industry_ranks_fail_closed_when_declared_peer_universe_is_incomplete():
         industries, market, decision_time=DECISION, expected_industry_count=3
     )
     assert ranked.filter(regex="_pct$").isna().all().all()
-    assert set(audit["status"]) == {"no_eligible_rows"}
+    assert set(audit["status"]) == {"universe_size_mismatch"}
 
 
 def test_residual_strength_uses_prior_daily_returns_and_audits_stock_pool():
@@ -122,4 +122,4 @@ def test_future_available_industry_rows_are_excluded_from_decision():
         industries, market, decision_time=DECISION, expected_industry_count=1
     )
     assert ranked["industry_excess_5_pct"].isna().all()
-    assert set(audit["status"]) == {"universe_size_mismatch"}
+    assert set(audit["status"]) == {"no_eligible_rows"}
