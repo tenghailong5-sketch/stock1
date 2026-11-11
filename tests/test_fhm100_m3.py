@@ -58,3 +58,14 @@ def test_m3_missing_archive_and_assembly_errors_fail_closed(monkeypatch, tmp_pat
     assert failed["status"] == "INVALID_DATA"
     assert failed["market_state"] is None
     assert "corrupt archive" in failed["reason"]
+
+
+def test_universe_provider_failure_creates_explicit_empty_scan():
+    error = RuntimeError("Push2RateLimitError: temporary provider rate limit")
+    watchlist, errors = fhm100.empty_scan_result(error)
+
+    assert watchlist.empty
+    assert "技术观察通过" in watchlist.columns
+    assert len(errors) == 1
+    assert errors.iloc[0]["代码"] == "UNIVERSE"
+    assert "temporary provider rate limit" in errors.iloc[0]["原因"]
