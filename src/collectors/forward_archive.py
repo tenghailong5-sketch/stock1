@@ -9,6 +9,9 @@ import argparse
 import json
 import os
 import tempfile
+import time
+
+import requests
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -22,6 +25,38 @@ from src.providers.akshare_pit import (
     normalize_index_history_snapshot,
     normalize_market_breadth_snapshot,
 )
+
+def _call_with_network_retry(call, *args, attempts: int = 3, sleep_fn=time.sleep, **kwargs):
+    """Retry transient transport failures only; never mask schema/data errors."""
+    if attempts < 1:
+        raise ValueError("attempts must be at least 1")
+    for attempt in range(attempts):
+        try:
+            return call(*args, **kwargs)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+            if attempt + 1 >= attempts:
+                raise
+            sleep_fn(2 ** attempt)
+
+
+class _RetryingProvider:
+    """Transparent AKShare proxy that retries transient HTTP transport failures."""
+    def __init__(self, provider, *, attempts: int = 3, sleep_fn=time.sleep):
+        self._provider = provider
+        self._attempts = attempts
+        self._sleep_fn = sleep_fn
+
+    def __getattr__(self, name):
+        attribute = getattr(self._provider, name)
+        if not callable(attribute):
+            return attribute
+        def invoke(*args, **kwargs):
+            return _call_with_network_retry(
+                attribute, *args, attempts=self._attempts,
+                sleep_fn=self._sleep_fn, **kwargs
+            )
+        return invoke
+
 
 INDEXES = {
     "000001": "SSE Composite",
@@ -90,7 +125,8 @@ def _records(frame: pd.DataFrame) -> list[dict]:
     return json.loads(payload)
 
 
-def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True) -> dict[str, int]:
+def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep) -> dict[str, int]:
+    ak_module = _RetryingProvider(ak_module, sleep_fn=retry_sleep)
     captured = pd.Timestamp(
         captured_at if captured_at is not None else datetime.now(ZoneInfo("Asia/Shanghai"))
     )
