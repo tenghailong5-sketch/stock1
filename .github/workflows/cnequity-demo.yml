@@ -67,10 +67,46 @@ jobs:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
           DEMO_DAYS: ${{ inputs.days || '90' }}
         run: |
+          set -euo pipefail
           mkdir -p validation/cnequity-demo
           python -c "from importlib.metadata import version; print('cnequity', version('cnequity'))" | tee validation/cnequity-demo/cne-version.txt
-          cne init --profile demo --symbols "$DEMO_SYMBOLS" --days "$DEMO_DAYS" --data-root "$RUNNER_TEMP/cnequity-demo-lake" --config-out "$RUNNER_TEMP/cnequity-demo.toml" 2>&1 | tee validation/cnequity-demo/init.log
+          # The provider occasionally returns an empty Shenzhen instrument response.
+          # Retry the isolated demo bootstrap, and fail the job if it never succeeds.
+          initialized=0
+          for attempt in 1 2 3; do
+            if cne init --profile demo --symbols "$DEMO_SYMBOLS" --days "$DEMO_DAYS" --data-root "$RUNNER_TEMP/cnequity-demo-lake" --config-out "$RUNNER_TEMP/cnequity-demo.toml" 2>&1 | tee "validation/cnequity-demo/init-attempt-$attempt.log"; then
+              initialized=1
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+          test "$initialized" -eq 1
+          cp "validation/cnequity-demo/init-attempt-$attempt.log" validation/cnequity-demo/init.log
           echo "CNE_CONFIG=$RUNNER_TEMP/cnequity-demo.toml" >> "$GITHUB_ENV"
+      - name: Ensure bounded demo daily bars exist before downstream derivations
+        env:
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SH,688012.SH' }}
+        run: |
+          set -euo pipefail
+          BAR_END="$(TZ=Asia/Shanghai date +%F)"
+          BAR_START="$(TZ=Asia/Shanghai date -d '180 days ago' +%F)"
+          cne backfill daily_bars --start "$BAR_START" --end "$BAR_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/daily-bars-plan.log
+          cne backfill daily_bars --start "$BAR_START" --end "$BAR_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/daily-bars-backfill.log
+          python - <<'PY'
+          import os
+          from cnequity.query import load
+
+          symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
+          bars = load("daily_bars", symbols=symbols, adjust=None)
+          if hasattr(bars, "to_pandas"):
+              bars = bars.to_pandas()
+          if bars is None or bars.empty:
+              raise RuntimeError("daily_bars prerequisite is still empty after explicit backfill")
+          missing = sorted(set(symbols) - set(bars["symbol"].astype(str).unique()))
+          if missing:
+              raise RuntimeError(f"daily_bars prerequisite missing requested symbols: {missing}")
+          print(f"Verified daily_bars prerequisite: {len(bars)} rows across {bars['symbol'].nunique()} symbols")
+          PY
       - name: Initialize isolated delisted-history lake
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
