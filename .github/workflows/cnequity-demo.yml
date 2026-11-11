@@ -97,8 +97,8 @@ jobs:
           from pathlib import Path
 
           log = Path("validation/cnequity-demo/delisted-bars-backfill.log").read_text(encoding="utf-8")
-          rows = re.findall(r"(?:Written|rows_written):?\\s*([0-9,]+)", log, flags=re.IGNORECASE)
-          symbols = re.findall(r"(?:Affected symbols|symbols):?\\s*([0-9,]+)", log, flags=re.IGNORECASE)
+          rows = re.findall(r"(?:Written|rows_written):?\s*([0-9,]+)", log, flags=re.IGNORECASE)
+          symbols = re.findall(r"(?:Affected symbols|symbols):?\s*([0-9,]+)", log, flags=re.IGNORECASE)
           report = {
               "profile": "delisted",
               "start": "2016-01-01",
