@@ -24,9 +24,14 @@ concurrency:
 jobs:
   demo:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: rootSunc/CNEquity
+          ref: 90ed0a5ad0df455af8d1e2610a79b642956a2f69
+          path: cnequity-source
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -87,16 +92,23 @@ jobs:
               json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
           print(json.dumps(report, ensure_ascii=False, indent=2))
           PY
+      - name: Discover confirmed delisted securities (resumable bounded sweep)
+        run: |
+          set -euo pipefail
+          python cnequity-source/scripts/delisted_ops.py --config "$CNE_CONFIG" discover --limit 500 2>&1 | tee validation/cnequity-demo/delisted-discovery.log
+          cne delisted status --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-before-backfill.log
       - name: Plan and backfill confirmed delisted-security daily bars
         run: |
           set -euo pipefail
           cne backfill daily_bars --profile delisted --start 2016-01-01 --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/delisted-bars-plan.log
           cne backfill daily_bars --profile delisted --start 2016-01-01 --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-bars-backfill.log
+          cne delisted status --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-after-backfill.log
           python - <<'PY'
           import json
           import re
           from pathlib import Path
 
+          discovery = Path("validation/cnequity-demo/delisted-discovery.log").read_text(encoding="utf-8")
           log = Path("validation/cnequity-demo/delisted-bars-backfill.log").read_text(encoding="utf-8")
           rows = re.findall(r"(?:Written|rows_written):?\s*([0-9,]+)", log, flags=re.IGNORECASE)
           symbols = re.findall(r"(?:Affected symbols|symbols):?\s*([0-9,]+)", log, flags=re.IGNORECASE)
