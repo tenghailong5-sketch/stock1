@@ -126,8 +126,14 @@ jobs:
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
         run: |
-          cne backfill corporate_actions --start 2023-01-01 --end 2026-11-10 --symbols "$DEMO_SYMBOLS" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-plan.log
-          cne backfill corporate_actions --start 2023-01-01 --end 2026-11-10 --symbols "$DEMO_SYMBOLS" 2>&1 | tee validation/cnequity-demo/corporate-actions-backfill.log
+          set -euo pipefail
+          # Keep corporate-action backfill and its readback inside the isolated
+          # delisted-history lake created above, not the runner's default lake.
+          export CNE_CONFIG="$DELISTED_CONFIG"
+          ACTION_END="$(TZ=Asia/Shanghai date -d 'yesterday' +%F)"
+          export ACTION_END
+          cne backfill corporate_actions --start 2023-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-plan.log
+          cne backfill corporate_actions --start 2023-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/corporate-actions-backfill.log
           python - <<'PY'
           import json
           import os
@@ -136,7 +142,7 @@ jobs:
           from cnequity.query import load
 
           symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
-          actions = load("corporate_actions", symbols=symbols, start="2023-01-01", end="2026-11-10")
+          actions = load("corporate_actions", symbols=symbols, start="2023-01-01", end=os.environ["ACTION_END"])
           if hasattr(actions, "to_pandas"):
               actions = actions.to_pandas()
           required = {"symbol", "ex_date", "action_type", "source"}
