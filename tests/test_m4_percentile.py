@@ -1,3 +1,5 @@
+import hashlib
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,13 +15,15 @@ def pool(values, date="2026-11-10"):
     })
 
 
-def test_audited_rank_records_scope_and_complete_coverage():
+def test_audited_rank_records_scope_membership_and_complete_coverage():
     frame = pool([1.0, 2.0, 2.0, 4.0])
     ranks, audit = audited_percentile_rank(frame, "raw", scope_id="top_350_turnover_universe", expected_universe_size=4)
     assert ranks.tolist() == [25.0, 62.5, 62.5, 100.0]
     assert audit.iloc[0].scope_id == "top_350_turnover_universe"
     assert audit.iloc[0].status == "ranked"
     assert audit.iloc[0].factor_coverage == 1.0
+    expected = hashlib.sha256("000000\n000001\n000002\n000003".encode()).hexdigest()
+    assert audit.iloc[0].symbol_membership_sha256 == expected
 
 
 def test_incomplete_universe_fails_closed():
@@ -54,5 +58,6 @@ def test_scope_and_coverage_arguments_are_mandatory_and_validated():
     frame = pool([1.0])
     with pytest.raises(ValueError, match="scope_id"):
         audited_percentile_rank(frame, "raw", scope_id=" ", expected_universe_size=1)
-    with pytest.raises(ValueError, match="min_coverage"):
-        audited_percentile_rank(frame, "raw", scope_id="pool", expected_universe_size=1, min_coverage=0)
+    for bad in (0, float("nan"), float("inf"), "not-a-number"):
+        with pytest.raises(ValueError, match="min_coverage"):
+            audited_percentile_rank(frame, "raw", scope_id="pool", expected_universe_size=1, min_coverage=bad)
