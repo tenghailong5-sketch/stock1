@@ -14,7 +14,7 @@ def write_jsonl(path, rows):
 
 
 def make_archive(root, *, omit_breadth_day=None):
-    dates = pd.bdate_range("2026-07-01", periods=140)
+    dates = pd.bdate_range("2026-01-05", periods=140)
     index_rows = []
     for i, day in enumerate(dates):
         day_text = day.strftime("%Y-%m-%d")
@@ -62,7 +62,7 @@ def test_m3_assembler_builds_state_only_after_60_complete_sessions(tmp_path):
 
 
 def test_m3_assembler_fails_closed_when_one_recent_daily_snapshot_is_missing(tmp_path):
-    dates = pd.bdate_range("2026-07-01", periods=140)
+    dates = pd.bdate_range("2026-01-05", periods=140)
     missing_day = dates[-10].strftime("%Y-%m-%d")
     make_archive(tmp_path, omit_breadth_day=missing_day)
     result = assemble_m3_history(
@@ -76,7 +76,7 @@ def test_m3_assembler_fails_closed_when_one_recent_daily_snapshot_is_missing(tmp
 def test_m3_assembler_rejects_decision_before_archive_capture(tmp_path):
     make_archive(tmp_path)
     result = assemble_m3_history(
-        tmp_path, index_symbol="000001", decision_time="2026-07-01T08:00:00Z"
+        tmp_path, index_symbol="000001", decision_time="2026-01-05T08:00:00Z"
     )
     assert result["status"] == "INSUFFICIENT_DATA"
 
