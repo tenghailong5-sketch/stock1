@@ -150,3 +150,32 @@ def test_price_structure_rejects_blank_symbol():
     x.loc[0, "symbol"] = "  "
     with pytest.raises(ValueError, match="invalid symbol"):
         price_structure(x, decision_time="2026-11-10T09:00:00Z")
+
+
+
+def test_industry_relative_strength_rejects_future_trade_date_with_forged_available_time():
+    available = pd.Timestamp("2026-01-02T08:00:00Z")
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-03"], "industry_code": ["I1"],
+        "return_5": [.1], "return_20": [.2], "available_time": [available],
+    })
+    market = pd.DataFrame({
+        "trade_date": ["2026-01-02"], "market_return_5": [.01],
+        "market_return_20": [.02], "available_time": [available],
+    })
+    with pytest.raises(ValueError, match="future trade_date"):
+        industry_relative_strength(industry, market, "2026-01-02T09:00:00Z")
+
+
+def test_industry_relative_strength_rejects_blank_historical_industry_code():
+    available = pd.Timestamp("2026-01-02T08:00:00Z")
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-02"], "industry_code": ["  "],
+        "return_5": [.1], "return_20": [.2], "available_time": [available],
+    })
+    market = pd.DataFrame({
+        "trade_date": ["2026-01-02"], "market_return_5": [.01],
+        "market_return_20": [.02], "available_time": [available],
+    })
+    with pytest.raises(ValueError, match="invalid industry_code"):
+        industry_relative_strength(industry, market, "2026-01-02T09:00:00Z")
