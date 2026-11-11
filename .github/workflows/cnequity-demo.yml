@@ -18,8 +18,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: cnequity-demo-validation
-  cancel-in-progress: false
+  group: cnequity-demo-validation-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   demo:
