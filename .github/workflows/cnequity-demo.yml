@@ -8,11 +8,11 @@ on:
       symbols:
         description: "Comma-separated A-share symbols (keep this to a small sample)"
         required: true
-        default: "600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH"
+        default: "600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH"
       days:
         description: "Approximate recent trading days"
         required: true
-        default: "60"
+        default: "90"
 
 permissions:
   contents: read
@@ -37,8 +37,8 @@ jobs:
           python -m pip install cnequity
       - name: Record CNEquity version and initialize isolated real-data demo
         env:
-          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH' }}
-          DEMO_DAYS: ${{ inputs.days || '60' }}
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
+          DEMO_DAYS: ${{ inputs.days || '90' }}
         run: |
           mkdir -p validation/cnequity-demo
           python -c "from importlib.metadata import version; print('cnequity', version('cnequity'))" | tee validation/cnequity-demo/cne-version.txt
@@ -46,7 +46,7 @@ jobs:
           echo "CNE_CONFIG=$RUNNER_TEMP/cnequity-demo.toml" >> "$GITHUB_ENV"
       - name: Derive and validate adjustment factors
         env:
-          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH' }}
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
         run: |
           cne derive adj_factors --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/adj-factors.log
           python - <<'PY'
@@ -129,8 +129,8 @@ jobs:
           exit 0
       - name: Validate loaded daily bars and produce bounded evidence report
         env:
-          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH' }}
-          DEMO_DAYS: ${{ inputs.days || '60' }}
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
+          DEMO_DAYS: ${{ inputs.days || '90' }}
         run: |
           python - <<'PY'
           import json
