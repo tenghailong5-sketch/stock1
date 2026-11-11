@@ -186,6 +186,11 @@ jobs:
               delisted_sample = delisted_sample.to_pandas()
           if delisted_sample.empty:
               raise RuntimeError("No corporate-action rows for the delisted lake's bootstrapped demo symbols")
+          missing = sorted(required - set(delisted_sample.columns))
+          if missing:
+              raise RuntimeError(f"Delisted sample corporate-action schema missing fields: {missing}")
+          if delisted_sample[list(required)].isna().any().any():
+              raise RuntimeError("Delisted sample corporate-action identity/source fields contain nulls")
           if delisted_sample.duplicated(["symbol", "ex_date", "action_type"]).any():
               raise RuntimeError("Duplicate corporate-action keys in the delisted lake's demo sample")
           Path("validation/cnequity-demo/corporate-actions-delisted-sample-validation.json").write_text(
