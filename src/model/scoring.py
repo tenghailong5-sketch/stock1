@@ -155,3 +155,23 @@ def score_factor_bundle(frame, factor_map, *, date_col="trade_date"):
         out[output_name] = rank_factor_by_date(out, raw_col, date_col=date_col,
                                                higher_is_better=bool(higher_is_better))
     return out
+
+
+def qualify_candidate(result: StrategyResult, *, minimum_score: float = 80.0) -> StrategyResult:
+    """Apply the mandatory FHM candidate floor after all strategy hard gates.
+
+    The configured floor may be raised but never lowered below 80. A high score
+    cannot override failed/missing hard gates, and a missing score never qualifies.
+    """
+    if not _finite_number(minimum_score) or not 80.0 <= float(minimum_score) <= 100.0:
+        raise ValueError("minimum_score must be finite and within [80,100]")
+    if not result.eligible or result.score is None:
+        return result
+    if not _finite_number(result.score) or not 0.0 <= float(result.score) <= 100.0:
+        return StrategyResult(result.strategy, None, False,
+                              result.reasons + ("invalid_score",), result.stage)
+    if float(result.score) < float(minimum_score):
+        return StrategyResult(result.strategy, result.score, False,
+                              result.reasons + (f"below_minimum_score:{minimum_score:g}",),
+                              result.stage)
+    return result

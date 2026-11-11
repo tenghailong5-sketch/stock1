@@ -60,7 +60,8 @@ def validate_daily_bars(frame: pd.DataFrame, decision_time) -> tuple[pd.DataFram
     return x, DataQuality(True, "ok", len(x))
 
 
-def build_total_return_index(prices: pd.DataFrame, actions: pd.DataFrame) -> pd.DataFrame:
+def build_total_return_index(prices: pd.DataFrame, actions: pd.DataFrame, *,
+                             complete_symbols: Iterable[str] = ()) -> pd.DataFrame:
     """Build a total-return index only where every corporate action is verified.
 
     Expected action columns: symbol, ex_date, action_type, cash_per_share,
@@ -72,11 +73,34 @@ def build_total_return_index(prices: pd.DataFrame, actions: pd.DataFrame) -> pd.
                        "share_factor", "verified_status"}
     if action_required - set(actions.columns):
         raise ValueError("corporate action ledger schema incomplete")
+    # An empty action response is not proof that no corporate actions occurred.
+    # Callers must explicitly attest that the ledger is complete for each symbol.
+    complete = {str(s) for s in complete_symbols}
     out = []
     for symbol, g in prices.groupby("symbol", sort=False):
         g = g.sort_values("trade_date").copy()
         a = actions[actions.symbol == symbol].copy()
+        if str(symbol) not in complete:
+            g["total_return_index"] = np.nan
+            g["corporate_action_status"] = "MISSING_ACTION_COVERAGE"
+            out.append(g)
+            continue
         if not a.empty:
+            a["ex_date"] = pd.to_datetime(a["ex_date"], errors="coerce")
+            if a["ex_date"].isna().any() or a["ex_date"].duplicated().any():
+                g["total_return_index"] = np.nan
+                g["corporate_action_status"] = "INVALID_ACTION_LEDGER"
+                out.append(g)
+                continue
+            a["cash_per_share"] = pd.to_numeric(a["cash_per_share"], errors="coerce")
+            a["share_factor"] = pd.to_numeric(a["share_factor"], errors="coerce")
+            values = a[["cash_per_share", "share_factor"]].to_numpy(dtype=float)
+            if (not np.isfinite(values).all() or (a["cash_per_share"] < 0).any()
+                    or (a["share_factor"] <= 0).any()):
+                g["total_return_index"] = np.nan
+                g["corporate_action_status"] = "INVALID_ACTION_LEDGER"
+                out.append(g)
+                continue
             if not (a.verified_status == "VERIFIED").all():
                 g["total_return_index"] = np.nan
                 g["corporate_action_status"] = "UNVERIFIED"
@@ -87,7 +111,6 @@ def build_total_return_index(prices: pd.DataFrame, actions: pd.DataFrame) -> pd.
                 g["corporate_action_status"] = "UNSUPPORTED_ACTION"
                 out.append(g)
                 continue
-        a["ex_date"] = pd.to_datetime(a.ex_date)
         action_map = {pd.Timestamp(r.ex_date).normalize(): r
                       for r in a.itertuples(index=False)}
         idx = [100.0]

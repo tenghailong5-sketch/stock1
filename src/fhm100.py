@@ -94,6 +94,11 @@ def push(report):
     r=requests.post("https://www.pushplus.plus/send",json={"token":token,
       "title":"FHM-100研究扫描报告","content":report[:18000],"template":"markdown"},timeout=30)
     r.raise_for_status(); d=r.json()
+    if str(d.get("code")) != "200":
+        raise RuntimeError(
+            "PushPlus rejected the message: "
+            f"code={d.get('code')} msg={str(d.get('msg', ''))[:200]}"
+        )
     return f"PushPlus: {d.get('msg')} (code={d.get('code')})"
 
 def main():
@@ -114,10 +119,17 @@ def main():
       "## 数据异常",e.head(30).to_markdown(index=False) if len(e) else "无记录"]
     report="\n".join(lines)+"\n\n## AI辅助风险点评\n"+ai_review("\n".join(lines))
     (OUT/"report.md").write_text(report,encoding="utf-8")
-    status=push(report)
+    push_error = None
+    try:
+        status = push(report)
+    except Exception as exc:
+        status = "PushPlus推送失败：" + str(exc)[:300]
+        push_error = exc
     (OUT/"run_status.json").write_text(json.dumps({"time":now.isoformat(),"universe":len(u),
       "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status},ensure_ascii=False,indent=2),encoding="utf-8")
     print(report); print(status)
+    if push_error is not None:
+        raise RuntimeError(status) from push_error
 
 if __name__=="__main__":
     try: main()

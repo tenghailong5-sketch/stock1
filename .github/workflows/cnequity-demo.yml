@@ -1,0 +1,304 @@
+name: CNEquity Bounded Demo Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Comma-separated A-share symbols (keep this to a small sample)"
+        required: true
+        default: "600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH"
+      days:
+        description: "Approximate recent trading days"
+        required: true
+        default: "90"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cnequity-demo-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: rootSunc/CNEquity
+          ref: 90ed0a5ad0df455af8d1e2610a79b642956a2f69
+          path: cnequity-source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install FHM and CNEquity dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install cnequity
+      - name: Prepare resumable delisted-discovery checkpoint
+        run: mkdir -p "$RUNNER_TEMP/cnequity-delisted-lake/meta/state"
+      - name: Restore delisted-discovery checkpoint
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cnequity-delisted-lake/meta/state/delisted_catalog.json
+          key: cnequity-delisted-catalog-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            cnequity-delisted-catalog-${{ github.event.pull_request.head.ref || github.ref_name }}-
+      - name: Record CNEquity version and initialize isolated real-data demo
+        env:
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
+          DEMO_DAYS: ${{ inputs.days || '90' }}
+        run: |
+          mkdir -p validation/cnequity-demo
+          python -c "from importlib.metadata import version; print('cnequity', version('cnequity'))" | tee validation/cnequity-demo/cne-version.txt
+          cne init --profile demo --symbols "$DEMO_SYMBOLS" --days "$DEMO_DAYS" --data-root "$RUNNER_TEMP/cnequity-demo-lake" --config-out "$RUNNER_TEMP/cnequity-demo.toml" 2>&1 | tee validation/cnequity-demo/init.log
+          echo "CNE_CONFIG=$RUNNER_TEMP/cnequity-demo.toml" >> "$GITHUB_ENV"
+      - name: Initialize isolated delisted-history lake
+        env:
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
+        run: |
+          cne init --profile demo --symbols "$DEMO_SYMBOLS" --days 1 --data-root "$RUNNER_TEMP/cnequity-delisted-lake" --config-out "$RUNNER_TEMP/cnequity-delisted.toml" 2>&1 | tee validation/cnequity-demo/delisted-lake-init.log
+          echo "DELISTED_CONFIG=$RUNNER_TEMP/cnequity-delisted.toml" >> "$GITHUB_ENV"
+      - name: Backfill bounded corporate-action history
+        env:
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
+        run: |
+          cne backfill corporate_actions --start 2023-01-01 --end 2026-11-10 --symbols "$DEMO_SYMBOLS" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-plan.log
+          cne backfill corporate_actions --start 2023-01-01 --end 2026-11-10 --symbols "$DEMO_SYMBOLS" 2>&1 | tee validation/cnequity-demo/corporate-actions-backfill.log
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import pandas as pd
+          from cnequity.query import load
+
+          symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
+          actions = load("corporate_actions", symbols=symbols, start="2023-01-01", end="2026-11-10")
+          if hasattr(actions, "to_pandas"):
+              actions = actions.to_pandas()
+          required = {"symbol", "ex_date", "action_type", "source"}
+          missing = sorted(required - set(actions.columns))
+          if missing:
+              raise RuntimeError(f"Corporate-action schema missing fields: {missing}")
+          if actions.empty:
+              raise RuntimeError("No corporate-action rows returned for the bounded sample")
+          if actions.duplicated(["symbol", "ex_date", "action_type"]).any():
+              raise RuntimeError("Duplicate corporate-action primary keys")
+          if actions[list(required)].isna().any().any():
+              raise RuntimeError("Corporate-action identity/source fields contain nulls")
+          report = {
+              "requested_symbols": sorted(symbols),
+              "row_count": int(len(actions)),
+              "symbols_with_events": sorted(actions["symbol"].astype(str).unique().tolist()),
+              "symbols_with_events_count": int(actions["symbol"].nunique()),
+              "event_types": sorted(actions["action_type"].astype(str).unique().tolist()),
+              "sources": sorted(actions["source"].astype(str).unique().tolist()),
+              "ex_date_min": str(pd.to_datetime(actions["ex_date"]).min().date()),
+              "ex_date_max": str(pd.to_datetime(actions["ex_date"]).max().date()),
+              "historical_pit_eligible": False,
+              "note": "Backfilled event history; fetched_at is not proof of historical public availability."
+          }
+          Path("validation/cnequity-demo/corporate-actions-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
+      - name: Discover confirmed delisted securities (resumable bounded sweep)
+        run: |
+          set -euo pipefail
+          python cnequity-source/scripts/delisted_ops.py --config "$DELISTED_CONFIG" discover --limit 500 2>&1 | tee validation/cnequity-demo/delisted-discovery.log
+          cne delisted status --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-before-backfill.log
+      - name: Plan and backfill confirmed delisted-security daily bars
+        run: |
+          set -euo pipefail
+          cne backfill daily_bars --profile delisted --start 2016-01-01 --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/delisted-bars-plan.log
+          cne backfill daily_bars --profile delisted --start 2016-01-01 --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-bars-backfill.log
+          cne delisted status --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-after-backfill.log
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          discovery = Path("validation/cnequity-demo/delisted-discovery.log").read_text(encoding="utf-8")
+          log = Path("validation/cnequity-demo/delisted-bars-backfill.log").read_text(encoding="utf-8")
+          rows = re.findall(r"(?:Written|rows_written):?\s*([0-9,]+)", log, flags=re.IGNORECASE)
+          symbols = re.findall(r"(?:Affected symbols|symbols):?\s*([0-9,]+)", log, flags=re.IGNORECASE)
+          report = {
+              "profile": "delisted",
+              "start": "2016-01-01",
+              "end": "2026-11-10",
+              "rows_written_reported": rows[-1].replace(",", "") if rows else None,
+              "symbol_count_reported": symbols[-1].replace(",", "") if symbols else None,
+              "log_tail": log[-6000:],
+              "historical_pit_eligible": False,
+              "note": "Historical delisted-security bars are not point-in-time certified merely by backfilling them."
+          }
+          Path("validation/cnequity-demo/delisted-bars-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps({k:v for k,v in report.items() if k != "log_tail"}, ensure_ascii=False, indent=2))
+          PY
+      - name: Extend trading calendar over recovered delisted history
+        run: |
+          set -euo pipefail
+          cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/trading-calendar-plan.log
+          cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/trading-calendar-backfill.log
+      - name: Derive and validate adjustment factors
+        env:
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
+        run: |
+          cne derive adj_factors --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/adj-factors.log
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import numpy as np
+          from cnequity.query import load
+
+          symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
+          bars = load("daily_bars", symbols=symbols, adjust=None)
+          factors = load("adj_factors", symbols=symbols)
+          # CNEquity returns Polars frames; normalize to pandas for the
+          # join/coverage report below, while keeping the source query unchanged.
+          if hasattr(bars, "to_pandas"):
+              bars = bars.to_pandas()
+          if factors is not None and hasattr(factors, "to_pandas"):
+              factors = factors.to_pandas()
+          if factors is None or len(factors) == 0:
+              raise RuntimeError("No adjustment factors returned for the demo symbols")
+          required = {"symbol", "trade_date", "adjust_type", "factor", "source"}
+          missing = sorted(required - set(factors.columns))
+          if missing:
+              raise RuntimeError(f"Adjustment-factor schema missing fields: {missing}")
+          if factors.duplicated(["symbol", "trade_date", "adjust_type"]).any():
+              raise RuntimeError("Duplicate adjustment-factor primary keys")
+          values = factors["factor"].to_numpy(dtype=float)
+          if not np.isfinite(values).all() or (values <= 0).any():
+              raise RuntimeError("Adjustment factors contain non-finite or non-positive values")
+          hfq = factors[factors["adjust_type"].astype(str).str.lower() == "hfq"].copy()
+          if hfq.empty:
+              raise RuntimeError("No hfq adjustment factors returned")
+          keys = bars[["symbol", "trade_date"]].drop_duplicates()
+          matched = keys.merge(hfq[["symbol", "trade_date"]], on=["symbol", "trade_date"], how="left", indicator=True)
+          coverage = []
+          for symbol in symbols:
+              subset = matched[matched["symbol"] == symbol]
+              count = int((subset["_merge"] == "both").sum())
+              total = int(len(subset))
+              coverage.append({"symbol": symbol, "matched_sessions": count, "bar_sessions": total,
+                               "coverage": round(count / total, 4) if total else 0.0})
+          report = {
+              "requested_symbols": sorted(symbols),
+              "factor_rows": int(len(factors)),
+              "hfq_factor_rows": int(len(hfq)),
+              "factor_sources": sorted(factors["source"].astype(str).unique().tolist()),
+              "factor_date_min": str(factors["trade_date"].min()),
+              "factor_date_max": str(factors["trade_date"].max()),
+              "factor_coverage": coverage,
+              "all_factors_finite_positive": True,
+              "primary_keys_unique": True,
+              "historical_pit_eligible": False,
+          }
+          Path("validation/cnequity-demo/adj-factor-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          low = [x["symbol"] for x in coverage if x["coverage"] < 0.8]
+          if low:
+              raise RuntimeError(f"Insufficient hfq factor coverage (<80%): {low}")
+          adjusted = load("daily_bars", symbols=symbols, adjust="hfq", strict_adj=True)
+          if hasattr(adjusted, "to_pandas"):
+              adjusted = adjusted.to_pandas()
+          if len(adjusted) != len(bars):
+              raise RuntimeError(f"Strict hfq row count mismatch: raw={len(bars)}, adjusted={len(adjusted)}")
+          if adjusted["close"].isna().any() or not np.isfinite(adjusted["close"].to_numpy(dtype=float)).all():
+              raise RuntimeError("Strict hfq adjusted close contains missing/non-finite values")
+          Path("validation/cnequity-demo/strict-adjustment-check.json").write_text(
+              json.dumps({"raw_rows": int(len(bars)), "strict_hfq_rows": int(len(adjusted)),
+                          "strict_hfq_close_finite": True}, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
+      - name: Capture full CNEquity quality and coverage audit
+        if: success()
+        run: |
+          set -o pipefail
+          # This is a bounded sample-validation workflow, not the lake's scheduled
+          # production freshness gate. Enforce the full data-quality audit here;
+          # record freshness/coverage separately so an intentionally unscheduled
+          # demo profile does not masquerade as a failed sample ingestion.
+          cne audit --full --quality-only 2>&1 | tee validation/cnequity-demo/check.log
+          cne status --datasets 2>&1 | tee validation/cnequity-demo/status.log
+          printf '{"full_quality_audit": true, "quality_audit_enforced": true, "freshness_gate": "reported_separately"}\\n' > validation/cnequity-demo/audit-exit-codes.json
+      - name: Validate loaded daily bars and produce bounded evidence report
+        env:
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
+          DEMO_DAYS: ${{ inputs.days || '90' }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import pandas as pd
+          from cnequity.query import load
+          from src.providers.cnequity import normalize_daily_bars
+
+          symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
+          target_sessions = int(os.environ["DEMO_DAYS"])
+          raw = load("daily_bars", symbols=symbols, adjust=None)
+          bars = normalize_daily_bars(raw)
+          actual_symbols = sorted(bars["symbol"].unique().tolist())
+          missing_symbols = sorted(set(symbols) - set(actual_symbols))
+          if missing_symbols:
+              raise RuntimeError(f"CNEquity returned no daily bars for requested symbols: {missing_symbols}")
+          per_symbol = []
+          for symbol, group in bars.groupby("symbol", sort=True):
+              dates = sorted(group["trade_date"].dt.strftime("%Y-%m-%d").unique().tolist())
+              per_symbol.append({
+                  "symbol": symbol,
+                  "row_count": int(len(group)),
+                  "first_trade_date": dates[0],
+                  "last_trade_date": dates[-1],
+                  "distinct_trade_dates": len(dates),
+                  "integer_volume_rows": int((group["volume"] % 1 == 0).sum()),
+              })
+          report = {
+              "requested_symbols": sorted(symbols),
+              "target_sessions": target_sessions,
+              "minimum_rows_per_symbol": max(1, int(target_sessions * 0.8)),
+              "symbols": actual_symbols,
+              "missing_symbols": missing_symbols,
+              "row_count": int(len(bars)),
+              "per_symbol": per_symbol,
+              "distinct_trade_dates": int(bars["trade_date"].nunique()),
+              "trade_date_min": str(bars["trade_date"].min().date()),
+              "trade_date_max": str(bars["trade_date"].max().date()),
+              "volume_unit": "shares (CNEquity daily_bars v2 contract)",
+              "non_integer_volume_rows": int((bars["volume"] % 1 != 0).sum()),
+              "data_versions": sorted(bars["data_version"].astype(str).unique().tolist()),
+              "sources": sorted(bars["source"].astype(str).unique().tolist()),
+              "fetched_at_min": str(bars["fetched_at"].min()),
+              "fetched_at_max": str(bars["fetched_at"].max()),
+              "historical_pit_eligible": False,
+              "pit_exclusion_reason": "retrieval_time_is_not_historical_availability",
+          }
+          Path("validation/cnequity-demo/data-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          minimum_rows = max(1, int(target_sessions * 0.8))
+          short_symbols = [row["symbol"] for row in per_symbol if row["row_count"] < minimum_rows]
+          if short_symbols:
+              raise RuntimeError(
+                  f"Insufficient daily-bar coverage: fewer than {minimum_rows} rows "
+                  f"for requested {target_sessions} sessions: {short_symbols}"
+              )
+          PY
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cnequity-demo-evidence
+          path: validation/cnequity-demo/
+          if-no-files-found: warn
+          retention-days: 14
