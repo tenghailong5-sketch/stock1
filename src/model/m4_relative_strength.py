@@ -46,6 +46,18 @@ def _rank_one(
         symbol_col="industry_code" if "industry_code" in ranked and "symbol" not in ranked else "symbol",
     )
     ranked[output_col] = ranks
+    if audit.empty:
+        audit = pd.DataFrame([{
+            "trade_date": None,
+            "scope_id": scope_id,
+            "expected_universe_size": expected_universe_size,
+            "observed_universe_size": 0,
+            "symbol_membership_sha256": None,
+            "finite_factor_count": 0,
+            "factor_coverage": 0.0,
+            "min_coverage": min_coverage,
+            "status": "no_eligible_rows",
+        }])
     audit["factor"] = output_col
     return ranked, audit
 
