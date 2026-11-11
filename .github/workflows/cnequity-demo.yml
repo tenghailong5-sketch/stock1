@@ -44,6 +44,71 @@ jobs:
           python -c "from importlib.metadata import version; print('cnequity', version('cnequity'))" | tee validation/cnequity-demo/cne-version.txt
           cne init --profile demo --symbols "$DEMO_SYMBOLS" --days "$DEMO_DAYS" --data-root "$RUNNER_TEMP/cnequity-demo-lake" --config-out "$RUNNER_TEMP/cnequity-demo.toml" 2>&1 | tee validation/cnequity-demo/init.log
           echo "CNE_CONFIG=$RUNNER_TEMP/cnequity-demo.toml" >> "$GITHUB_ENV"
+      - name: Derive and validate adjustment factors
+        env:
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH' }}
+        run: |
+          cne derive adj_factors --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/adj-factors.log
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import numpy as np
+          from cnequity.query import load
+
+          symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
+          bars = load("daily_bars", symbols=symbols, adjust=None)
+          factors = load("adj_factors", symbols=symbols)
+          if factors is None or len(factors) == 0:
+              raise RuntimeError("No adjustment factors returned for the demo symbols")
+          required = {"symbol", "trade_date", "adjust_type", "factor", "source"}
+          missing = sorted(required - set(factors.columns))
+          if missing:
+              raise RuntimeError(f"Adjustment-factor schema missing fields: {missing}")
+          if factors.duplicated(["symbol", "trade_date", "adjust_type"]).any():
+              raise RuntimeError("Duplicate adjustment-factor primary keys")
+          values = factors["factor"].to_numpy(dtype=float)
+          if not np.isfinite(values).all() or (values <= 0).any():
+              raise RuntimeError("Adjustment factors contain non-finite or non-positive values")
+          hfq = factors[factors["adjust_type"].astype(str).str.lower() == "hfq"].copy()
+          if hfq.empty:
+              raise RuntimeError("No hfq adjustment factors returned")
+          keys = bars[["symbol", "trade_date"]].drop_duplicates()
+          matched = keys.merge(hfq[["symbol", "trade_date"]], on=["symbol", "trade_date"], how="left", indicator=True)
+          coverage = []
+          for symbol in symbols:
+              subset = matched[matched["symbol"] == symbol]
+              count = int((subset["_merge"] == "both").sum())
+              total = int(len(subset))
+              coverage.append({"symbol": symbol, "matched_sessions": count, "bar_sessions": total,
+                               "coverage": round(count / total, 4) if total else 0.0})
+          report = {
+              "requested_symbols": sorted(symbols),
+              "factor_rows": int(len(factors)),
+              "hfq_factor_rows": int(len(hfq)),
+              "factor_sources": sorted(factors["source"].astype(str).unique().tolist()),
+              "factor_date_min": str(factors["trade_date"].min()),
+              "factor_date_max": str(factors["trade_date"].max()),
+              "factor_coverage": coverage,
+              "all_factors_finite_positive": True,
+              "primary_keys_unique": True,
+              "historical_pit_eligible": False,
+          }
+          Path("validation/cnequity-demo/adj-factor-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          low = [x["symbol"] for x in coverage if x["coverage"] < 0.8]
+          if low:
+              raise RuntimeError(f"Insufficient hfq factor coverage (<80%): {low}")
+          adjusted = load("daily_bars", symbols=symbols, adjust="hfq", strict_adj=True)
+          if len(adjusted) != len(bars):
+              raise RuntimeError(f"Strict hfq row count mismatch: raw={len(bars)}, adjusted={len(adjusted)}")
+          if adjusted["close"].isna().any() or not np.isfinite(adjusted["close"].to_numpy(dtype=float)).all():
+              raise RuntimeError("Strict hfq adjusted close contains missing/non-finite values")
+          Path("validation/cnequity-demo/strict-adjustment-check.json").write_text(
+              json.dumps({"raw_rows": int(len(bars)), "strict_hfq_rows": int(len(adjusted)),
+                          "strict_hfq_close_finite": True}, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
       - name: Capture CNEquity quality and coverage audit
         if: success()
         run: |
