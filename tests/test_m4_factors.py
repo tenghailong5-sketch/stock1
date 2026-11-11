@@ -95,11 +95,11 @@ def test_rank_factor_is_scoped_to_each_trade_date():
 
 def test_industry_relative_strength_rejects_future_and_naive_availability():
     industry = pd.DataFrame({
-        "trade_date": ["d1"], "industry_code": ["I1"], "return_5": [.1],
+        "trade_date": ["2026-01-02"], "industry_code": ["I1"], "return_5": [.1],
         "return_20": [.2], "available_time": [pd.Timestamp("2026-01-02T10:00:00Z")]
     })
     market = pd.DataFrame({
-        "trade_date": ["d1"], "market_return_5": [.01], "market_return_20": [.02],
+        "trade_date": ["2026-01-02"], "market_return_5": [.01], "market_return_20": [.02],
         "available_time": [pd.Timestamp("2026-01-02T08:00:00Z")]
     })
     out = industry_relative_strength(industry, market, "2026-01-02T09:00:00Z")
