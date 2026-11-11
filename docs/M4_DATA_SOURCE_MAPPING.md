@@ -175,6 +175,7 @@ BigQuant Free 是目前发现的较有价值的历史行业成分候选，但尚
 `src/model/m4_industry_observations.py` 提供独立于历史 PIT selector 的前瞻观察 selector：
 - 只接受 `snapshot_scope=current_membership_observation_only` 且 `historical_pit_eligible=false` 的检索时快照；
 - 以批次为单位选择决策时点前最新且未超龄的完整快照，不跨批次拼接；
+- 批次携带预期行业板块数量；若实际返回板块数量不足，即使股票覆盖看似完整也 fail closed；
 - 最新可见批次覆盖不足、存在重复成员关系、时间戳无效或超龄时 fail closed，不回退到旧批次；
 - 保留一只股票同时属于多个行业的多对多关系；
 - 输出始终标记 `historical_pit_eligible=false`，不得输入历史 PIT 回测或据此推造历史 `valid_from/valid_to`。
