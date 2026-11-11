@@ -91,7 +91,10 @@ def select_latest_observed_industry_snapshot(
         raise ValueError("only current_membership_observation_only snapshots are accepted")
     if not x["availability_basis"].eq("retrieval_time_only").all():
         raise ValueError("industry observations must use retrieval_time_only availability")
-    if x["historical_pit_eligible"].isna().any() or x["historical_pit_eligible"].astype(bool).any():
+    pit_flags = x["historical_pit_eligible"].map(
+        lambda value: value is True or str(value).strip().lower() in {"true", "1", "yes"}
+    )
+    if x["historical_pit_eligible"].isna().any() or pit_flags.any():
         raise ValueError("historical PIT-eligible rows are not valid forward observations")
 
     x["available_time"] = _aware_utc_series(x["available_time"], "available_time")
