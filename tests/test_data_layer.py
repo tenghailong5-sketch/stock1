@@ -155,3 +155,13 @@ def test_total_return_rejects_actions_without_prior_price_coverage(ex_date):
     out = build_total_return_index(p, a, complete_symbols={"000001"})
     assert out.total_return_index.isna().all()
     assert set(out.corporate_action_status) == {"ACTION_DATE_OUTSIDE_PRICE_COVERAGE"}
+
+
+def test_industry_membership_rejects_naive_availability_without_pit_cutoff():
+    frame = pd.DataFrame([{
+        "symbol": "000001", "industry_code": "BK001",
+        "valid_from": "2026-01-01", "valid_to": None,
+        "available_time": "2026-01-01 08:00:00", "source_id": "x",
+    }])
+    with pytest.raises(ValueError, match="timezone-aware"):
+        assert_historical_industry_membership(frame)
