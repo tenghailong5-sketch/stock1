@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.model.m4_relative_strength import (
     rank_industry_excess,
@@ -31,7 +32,7 @@ def test_industry_excess_is_ranked_separately_for_five_and_twenty_sessions():
     )
     ranked = ranked.set_index("symbol")
     assert ranked.loc["I1", "industry_excess_5_pct"] == 100.0
-    assert ranked.loc["I3", "industry_excess_20_pct"] == 33.3333333333
+    assert ranked.loc["I3", "industry_excess_20_pct"] == pytest.approx(33.3333333333)
     assert set(audit["factor"]) == {"industry_excess_5_pct", "industry_excess_20_pct"}
     assert set(audit["status"]) == {"ranked"}
 
@@ -97,7 +98,9 @@ def test_residual_strength_uses_prior_daily_returns_and_audits_stock_pool():
     assert len(latest) == 4
     assert latest["residual_return_5"].notna().all()
     assert latest["residual_return_5_pct"].notna().all()
-    assert audit.iloc[0]["status"] == "ranked"
+    latest_audit = audit[audit["trade_date"] == dates[-1]]
+    assert len(latest_audit) == 1
+    assert latest_audit.iloc[0]["status"] == "ranked"
 
 
 def test_future_available_industry_rows_are_excluded_from_decision():
