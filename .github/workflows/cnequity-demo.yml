@@ -8,11 +8,11 @@ on:
       symbols:
         description: "Comma-separated A-share symbols (keep this to a small sample)"
         required: true
-        default: "600519.SH,000001.SZ,000858.SZ"
+        default: "600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH"
       days:
         description: "Approximate recent trading days"
         required: true
-        default: "10"
+        default: "60"
 
 permissions:
   contents: read
@@ -37,7 +37,7 @@ jobs:
           python -m pip install cnequity
       - name: Record CNEquity version and initialize isolated real-data demo
         env:
-          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ' }}
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH' }}
           DEMO_DAYS: ${{ inputs.days || '10' }}
         run: |
           mkdir -p validation/cnequity-demo
@@ -56,7 +56,7 @@ jobs:
           exit 0
       - name: Validate loaded daily bars and produce bounded evidence report
         env:
-          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ' }}
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH' }}
         run: |
           python - <<'PY'
           import json
@@ -69,12 +69,32 @@ jobs:
           symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
           raw = load("daily_bars", symbols=symbols, adjust=None)
           bars = normalize_daily_bars(raw)
+          actual_symbols = sorted(bars["symbol"].unique().tolist())
+          missing_symbols = sorted(set(symbols) - set(actual_symbols))
+          if missing_symbols:
+              raise RuntimeError(f"CNEquity returned no daily bars for requested symbols: {missing_symbols}")
+          per_symbol = []
+          for symbol, group in bars.groupby("symbol", sort=True):
+              dates = sorted(group["trade_date"].dt.strftime("%Y-%m-%d").unique().tolist())
+              per_symbol.append({
+                  "symbol": symbol,
+                  "row_count": int(len(group)),
+                  "first_trade_date": dates[0],
+                  "last_trade_date": dates[-1],
+                  "distinct_trade_dates": len(dates),
+                  "integer_volume_rows": int((group["volume"] % 1 == 0).sum()),
+              })
           report = {
+              "requested_symbols": sorted(symbols),
+              "symbols": actual_symbols,
+              "missing_symbols": missing_symbols,
               "row_count": int(len(bars)),
-              "symbols": sorted(bars["symbol"].unique().tolist()),
+              "per_symbol": per_symbol,
+              "distinct_trade_dates": int(bars["trade_date"].nunique()),
               "trade_date_min": str(bars["trade_date"].min().date()),
               "trade_date_max": str(bars["trade_date"].max().date()),
               "volume_unit": "shares (CNEquity daily_bars v2 contract)",
+              "non_integer_volume_rows": int((bars["volume"] % 1 != 0).sum()),
               "data_versions": sorted(bars["data_version"].astype(str).unique().tolist()),
               "sources": sorted(bars["source"].astype(str).unique().tolist()),
               "fetched_at_min": str(bars["fetched_at"].min()),
