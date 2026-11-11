@@ -232,6 +232,17 @@ def assert_historical_industry_membership(membership: pd.DataFrame,
         raise ValueError("industry membership valid_to precedes valid_from")
     if x.duplicated(["symbol", "industry_code", "valid_from", "available_time", "source_id"]).any():
         raise ValueError("duplicate industry membership version")
+
+    # Availability is always a timestamped fact, even when the caller only
+    # wants structural validation and has not supplied a PIT decision cutoff.
+    available = []
+    for value in x["available_time"]:
+        stamp = pd.Timestamp(value)
+        if pd.isna(stamp) or stamp.tzinfo is None:
+            raise ValueError("industry membership.available_time must be timezone-aware")
+        available.append(stamp.tz_convert("UTC"))
+    x["available_time"] = pd.Series(available, index=x.index, dtype="datetime64[ns, UTC]")
+
     if decision_time is not None:
         x = _pit_filter(x, decision_time, "industry membership")
     return x
