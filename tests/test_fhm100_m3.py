@@ -69,3 +69,27 @@ def test_universe_provider_failure_creates_explicit_empty_scan():
     assert len(errors) == 1
     assert errors.iloc[0]["代码"] == "UNIVERSE"
     assert "temporary provider rate limit" in errors.iloc[0]["原因"]
+
+
+def test_m5_blocker_summary_counts_reasons_by_strategy():
+    frame = pd.DataFrame([
+        {"strategy": "A", "reasons": ["missing_factor:x", "missing_gate:y"]},
+        {"strategy": "A", "reasons": ["missing_factor:x"]},
+        {"strategy": "C", "reasons": ["missing_factor:z"]},
+    ])
+
+    summary = fhm100.summarize_m5_blockers(frame)
+
+    counts = {
+        (row.strategy, row.blocker): row.count
+        for row in summary.itertuples(index=False)
+    }
+    assert counts[("A", "missing_factor:x")] == 2
+    assert counts[("A", "missing_gate:y")] == 1
+    assert counts[("C", "missing_factor:z")] == 1
+
+
+def test_m5_blocker_summary_handles_empty_diagnostics():
+    summary = fhm100.summarize_m5_blockers(pd.DataFrame())
+    assert summary.empty
+    assert list(summary.columns) == ["strategy", "blocker", "count"]
