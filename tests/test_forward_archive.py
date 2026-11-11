@@ -92,6 +92,8 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
     assert {row["snapshot_scope"] for row in industry_rows} == {
         "current_membership_observation_only"
     }
+    assert all(row["historical_pit_eligible"] is False for row in industry_rows)
+    assert {row["availability_basis"] for row in industry_rows} == {"retrieval_time_only"}
     assert all("valid_from" not in row and "valid_to" not in row for row in industry_rows)
 
     sentiment_file = tmp_path / "market_sentiment" / "2026-11-11.jsonl"
