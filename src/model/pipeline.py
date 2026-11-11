@@ -85,11 +85,15 @@ def evaluate_row(row: Mapping[str, Any], *, stage: str = "close") -> list[dict[s
                 for key in weights
                 if key not in row or not _finite_factor(row.get(key))
             )
-            reasons.extend(
-                f"missing_or_invalid_gate:{key}"
-                for key in _GATE_KEYS[strategy]
-                if key not in row or row.get(key) is None
-            )
+            for key in _GATE_KEYS[strategy]:
+                # The next-open gap is optional at close; if supplied, score_a
+                # validates it independently. Other absent gates are unresolved.
+                if strategy == "A" and key == "next_open_gap_pct":
+                    continue
+                if key not in row or row.get(key) is None:
+                    reasons.append(f"missing_or_invalid_gate:{key}")
+                elif row.get(key) is False:
+                    reasons.append(f"hard_gate_failed:{key}")
             if strategy == "B" and stage != "next_day":
                 reasons.append("B_requires_next_day_stage")
             result = StrategyResult(strategy, None, False, tuple(reasons), stage)
