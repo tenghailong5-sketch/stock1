@@ -94,6 +94,8 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
     }
     assert all(row["historical_pit_eligible"] is False for row in industry_rows)
     assert {row["availability_basis"] for row in industry_rows} == {"retrieval_time_only"}
+    assert len({row["snapshot_id"] for row in industry_rows}) == 1
+    assert all(row["snapshot_id"] for row in industry_rows)
     assert all("valid_from" not in row and "valid_to" not in row for row in industry_rows)
 
     sentiment_file = tmp_path / "market_sentiment" / "2026-11-11.jsonl"
@@ -178,3 +180,16 @@ def test_forward_archive_retries_only_up_to_configured_attempts():
             unavailable_provider, attempts=3, sleep_fn=lambda _: None
         )
     assert calls["count"] == 3
+
+
+
+def test_same_day_repeated_industry_captures_are_archived_as_separate_batches(tmp_path):
+    captured = "2026-11-11T16:30:00+08:00"
+    first = collect(FakeArchiveAkshare(), tmp_path, captured_at=captured)
+    second = collect(FakeArchiveAkshare(), tmp_path, captured_at=captured)
+    assert first["industry_membership"] == 4
+    assert second["industry_membership"] == 4
+    path = tmp_path / "industry_membership" / "2026-11-11.jsonl"
+    archived = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert len(archived) == 8
+    assert len({row["snapshot_id"] for row in archived}) == 2
