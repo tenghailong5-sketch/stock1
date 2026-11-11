@@ -15,9 +15,9 @@ class FakeArchiveAkshare:
 
     def stock_zh_a_spot_em(self):
         return pd.DataFrame([
-            {"代码": "000001", "最新价": 10, "涨跌幅": 2.0},
-            {"代码": "600000", "最新价": 8, "涨跌幅": -1.0},
-            {"代码": "000002", "最新价": 9, "涨跌幅": 0.0},
+            {"代码": "000001", "最新价": 10, "涨跌幅": 2.0, "成交额": 100.0},
+            {"代码": "600000", "最新价": 8, "涨跌幅": -1.0, "成交额": 200.0},
+            {"代码": "000002", "最新价": 9, "涨跌幅": 0.0, "成交额": 300.0},
         ])
 
 
@@ -106,6 +106,9 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
     assert breadth_row["advances"] == 1
     assert breadth_row["declines"] == 1
     assert breadth_row["unchanged"] == 1
+    assert breadth_row["breadth"] == pytest.approx(1 / 3)
+    assert breadth_row["total_amount"] == 600.0
+    assert breadth_row["total_amount_status"] == "complete_provider_snapshot_sum"
     assert breadth_row["snapshot_scope"] == "current_provider_snapshot_only"
     assert breadth_row["historical_pit_eligible"] is False
 
