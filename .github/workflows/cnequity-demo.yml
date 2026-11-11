@@ -135,6 +135,10 @@ jobs:
           export ACTION_END
           cne backfill corporate_actions --start 2023-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-main-plan.log
           cne backfill corporate_actions --start 2023-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/corporate-actions-main-backfill.log
+          # The delisted-history lake is also bootstrapped with a one-session
+          # demo sample; keep its action ledger aligned with those sample bars.
+          cne backfill corporate_actions --start 1990-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-delisted-sample-plan.log
+          cne backfill corporate_actions --start 1990-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/corporate-actions-delisted-sample-backfill.log
           python - <<'PY'
           import json
           import os
@@ -173,6 +177,24 @@ jobs:
           Path("validation/cnequity-demo/corporate-actions-main-validation.json").write_text(
               json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
           print(json.dumps(report, ensure_ascii=False, indent=2))
+          delisted_config = load_config(os.environ["DELISTED_CONFIG"])
+          delisted_sample = load(
+              "corporate_actions", symbols=symbols, start="1990-01-01",
+              end=os.environ["ACTION_END"], config=delisted_config,
+          )
+          if hasattr(delisted_sample, "to_pandas"):
+              delisted_sample = delisted_sample.to_pandas()
+          if delisted_sample.empty:
+              raise RuntimeError("No corporate-action rows for the delisted lake's bootstrapped demo symbols")
+          if delisted_sample.duplicated(["symbol", "ex_date", "action_type"]).any():
+              raise RuntimeError("Duplicate corporate-action keys in the delisted lake's demo sample")
+          Path("validation/cnequity-demo/corporate-actions-delisted-sample-validation.json").write_text(
+              json.dumps({
+                  "requested_symbols": sorted(symbols),
+                  "row_count": int(len(delisted_sample)),
+                  "symbols_with_events": sorted(delisted_sample["symbol"].astype(str).unique().tolist()),
+                  "historical_pit_eligible": False,
+              }, ensure_ascii=False, indent=2), encoding="utf-8")
           PY
       - name: Discover confirmed delisted securities (resumable bounded sweep)
         run: |
