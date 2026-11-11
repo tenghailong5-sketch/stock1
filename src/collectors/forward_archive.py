@@ -125,7 +125,7 @@ def _records(frame: pd.DataFrame) -> list[dict]:
     return json.loads(payload)
 
 
-def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep) -> dict[str, int]:
+def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None) -> dict[str, int]:
     ak_module = _RetryingProvider(ak_module, sleep_fn=retry_sleep)
     captured = pd.Timestamp(
         captured_at if captured_at is not None else datetime.now(ZoneInfo("Asia/Shanghai"))
@@ -148,8 +148,10 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         )
         index_records.extend(_records(normalized))
 
+    # Industry availability must be stamped when each provider response finishes,
+    # not with the collector's batch-start timestamp. Tests may inject a clock.
     industry = fetch_current_industry_membership_snapshot(
-        ak_module, clock=lambda: captured, pause_seconds=0.15
+        ak_module, clock=industry_clock, pause_seconds=0.15
     )
     industry_records = _records(industry)
     breadth = normalize_market_breadth_snapshot(
