@@ -193,3 +193,26 @@ def test_same_day_repeated_industry_captures_are_archived_as_separate_batches(tm
     archived = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert len(archived) == 8
     assert len({row["snapshot_id"] for row in archived}) == 2
+
+def test_industry_rows_record_each_response_completion_time(tmp_path):
+    captured_times = iter([
+        "2026-11-12T08:30:01Z",
+        "2026-11-12T08:30:07Z",
+    ])
+    collect(
+        FakeArchiveAkshare(),
+        tmp_path,
+        captured_at="2026-11-12T08:30:00Z",
+        industry_clock=lambda: next(captured_times),
+    )
+    path = tmp_path / "industry_membership" / "2026-11-12.jsonl"
+    archived = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    by_industry = {}
+    for row in archived:
+        by_industry.setdefault(row["industry_code"], set()).add(row["available_time"])
+    assert len(by_industry) == 2
+    assert {next(iter(values)) for values in by_industry.values()} == {
+        "2026-11-12T08:30:01.000Z",
+        "2026-11-12T08:30:07.000Z",
+    }
+    assert len({row["snapshot_id"] for row in archived}) == 1
