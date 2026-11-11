@@ -92,6 +92,18 @@ def build_total_return_index(prices: pd.DataFrame, actions: pd.DataFrame, *,
                 g["corporate_action_status"] = "INVALID_ACTION_LEDGER"
                 out.append(g)
                 continue
+            # Every action must map to an observed ex-date bar with a prior
+            # close. Silently ignoring out-of-window actions (or applying an
+            # action on the first bar without a prior close) would fabricate a
+            # seemingly verified but incorrect total-return series.
+            price_dates = set(pd.to_datetime(g["trade_date"]).dt.normalize())
+            action_dates = set(a["ex_date"].dt.normalize())
+            first_price_date = pd.Timestamp(g["trade_date"].iloc[0]).normalize()
+            if not action_dates.issubset(price_dates) or first_price_date in action_dates:
+                g["total_return_index"] = np.nan
+                g["corporate_action_status"] = "ACTION_DATE_OUTSIDE_PRICE_COVERAGE"
+                out.append(g)
+                continue
             a["cash_per_share"] = pd.to_numeric(a["cash_per_share"], errors="coerce")
             a["share_factor"] = pd.to_numeric(a["share_factor"], errors="coerce")
             values = a[["cash_per_share", "share_factor"]].to_numpy(dtype=float)
