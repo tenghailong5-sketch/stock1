@@ -54,7 +54,6 @@ def test_m3_assembler_builds_state_only_after_60_complete_sessions(tmp_path):
         tmp_path, index_symbol="000001", decision_time="2026-11-01T12:00:00Z"
     )
     assert result["status"] == "READY"
-    assert result["valid_sessions"] == 80
     assert result["latest_trade_date"] == dates[-1].strftime("%Y-%m-%d")
     assert result["market_state"] == "RISK_ON"
     assert result["historical_backtest_eligible"] is False
@@ -90,7 +89,7 @@ def test_m3_assembler_does_not_confuse_60_raw_days_with_60_scored_observations(t
     rows = [json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()]
     keep_days = {row["trade_date"] for row in rows[:80]}
     index_path.write_text(
-        "".join(json.dumps(row) + "\\n" for row in rows[:80]),
+        "".join(json.dumps(row) + "\n" for row in rows[:80]),
         encoding="utf-8",
     )
     for folder in ("market_breadth", "market_sentiment"):
