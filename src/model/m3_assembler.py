@@ -157,6 +157,20 @@ def assemble_m3_history(
             "history": complete,
             "historical_backtest_eligible": False,
         }
+    # The 60-day percentile window runs on rows that already have MA60 and
+    # volatility features. With no pre-existing index warm-up, this requires
+    # about 119 aligned sessions, not merely 60 raw daily snapshots.
+    if len(complete) < 60:
+        return {
+            "status": "INSUFFICIENT_DATA",
+            "reason": "fewer_than_60_scored_feature_observations",
+            "valid_sessions": int(len(complete)),
+            "required_sessions": 60,
+            "missing_recent_dates": [],
+            "quality_warnings": reasons[-10:],
+            "history": complete,
+            "historical_backtest_eligible": False,
+        }
 
     scored = calculate_state_scores(complete, decision_time=cutoff)
     scored = apply_state_cooldown(scored)
