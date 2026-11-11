@@ -10,7 +10,7 @@ import pandas as pd
 
 
 REQUIRED_COLUMNS = {
-    "snapshot_id", "symbol", "industry_code", "observed_at", "available_time",
+    "snapshot_id", "expected_industry_count", "symbol", "industry_code", "observed_at", "available_time",
     "source_id", "source_revision", "snapshot_scope", "availability_basis",
     "historical_pit_eligible",
 }
@@ -114,6 +114,12 @@ def select_latest_observed_industry_snapshot(
 
     if cutoff - latest_time > age_limit:
         return empty, audit("stale_snapshot", snapshot_id=snapshot_id, latest_time=latest_time)
+
+    expected_counts = pd.to_numeric(batch["expected_industry_count"], errors="coerce").dropna().unique()
+    if len(expected_counts) != 1 or expected_counts[0] <= 0:
+        return empty, audit("invalid_batch_manifest", snapshot_id=snapshot_id, latest_time=latest_time)
+    if batch["industry_code"].nunique() != int(expected_counts[0]):
+        return empty, audit("incomplete_industry_batch", snapshot_id=snapshot_id, latest_time=latest_time)
 
     if batch.duplicated(["symbol", "industry_code"]).any():
         return empty, audit("duplicate_membership", snapshot_id=snapshot_id, latest_time=latest_time)
