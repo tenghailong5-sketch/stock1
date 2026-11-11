@@ -46,7 +46,7 @@ def _rank_one(
         symbol_col="industry_code" if "industry_code" in ranked and "symbol" not in ranked else "symbol",
     )
     ranked[output_col] = ranks
-    audit.insert(1, "factor", output_col)
+    audit["factor"] = output_col
     return ranked, audit
 
 
