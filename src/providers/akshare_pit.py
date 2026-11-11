@@ -132,12 +132,14 @@ def fetch_current_industry_membership_snapshot(
     for industry in industries[["板块名称", "板块代码"]].drop_duplicates().itertuples(index=False):
         name, code = str(industry[0]), str(industry[1])
         members = ak_module.stock_board_industry_cons_em(symbol=name)
+        # Capture availability immediately when the provider call returns; the
+        # politeness delay must not shift the recorded observation timestamp.
+        captured = _utc(now())
         if pause_seconds > 0:
             sleep_fn(pause_seconds)
         required_members = {"代码"}
         if members is None or required_members - set(members.columns):
             raise ValueError(f"AKShare constituents schema changed for {code}")
-        captured = _utc(now())
         clean = members[["代码"]].copy()
         clean["symbol"] = clean["代码"].astype(str).str.zfill(6)
         clean["industry_code"] = code
