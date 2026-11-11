@@ -86,3 +86,13 @@ def test_m5_batch_keeps_rejected_rows_and_emits_three_strategy_records():
     assert len(out) == 6
     assert set(out.symbol) == {"000001", "000002"}
     assert not out.loc[out.symbol == "000002", "eligible"].any()
+
+
+def test_m5_missing_market_state_reports_all_unavailable_factor_and_gate_inputs():
+    row = {"symbol": "000003", "market_state": None}
+    result = by_strategy(evaluate_row(row, stage="close"))
+    assert all(not result[s]["eligible"] and result[s]["score"] is None for s in ("A", "B", "C"))
+    assert "missing_or_invalid_market_state" in result["A"]["reasons"]
+    assert "missing_or_invalid_factor:industry_relative_strength" in result["A"]["reasons"]
+    assert "missing_or_invalid_gate:industry_top_30pct" in result["A"]["reasons"]
+    assert "B_requires_next_day_stage" in result["B"]["reasons"]
