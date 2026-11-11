@@ -59,6 +59,12 @@ jobs:
           symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
           bars = load("daily_bars", symbols=symbols, adjust=None)
           factors = load("adj_factors", symbols=symbols)
+          # CNEquity returns Polars frames; normalize to pandas for the
+          # join/coverage report below, while keeping the source query unchanged.
+          if hasattr(bars, "to_pandas"):
+              bars = bars.to_pandas()
+          if factors is not None and hasattr(factors, "to_pandas"):
+              factors = factors.to_pandas()
           if factors is None or len(factors) == 0:
               raise RuntimeError("No adjustment factors returned for the demo symbols")
           required = {"symbol", "trade_date", "adjust_type", "factor", "source"}
@@ -101,6 +107,8 @@ jobs:
           if low:
               raise RuntimeError(f"Insufficient hfq factor coverage (<80%): {low}")
           adjusted = load("daily_bars", symbols=symbols, adjust="hfq", strict_adj=True)
+          if hasattr(adjusted, "to_pandas"):
+              adjusted = adjusted.to_pandas()
           if len(adjusted) != len(bars):
               raise RuntimeError(f"Strict hfq row count mismatch: raw={len(bars)}, adjusted={len(adjusted)}")
           if adjusted["close"].isna().any() or not np.isfinite(adjusted["close"].to_numpy(dtype=float)).all():
