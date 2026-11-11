@@ -1,6 +1,6 @@
 """FHM-100 research runner. No fabricated official scores or M6 probabilities."""
 from __future__ import annotations
-import json, os, traceback
+import json, os, traceback, time
 from datetime import datetime, timezone
 from pathlib import Path
 import akshare as ak
@@ -27,9 +27,24 @@ def universe():
     d=d[~d.name.str.contains(r"ST|退",na=False)]
     return d[(d.price>0)&(d.amount>0)].sort_values("amount",ascending=False).head(350)
 
+def _download_history(code, start, max_attempts=3):
+    """Retry only transient transport failures; never hide schema/data errors."""
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+    for attempt in range(max_attempts):
+        try:
+            return ak.stock_zh_a_hist(
+                symbol=code, period="daily", start_date=start,
+                end_date=datetime.now().strftime("%Y%m%d"), adjust=""
+            )  # raw prices only; no look-ahead-adjusted history
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+            if attempt + 1 >= max_attempts:
+                raise
+            time.sleep(2 ** attempt)
+
+
 def history(code,start):
-    h=ak.stock_zh_a_hist(symbol=code,period="daily",start_date=start,
-                         end_date=datetime.now().strftime("%Y%m%d"),adjust="")  # raw prices only; no look-ahead-adjusted history
+    h=_download_history(code,start)
     if h is None or len(h)<25: return None
     cols={"日期":"date","开盘":"open","收盘":"close","最高":"high","最低":"low","成交量":"volume","成交额":"amount"}
     if any(c not in h.columns for c in cols): return None
