@@ -168,7 +168,7 @@ def main():
     m3 = load_m3_market_context(decision_time=now)
     u=universe(); w,e=scan(u)
     w=w.sort_values(["技术观察通过","流动性观察通过","当日成交额"],ascending=[False,False,False])
-    # M5 is executed in diagnostic mode only: no guessed market state, ranks or gates.
+    # M5 remains diagnostic-only: M3 state is supplied only when independently READY; factors and hard gates are still incomplete.
     m5_input = pd.DataFrame([{"symbol": str(code), "market_state": m3["market_state"]} for code in w["代码"]])
     m5 = evaluate_candidates(m5_input, stage="close") if not m5_input.empty else pd.DataFrame(
         columns=["symbol","strategy","stage","score","eligible","candidate_band","minimum_score","reasons"])
