@@ -9,6 +9,7 @@ import pandas as pd
 import requests
 from src.model.m4_factors import price_structure
 from src.model.pipeline import evaluate_candidates
+from src.model.m3_assembler import assemble_m3_history
 
 OUT=Path("output"); OUT.mkdir(exist_ok=True)
 MIN_AMOUNT=100_000_000
@@ -131,14 +132,48 @@ def push(report):
         )
     return f"PushPlus: {d.get('msg')} (code={d.get('code')})"
 
+
+def load_m3_market_context(decision_time=None, archive_root=Path("data/forward_archive")):
+    """Load only a verified, post-close M3 state; every failure remains fail-closed."""
+    decision = decision_time or datetime.now(timezone.utc)
+    try:
+        result = assemble_m3_history(
+            archive_root, index_symbol="000001", decision_time=decision
+        )
+    except Exception as exc:
+        return {
+            "status": "INVALID_DATA",
+            "reason": f"m3_assembly_error:{type(exc).__name__}:{str(exc)[:180]}",
+            "market_state": None, "position_scale": None, "valid_sessions": 0,
+            "latest_trade_date": None, "historical_backtest_eligible": False,
+            "quality_warnings": [],
+        }
+    status = str(result.get("status", "INVALID_DATA"))
+    state = result.get("market_state") if status == "READY" else None
+    if state not in {"RISK_ON", "NEUTRAL", "RISK_OFF"}:
+        state = None
+        if status == "READY":
+            status = "INVALID_DATA"
+    return {
+        "status": status, "reason": result.get("reason"), "market_state": state,
+        "position_scale": result.get("position_scale") if state else None,
+        "valid_sessions": int(result.get("valid_sessions", 0) or 0),
+        "latest_trade_date": result.get("latest_trade_date"),
+        "historical_backtest_eligible": False,
+        "quality_warnings": result.get("quality_warnings", []),
+    }
+
 def main():
-    now=datetime.now(timezone.utc).astimezone(); u=universe(); w,e=scan(u)
+    now=datetime.now(timezone.utc).astimezone()
+    m3 = load_m3_market_context(decision_time=now)
+    u=universe(); w,e=scan(u)
     w=w.sort_values(["技术观察通过","流动性观察通过","当日成交额"],ascending=[False,False,False])
-    # M5 is executed in diagnostic mode only: no guessed market state, ranks or gates.
-    m5_input = pd.DataFrame([{"symbol": str(code), "market_state": None} for code in w["代码"]])
+    # M5 remains diagnostic-only: M3 state is supplied only when independently READY; factors and hard gates are still incomplete.
+    m5_input = pd.DataFrame([{"symbol": str(code), "market_state": m3["market_state"]} for code in w["代码"]])
     m5 = evaluate_candidates(m5_input, stage="close") if not m5_input.empty else pd.DataFrame(
         columns=["symbol","strategy","stage","score","eligible","candidate_band","minimum_score","reasons"])
     m5.to_csv(OUT/"m5_diagnostics.csv",index=False,encoding="utf-8-sig")
+    (OUT/"m3_market_context.json").write_text(json.dumps(m3, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     w.to_csv(OUT/"watchlist.csv",index=False,encoding="utf-8-sig")
     e.to_csv(OUT/"data_errors.csv",index=False,encoding="utf-8-sig")
     c=w[w["技术观察通过"]&w["流动性观察通过"]]
@@ -146,10 +181,12 @@ def main():
       f"- 快照股票池：{len(u)}",f"- 历史数据成功：{len(w)}",f"- 数据异常：{len(e)}",
       f"- 基础技术观察名单：{len(c)}",
       f"- M4价格/流动性观察因子已计算：{len(w)}",
+      f"- M3市场状态：{m3['status']}；状态={m3['market_state'] or '未确认'}；有效会话={m3['valid_sessions']}；最新日期={m3['latest_trade_date'] or '无'}",
+      f"- M3仓位系数：{m3['position_scale'] if m3['position_scale'] is not None else '不可用'}；原因={m3['reason'] or '无'}",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）","",
       "## 模型状态（重要）",
       "**本次不是正式FHM-100信号。** 行业相对强度、市场/行业滚动Beta残差、完整涨跌停事件、经样本外校准的M6收益预测、M8组合风险及M9回测尚未完成。",
-      "M4价格结构和流动性观察已进入扫描输出；M5已逐股运行缺失输入诊断。历史行业/残差分位、市场状态及策略硬门槛尚未全部接入，M5当前按缺失项拒绝，不填充假值。详见m5_diagnostics.csv。",
+      "M4价格结构和流动性观察已进入扫描输出；M3现已从前瞻归档读取市场状态，只有状态READY才传入M5，否则保持缺失并拒绝正式评分。M4尚未映射为M5加权因子，行业/残差分位及策略硬门槛也未全部接入，因此M5仍是诊断而非正式评分。详见m3_market_context.json和m5_diagnostics.csv。",
       "不输出A/B/C正式评分、P_up、预期收益或买入指令；观察名单不等于达到80分门槛。AI仅作文字点评，不参与评分、不放宽硬门槛。",
       "价格口径：本扫描仅用未复权原始日线；尚无点时公司行为账本，分红送转附近的跨日收益/均线可能失真，相关观察值不得进入正式模型评分或回测标签。",
       "## 技术观察名单（非买入信号）",
