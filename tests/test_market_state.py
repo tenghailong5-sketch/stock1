@@ -43,7 +43,9 @@ def test_state_switch_requires_two_consecutive_sessions_and_applies_next_day():
         "raw_market_state": ["RISK_ON", "RISK_ON", "RISK_OFF", "RISK_ON", "RISK_ON"],
     })
     out = apply_state_cooldown(x)
-    assert out.market_state.tolist() == ["NEUTRAL", "NEUTRAL", "RISK_ON", "RISK_ON", "RISK_ON"]
+    assert out.market_state.tolist() == [
+        "INSUFFICIENT_DATA", "INSUFFICIENT_DATA", "RISK_ON", "RISK_ON", "RISK_ON"
+    ]
 
 
 def test_market_score_missing_state_is_nan():
@@ -74,3 +76,21 @@ def test_m3_missing_trend_inputs_do_not_become_false_bearish_scores():
     out = calculate_state_scores(x, decision_time="2026-11-10T09:00:00Z")
     assert pd.isna(out.iloc[-1].S_trend)
     assert pd.isna(out.iloc[-1].StateScore)
+
+
+
+def test_state_cooldown_never_defaults_to_neutral_and_resets_after_missing_data():
+    x = pd.DataFrame({
+        "trade_date": pd.date_range("2026-01-01", periods=7),
+        "raw_market_state": [
+            "INSUFFICIENT_DATA", "NEUTRAL", "NEUTRAL",
+            "INSUFFICIENT_DATA", "RISK_OFF", "RISK_OFF", "RISK_OFF",
+        ],
+    })
+    out = apply_state_cooldown(x)
+    assert out.market_state.tolist() == [
+        "INSUFFICIENT_DATA", "INSUFFICIENT_DATA", "INSUFFICIENT_DATA",
+        "INSUFFICIENT_DATA", "INSUFFICIENT_DATA", "INSUFFICIENT_DATA", "RISK_OFF",
+    ]
+    assert pd.isna(out.position_scale.iloc[0])
+    assert pd.isna(out.candidate_score_threshold.iloc[0])

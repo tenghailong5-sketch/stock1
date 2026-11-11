@@ -164,7 +164,8 @@ def normalize_market_breadth_snapshot(frame: pd.DataFrame, *, fetched_at=None) -
             "AKShare spot snapshot is empty or missing: " + ",".join(sorted(missing))
         )
     captured = _utc(fetched_at)
-    out = frame[["代码", "最新价", "涨跌幅"]].copy()
+    selected = ["代码", "最新价", "涨跌幅"] + (["成交额"] if "成交额" in frame.columns else [])
+    out = frame[selected].copy()
     out["symbol"] = out["代码"].astype(str).str.zfill(6)
     if out["symbol"].duplicated().any():
         raise ValueError("AKShare spot snapshot contains duplicate symbols")
@@ -183,6 +184,16 @@ def normalize_market_breadth_snapshot(frame: pd.DataFrame, *, fetched_at=None) -
     unchanged = int(valid_rows["change_pct"].eq(0).sum())
     valid_count = int(valid.sum())
     total_count = int(len(out))
+    breadth_ratio = advances / valid_count if valid_count else None
+    total_amount = None
+    total_amount_status = "missing_provider_field"
+    if "成交额" in out.columns:
+        amounts = pd.to_numeric(out["成交额"], errors="coerce")
+        if amounts.notna().all() and amounts.map(lambda v: isfinite(float(v))).all() and amounts.ge(0).all():
+            total_amount = float(amounts.sum())
+            total_amount_status = "complete_provider_snapshot_sum"
+        else:
+            total_amount_status = "invalid_or_incomplete_provider_values"
     summary = {
         "snapshot_time": captured,
         "provider_row_count": total_count,
@@ -192,6 +203,9 @@ def normalize_market_breadth_snapshot(frame: pd.DataFrame, *, fetched_at=None) -
         "declines": declines,
         "unchanged": unchanged,
         "breadth_coverage": valid_count / total_count,
+        "breadth": breadth_ratio,
+        "total_amount": total_amount,
+        "total_amount_status": total_amount_status,
         "snapshot_scope": "current_provider_snapshot_only",
         "historical_pit_eligible": False,
     }

@@ -101,13 +101,25 @@ def apply_state_cooldown(scored: pd.DataFrame) -> pd.DataFrame:
     if "raw_market_state" not in x:
         x["raw_market_state"] = x.apply(classify_raw_state, axis=1)
     confirmed = []
-    current = "NEUTRAL"
+    # No default NEUTRAL state: the first valid regime must be observed twice.
+    # Missing data also resets confirmation so a stale regime cannot be reused.
+    current = None
     pending = None
     streak = 0
     for raw in x["raw_market_state"]:
         if raw == "INSUFFICIENT_DATA":
-            pending, streak = None, 0
+            current, pending, streak = None, None, 0
             confirmed.append("INSUFFICIENT_DATA")
+            continue
+        if current is None:
+            if raw == pending:
+                streak += 1
+            else:
+                pending, streak = raw, 1
+            confirmed.append("INSUFFICIENT_DATA")
+            if streak >= 2:
+                current = pending
+                pending, streak = None, 0
             continue
         if raw == current:
             pending, streak = None, 0
