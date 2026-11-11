@@ -1,5 +1,7 @@
 name: FHM-100 Daily Research
 on:
+  pull_request:
+    branches: [main, fix/numeric-factor-validation]
   push:
     branches: [main]
   workflow_dispatch:
@@ -26,7 +28,10 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m pytest -q
+      # Pull requests validate code only; do not spend runner time on a live market-data scan.
+      # GitHub does not expose repository secrets to fork PRs, and scan output is not a PR check.
       - name: Run research scan
+        if: github.event_name != 'pull_request'
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
@@ -34,7 +39,7 @@ jobs:
           AI_MODEL: ${{ secrets.AI_MODEL }}
         run: python -m src.fhm100
       - name: Upload research report
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: fhm100-report-${{ github.run_number }}

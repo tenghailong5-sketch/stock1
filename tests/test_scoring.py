@@ -95,3 +95,24 @@ def test_b_requires_one_of_four_distinct_event_subtypes():
     result = score_b(factors(B_WEIGHTS), gates, market_state=MarketState.NEUTRAL, stage="next_day")
     assert not result.eligible
     assert result.score is None
+
+
+def test_boolean_values_are_not_accepted_as_numeric_factor_scores():
+    values = factors(A_WEIGHTS)
+    values["catalyst"] = True
+    result = score_a(values, {}, market_state=MarketState.RISK_ON)
+    assert result.score is None
+    assert not result.eligible
+    assert "missing_or_invalid_factor:catalyst" in result.reasons
+
+
+def test_non_finite_factor_values_are_rejected():
+    import math
+    from src.model.r21_core import weighted_score
+    for invalid in (float("nan"), float("inf"), float("-inf")):
+        values = factors(A_WEIGHTS)
+        values["catalyst"] = invalid
+        result = score_a(values, {}, market_state=MarketState.RISK_ON)
+        assert result.score is None
+        with pytest.raises(ValueError):
+            weighted_score(A_WEIGHTS, values)
