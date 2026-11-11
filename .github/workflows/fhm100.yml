@@ -6,7 +6,7 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: "0 8 * * 1-5" # 16:00 Beijing time
+    - cron: "0 9 * * 1-5" # 17:00 Beijing time; run after the 16:30 forward archive
 permissions:
   contents: read
 concurrency:
