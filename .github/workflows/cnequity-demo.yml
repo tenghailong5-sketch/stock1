@@ -87,6 +87,32 @@ jobs:
               json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
           print(json.dumps(report, ensure_ascii=False, indent=2))
           PY
+      - name: Plan and backfill confirmed delisted-security daily bars
+        run: |
+          cne backfill daily_bars --profile delisted --start 2016-01-01 --end 2026-11-10 --plan 2>&1 | tee validation/cnequity-demo/delisted-bars-plan.log
+          cne backfill daily_bars --profile delisted --start 2016-01-01 --end 2026-11-10 2>&1 | tee validation/cnequity-demo/delisted-bars-backfill.log
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          log = Path("validation/cnequity-demo/delisted-bars-backfill.log").read_text(encoding="utf-8")
+          rows = re.findall(r"(?:Written|rows_written):?\\s*([0-9,]+)", log, flags=re.IGNORECASE)
+          symbols = re.findall(r"(?:Affected symbols|symbols):?\\s*([0-9,]+)", log, flags=re.IGNORECASE)
+          report = {
+              "profile": "delisted",
+              "start": "2016-01-01",
+              "end": "2026-11-10",
+              "rows_written_reported": rows[-1].replace(",", "") if rows else None,
+              "symbol_count_reported": symbols[-1].replace(",", "") if symbols else None,
+              "log_tail": log[-6000:],
+              "historical_pit_eligible": False,
+              "note": "Historical delisted-security bars are not point-in-time certified merely by backfilling them."
+          }
+          Path("validation/cnequity-demo/delisted-bars-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps({k:v for k,v in report.items() if k != "log_tail"}, ensure_ascii=False, indent=2))
+          PY
       - name: Derive and validate adjustment factors
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
