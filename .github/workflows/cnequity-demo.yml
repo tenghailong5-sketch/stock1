@@ -295,6 +295,31 @@ jobs:
           symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
           target_sessions = int(os.environ["DEMO_DAYS"])
           raw = load("daily_bars", symbols=symbols, adjust=None)
+          # Preserve strict rejection, but capture exact offending source rows so
+          # provider null semantics can be diagnosed rather than silently dropped.
+          if not isinstance(raw, pd.DataFrame) and hasattr(raw, "to_dicts"):
+              raw = pd.DataFrame(raw.to_dicts())
+          numeric_cols = ["open", "high", "low", "close", "volume", "amount"]
+          numeric = raw[numeric_cols].apply(pd.to_numeric, errors="coerce")
+          invalid_mask = numeric.isna().any(axis=1) | ~pd.DataFrame(
+              __import__("numpy").isfinite(numeric.to_numpy()),
+              index=numeric.index, columns=numeric.columns
+          ).all(axis=1)
+          invalid_rows = raw.loc[invalid_mask].copy()
+          diagnostic = {
+              "raw_row_count": int(len(raw)),
+              "invalid_row_count": int(len(invalid_rows)),
+              "invalid_counts_by_field": {
+                  col: int((numeric[col].isna() | ~__import__("numpy").isfinite(numeric[col])).sum())
+                  for col in numeric_cols
+              },
+              "invalid_examples": invalid_rows.head(50).astype(str).to_dict(orient="records"),
+              "policy": "No malformed bars are silently dropped; any invalid OHLCVA row blocks validation."
+          }
+          Path("validation/cnequity-demo/daily-bar-invalid-row-diagnostic.json").write_text(
+              json.dumps(diagnostic, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(diagnostic, ensure_ascii=False, indent=2))
           bars = normalize_daily_bars(raw)
           actual_symbols = sorted(bars["symbol"].unique().tolist())
           missing_symbols = sorted(set(symbols) - set(actual_symbols))
