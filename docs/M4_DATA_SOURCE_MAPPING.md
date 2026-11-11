@@ -166,3 +166,17 @@ BigQuant Free 是目前发现的较有价值的历史行业成分候选，但尚
 - 官方客服关于 SDK 试用与后续付费的答复：https://fund.bigquant.com/wiki/doc/j8VaVOtB5g
 
 **决策：** BigQuant 不再列为符合“长期零成本、可由 GitHub Actions 自动调用”要求的可用数据源。只保留为文档研究候选；不添加 SDK 依赖、不要求用户注册或开通试用、不触发付费。即使未来短期试用成功，也不得把试用期数据权限视为长期生产可用性。
+
+
+### 行业成分快照批次与前瞻选择（2026-11-12）
+
+当前行业成分采集为每次完整函数调用生成唯一 `snapshot_id`，同一调用中不同板块的记录共享该批次 ID；每个板块仍保留实际响应完成时的 `observed_at` 与 `available_time`。归档去重键包含 `snapshot_id`，因此同一天多次采集即使成员未变化，也会留下独立批次，不会把不同采集时点合并。
+
+`src/model/m4_industry_observations.py` 提供独立于历史 PIT selector 的前瞻观察 selector：
+- 只接受 `snapshot_scope=current_membership_observation_only` 且 `historical_pit_eligible=false` 的检索时快照；
+- 以批次为单位选择决策时点前最新且未超龄的完整快照，不跨批次拼接；
+- 最新可见批次覆盖不足、存在重复成员关系、时间戳无效或超龄时 fail closed，不回退到旧批次；
+- 保留一只股票同时属于多个行业的多对多关系；
+- 输出始终标记 `historical_pit_eligible=false`，不得输入历史 PIT 回测或据此推造历史 `valid_from/valid_to`。
+
+这只是从首次持续归档之后建立前瞻行业观察序列，不补齐采集开始前的行业历史，也尚未接入 M5 正式评分。
