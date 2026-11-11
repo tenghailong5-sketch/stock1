@@ -3,6 +3,19 @@ name: CNEquity Bounded Demo Validation
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    # The bounded real-provider demo can take a long time and consumes external
+    # data-provider quota. Run it only when ingestion/normalization contracts,
+    # their tests, dependencies, or this workflow change—not for docs-only PRs.
+    paths:
+      - ".github/workflows/cnequity-demo.yml"
+      - "src/providers/cnequity.py"
+      - "src/providers/akshare_pit.py"
+      - "src/providers/akshare_limit_pools.py"
+      - "src/collectors/**"
+      - "src/model/data_layer.py"
+      - "tests/**"
+      - "requirements.txt"
+      - "pyproject.toml"
   workflow_dispatch:
     inputs:
       symbols:
