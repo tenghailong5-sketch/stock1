@@ -163,10 +163,30 @@ def load_m3_market_context(decision_time=None, archive_root=Path("data/forward_a
         "quality_warnings": result.get("quality_warnings", []),
     }
 
+def empty_scan_result(error):
+    """Return explicit empty outputs when the live universe provider is unavailable."""
+    columns = [
+        "代码", "名称", "最新价", "涨跌幅%", "当日成交额", "20日平均成交额",
+        "5日收益%", "20日收益%", "CLV", "20日高点回撤%",
+        "M4突破20日高点%", "M4量比5日/20日", "M4距20日高点交易日",
+        "M4高量滞涨", "M4缩量回撤", "M4数据口径", "流动性观察通过",
+        "技术观察通过", "未通过项", "公司行为口径",
+    ]
+    return pd.DataFrame(columns=columns), pd.DataFrame([{
+        "代码": "UNIVERSE", "原因": f"行情股票池不可用：{type(error).__name__}: {str(error)[:220]}"
+    }])
+
+
 def main():
     now=datetime.now(timezone.utc).astimezone()
     m3 = load_m3_market_context(decision_time=now)
-    u=universe(); w,e=scan(u)
+    try:
+        u=universe()
+        w,e=scan(u)
+    except Exception as exc:
+        # Provider outages/rate limits must produce an auditable report, not a false clean scan.
+        u=pd.DataFrame()
+        w,e=empty_scan_result(exc)
     w=w.sort_values(["技术观察通过","流动性观察通过","当日成交额"],ascending=[False,False,False])
     # M5 remains diagnostic-only: M3 state is supplied only when independently READY; factors and hard gates are still incomplete.
     m5_input = pd.DataFrame([{"symbol": str(code), "market_state": m3["market_state"]} for code in w["代码"]])
@@ -179,6 +199,7 @@ def main():
     c=w[w["技术观察通过"]&w["流动性观察通过"]]
     lines=["# FHM-100 自动研究扫描报告",f"- 运行时间：{now.isoformat()}",
       f"- 快照股票池：{len(u)}",f"- 历史数据成功：{len(w)}",f"- 数据异常：{len(e)}",
+      f"- 行情采集状态：{'正常' if len(u) else '失败/不可用；本次不产生候选'}",
       f"- 基础技术观察名单：{len(c)}",
       f"- M4价格/流动性观察因子已计算：{len(w)}",
       f"- M3市场状态：{m3['status']}；状态={m3['market_state'] or '未确认'}；有效会话={m3['valid_sessions']}；最新日期={m3['latest_trade_date'] or '无'}",
