@@ -49,6 +49,16 @@ _GATE_KEYS = {
 }
 
 
+def _finite_factor(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        number = float(value)
+        return number == number and abs(number) != float("inf")
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def _mapping(row: Mapping[str, Any], keys) -> dict[str, Any]:
     return {key: row[key] for key in keys if key in row}
 
@@ -66,12 +76,25 @@ def evaluate_row(row: Mapping[str, Any], *, stage: str = "close") -> list[dict[s
     try:
         state = state_value if isinstance(state_value, MarketState) else MarketState(str(state_value))
     except (TypeError, ValueError):
-        return [
-            _result_dict(symbol, strategy, _invalid_state_result(
-                strategy, stage, "missing_or_invalid_market_state"
-            ), None)
-            for strategy in ("A", "B", "C")
-        ]
+        # Preserve unavailable inputs; never substitute a guessed market state.
+        output = []
+        for strategy, weights in (("A", A_WEIGHTS), ("B", B_WEIGHTS), ("C", C_WEIGHTS)):
+            reasons = ["missing_or_invalid_market_state"]
+            reasons.extend(
+                f"missing_or_invalid_factor:{key}"
+                for key in weights
+                if key not in row or not _finite_factor(row.get(key))
+            )
+            reasons.extend(
+                f"missing_or_invalid_gate:{key}"
+                for key in _GATE_KEYS[strategy]
+                if key not in row or row.get(key) is None
+            )
+            if strategy == "B" and stage != "next_day":
+                reasons.append("B_requires_next_day_stage")
+            result = StrategyResult(strategy, None, False, tuple(reasons), stage)
+            output.append(_result_dict(symbol, strategy, result, None))
+        return output
 
     definitions = (
         ("A", A_WEIGHTS, score_a, "close"),
