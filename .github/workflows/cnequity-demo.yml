@@ -203,7 +203,7 @@ jobs:
       - name: Extend trading calendar over recovered delisted history
         run: |
           set -euo pipefail
-          cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/trading-calendar-plan.log
+          cne backfill trading_calendar --start 2016-01-01 --end "$BAR_END" --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/trading-calendar-plan.log
           cne backfill trading_calendar --start 2016-01-01 --end "$BAR_END" --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/trading-calendar-backfill.log
       - name: Derive and validate adjustment factors
         env:
