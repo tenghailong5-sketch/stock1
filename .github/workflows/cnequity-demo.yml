@@ -42,10 +42,10 @@ jobs:
         run: |
           mkdir -p validation/cnequity-demo
           python -c "from importlib.metadata import version; print('cnequity', version('cnequity'))" | tee validation/cnequity-demo/cne-version.txt
-          cne init --profile demo --symbols "$DEMO_SYMBOLS" --days "$DEMO_DAYS" --data-root "$RUNNER_TEMP/cnequity-demo-lake" --config-out "$RUNNER_TEMP/cnequity-demo.toml" --json 2>&1 | tee validation/cnequity-demo/init.log
+          cne init --profile demo --symbols "$DEMO_SYMBOLS" --days "$DEMO_DAYS" --data-root "$RUNNER_TEMP/cnequity-demo-lake" --config-out "$RUNNER_TEMP/cnequity-demo.toml" 2>&1 | tee validation/cnequity-demo/init.log
           echo "CNE_CONFIG=$RUNNER_TEMP/cnequity-demo.toml" >> "$GITHUB_ENV"
       - name: Capture CNEquity quality and coverage audit
-        if: always()
+        if: success()
         run: |
           set +e
           cne check 2>&1 | tee validation/cnequity-demo/check.log
