@@ -204,7 +204,8 @@ jobs:
       - name: Discover confirmed delisted securities (resumable bounded sweep)
         run: |
           set -euo pipefail
-          python cnequity-source/scripts/delisted_ops.py --config "$DELISTED_CONFIG" discover --limit 500 2>&1 | tee validation/cnequity-demo/delisted-discovery.log
+          # The upstream discovery sweep checkpoints every 100 probes. Keep each Actions run to one checkpointed chunk so it can finish inside the job timeout; later runs resume from the cached catalogue.
+          python cnequity-source/scripts/delisted_ops.py --config "$DELISTED_CONFIG" discover --limit 100 2>&1 | tee validation/cnequity-demo/delisted-discovery.log
           cne delisted status --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-before-backfill.log
       - name: Backfill corporate actions for confirmed delisted securities
         run: |
