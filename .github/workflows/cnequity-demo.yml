@@ -117,16 +117,13 @@ jobs:
               json.dumps({"raw_rows": int(len(bars)), "strict_hfq_rows": int(len(adjusted)),
                           "strict_hfq_close_finite": True}, ensure_ascii=False, indent=2), encoding="utf-8")
           PY
-      - name: Capture CNEquity quality and coverage audit
+      - name: Capture full CNEquity quality and coverage audit
         if: success()
         run: |
-          set +e
-          cne check 2>&1 | tee validation/cnequity-demo/check.log
-          check_status=${PIPESTATUS[0]}
+          set -o pipefail
+          cne check --full 2>&1 | tee validation/cnequity-demo/check.log
           cne status --datasets 2>&1 | tee validation/cnequity-demo/status.log
-          status_status=${PIPESTATUS[0]}
-          printf '{"cne_check_exit_code": %s, "cne_status_exit_code": %s}\\n' "$check_status" "$status_status" > validation/cnequity-demo/audit-exit-codes.json
-          exit 0
+          printf '{"full_audit": true, "audit_enforced": true}\\n' > validation/cnequity-demo/audit-exit-codes.json
       - name: Validate loaded daily bars and produce bounded evidence report
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
