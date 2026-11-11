@@ -88,8 +88,17 @@ jobs:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
         run: |
           set -euo pipefail
-          BAR_END="$(TZ=Asia/Shanghai date +%F)"
+          # CNEquity deliberately rejects the in-progress A-share daily bar
+          # before 15:05 Asia/Shanghai. PRs may run at any hour, so cap the
+          # requested range at the previous calendar day until that cutoff.
+          LOCAL_HHMM="$(TZ=Asia/Shanghai date +%H%M)"
+          if (( 10#$LOCAL_HHMM < 1505 )); then
+            BAR_END="$(TZ=Asia/Shanghai date -d 'yesterday' +%F)"
+          else
+            BAR_END="$(TZ=Asia/Shanghai date +%F)"
+          fi
           BAR_START="$(TZ=Asia/Shanghai date -d '180 days ago' +%F)"
+          echo "Bounded daily-bar validation window: ${BAR_START}..${BAR_END} (Asia/Shanghai ${LOCAL_HHMM})"
           cne backfill daily_bars --start "$BAR_START" --end "$BAR_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/daily-bars-plan.log
           cne backfill daily_bars --start "$BAR_START" --end "$BAR_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/daily-bars-backfill.log
           python - <<'PY'

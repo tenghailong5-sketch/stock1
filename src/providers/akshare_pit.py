@@ -137,6 +137,8 @@ def fetch_current_industry_membership_snapshot(
         clean["industry_name"] = name
         clean["observed_at"] = captured
         clean["available_time"] = captured
+        clean["availability_basis"] = "retrieval_time_only"
+        clean["historical_pit_eligible"] = False
         clean["source_id"] = "akshare.stock_board_industry_cons_em"
         clean["snapshot_scope"] = "current_membership_observation_only"
         revision = _revision(clean[["symbol", "industry_code", "industry_name"]])
