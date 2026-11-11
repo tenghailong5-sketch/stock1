@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from src.collectors.forward_archive import append_jsonl_atomic, collect, _call_with_network_retry
+from src.providers.akshare_pit import fetch_current_industry_membership_snapshot
 
 
 class FakeArchiveAkshare:
@@ -216,3 +217,32 @@ def test_industry_rows_record_each_response_completion_time(tmp_path):
         "2026-11-12T08:30:07.000Z",
     }
     assert len({row["snapshot_id"] for row in archived}) == 1
+
+
+def test_industry_availability_clock_is_captured_before_throttle_sleep():
+    events = []
+    times = iter([
+        "2026-11-12T08:30:01Z",
+        "2026-11-12T08:30:07Z",
+    ])
+
+    class OrderedProvider(FakeArchiveAkshare):
+        def stock_board_industry_cons_em(self, symbol):
+            events.append(("response", symbol))
+            return super().stock_board_industry_cons_em(symbol)
+
+    def clock():
+        events.append(("clock", None))
+        return next(times)
+
+    def sleep_fn(seconds):
+        events.append(("sleep", seconds))
+
+    fetch_current_industry_membership_snapshot(
+        OrderedProvider(), clock=clock, pause_seconds=0.15, sleep_fn=sleep_fn
+    )
+
+    assert [kind for kind, _ in events] == [
+        "response", "clock", "sleep",
+        "response", "clock", "sleep",
+    ]
