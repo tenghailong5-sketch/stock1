@@ -68,7 +68,7 @@ def test_m3_assembler_fails_closed_when_one_recent_daily_snapshot_is_missing(tmp
         tmp_path, index_symbol="000001", decision_time="2026-11-01T12:00:00Z"
     )
     assert result["status"] == "INSUFFICIENT_DATA"
-    assert result["reason"] == "fewer_than_60_complete_consecutive_sessions"
+    assert result["reason"] == "fewer_than_119_complete_consecutive_sessions"
     assert missing_day in result["missing_recent_dates"]
 
 
@@ -81,10 +81,10 @@ def test_m3_assembler_rejects_decision_before_archive_capture(tmp_path):
 
 
 
-def test_m3_assembler_does_not_confuse_60_raw_days_with_60_scored_observations(tmp_path):
+def test_m3_assembler_requires_119_aligned_days_for_60_scored_observations(tmp_path):
     make_archive(tmp_path)
-    # Keep only the first 80 aligned sessions; MA60 warm-up leaves only 21
-    # feature rows, so the 60-observation percentile window is not ready.
+    # Keep only the first 80 aligned sessions; that cannot form 60 scored
+    # observations after the MA60/volatility warm-up.
     index_path = tmp_path / "index_daily" / "000001.jsonl"
     rows = [json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()]
     keep_days = {row["trade_date"] for row in rows[:80]}
@@ -100,5 +100,5 @@ def test_m3_assembler_does_not_confuse_60_raw_days_with_60_scored_observations(t
         tmp_path, index_symbol="000001", decision_time="2026-11-01T12:00:00Z"
     )
     assert result["status"] == "INSUFFICIENT_DATA"
-    assert result["reason"] == "fewer_than_60_scored_feature_observations"
-    assert result["valid_sessions"] == 21
+    assert result["reason"] == "fewer_than_119_complete_consecutive_sessions"
+    assert result["required_sessions"] == 119
