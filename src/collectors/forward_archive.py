@@ -188,7 +188,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     counts["industry_membership"] = append_jsonl_atomic(
         archive_root / "industry_membership" / f"{day}.jsonl",
         industry_records,
-        ("symbol", "industry_code", "source_revision"),
+        ("snapshot_id", "symbol", "industry_code", "source_revision"),
     )
     counts["market_breadth"] = append_jsonl_atomic(
         archive_root / "market_breadth" / f"{day}.jsonl",

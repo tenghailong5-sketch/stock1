@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+import uuid
 from math import isfinite
 from datetime import datetime, timezone
 
@@ -121,6 +122,12 @@ def fetch_current_industry_membership_snapshot(
     if industries is None or industries.empty or required_industry - set(industries.columns):
         raise ValueError("AKShare industry list schema changed or is empty")
 
+    # One immutable identifier binds every industry response fetched by this call.
+    # Per-industry observed_at/available_time remain the actual retrieval times.
+    snapshot_id = str(uuid.uuid4())
+    expected_industry_count = int(
+        industries[["板块名称", "板块代码"]].drop_duplicates()["板块代码"].nunique()
+    )
     rows = []
     for industry in industries[["板块名称", "板块代码"]].drop_duplicates().itertuples(index=False):
         name, code = str(industry[0]), str(industry[1])
@@ -135,6 +142,8 @@ def fetch_current_industry_membership_snapshot(
         clean["symbol"] = clean["代码"].astype(str).str.zfill(6)
         clean["industry_code"] = code
         clean["industry_name"] = name
+        clean["snapshot_id"] = snapshot_id
+        clean["expected_industry_count"] = expected_industry_count
         clean["observed_at"] = captured
         clean["available_time"] = captured
         clean["availability_basis"] = "retrieval_time_only"
@@ -146,7 +155,7 @@ def fetch_current_industry_membership_snapshot(
         rows.append(clean.drop(columns=["代码"]))
     if not rows:
         return pd.DataFrame(columns=[
-            "symbol", "industry_code", "industry_name", "observed_at",
+            "symbol", "industry_code", "industry_name", "snapshot_id", "expected_industry_count", "observed_at",
             "available_time", "source_id", "snapshot_scope", "source_revision",
         ])
     result = pd.concat(rows, ignore_index=True)
