@@ -14,9 +14,7 @@ def test_daily_history_uses_retrieval_time_not_trade_date_as_availability():
         "日期": "2024-01-02", "开盘": 10, "最高": 11, "最低": 9,
         "收盘": 10.5, "成交量": 100, "成交额": 1000, "换手率": 1.2,
     }])
-    out = normalize_daily_history_snapshot(
-        raw, symbol="1", fetched_at="2026-11-11T08:00:00Z"
-    )
+    out = normalize_daily_history_snapshot(raw, symbol="1", fetched_at="2026-11-11T08:00:00Z")
     assert out.iloc[0].symbol == "000001"
     assert out.iloc[0].available_time == pd.Timestamp("2026-11-11T08:00:00Z")
     assert out.iloc[0].trade_date == pd.Timestamp("2024-01-02")
@@ -50,13 +48,8 @@ class FakeAkshare:
 
 
 def test_industry_membership_is_explicitly_snapshot_only():
-    ticks = iter([
-        "2026-11-11T08:00:00Z",
-        "2026-11-11T08:00:01Z",
-    ])
-    out = fetch_current_industry_membership_snapshot(
-        FakeAkshare(), clock=lambda: next(ticks)
-    )
+    ticks = iter(["2026-11-11T08:00:00Z", "2026-11-11T08:00:01Z"])
+    out = fetch_current_industry_membership_snapshot(FakeAkshare(), clock=lambda: next(ticks))
     assert len(out) == 4
     assert set(out.snapshot_scope) == {"current_membership_observation_only"}
     assert "valid_from" not in out.columns
@@ -68,11 +61,9 @@ def test_industry_membership_fails_closed_on_provider_schema_change():
     class Broken(FakeAkshare):
         def stock_board_industry_cons_em(self, symbol):
             return pd.DataFrame({"证券代码": ["000001"]})
-
     with pytest.raises(ValueError, match="schema changed"):
         fetch_current_industry_membership_snapshot(Broken())
 
- 
 
 def test_daily_history_revision_hash_ignores_retrieval_timestamp():
     raw = pd.DataFrame([{
@@ -89,9 +80,7 @@ def test_index_history_is_normalized_and_never_claims_historical_pit():
         "日期": "2026-11-10", "开盘": 3000, "最高": 3050, "最低": 2990,
         "收盘": 3030, "成交量": 100000, "成交额": 200000000,
     }])
-    out = normalize_index_history_snapshot(
-        raw, symbol="000001", fetched_at="2026-11-11T08:00:00Z"
-    )
+    out = normalize_index_history_snapshot(raw, symbol="000001", fetched_at="2026-11-11T08:00:00Z")
     assert out.iloc[0].index_symbol == "000001"
     assert out.iloc[0].source_id == "akshare.index_zh_a_hist"
     assert out.iloc[0].historical_pit_eligible == False
@@ -124,16 +113,14 @@ def test_daily_history_revision_is_per_row_not_per_rolling_window():
     assert first_hashes["2024-01-03"] != second_hashes["2024-01-03"]
 
 
-def test_market_breadth_snapshot_counts_valid_quotes_without_limit_inference():
+def test_market_breadth_snapshot_counts_valid_quotes_and_turnover():
     raw = pd.DataFrame([
-        {"代码": "000001", "最新价": 10, "涨跌幅": 2.5},
-        {"代码": "600000", "最新价": 8, "涨跌幅": -1.2},
-        {"代码": "000002", "最新价": 9, "涨跌幅": 0},
-        {"代码": "300001", "最新价": None, "涨跌幅": None},
+        {"代码": "000001", "最新价": 10, "涨跌幅": 2.5, "成交额": 100.0},
+        {"代码": "600000", "最新价": 8, "涨跌幅": -1.2, "成交额": 200.0},
+        {"代码": "000002", "最新价": 9, "涨跌幅": 0, "成交额": 300.0},
+        {"代码": "300001", "最新价": None, "涨跌幅": None, "成交额": 400.0},
     ])
-    result = normalize_market_breadth_snapshot(
-        raw, fetched_at="2026-11-11T16:30:00+08:00"
-    ).iloc[0]
+    result = normalize_market_breadth_snapshot(raw, fetched_at="2026-11-11T16:30:00+08:00").iloc[0]
     assert result["provider_row_count"] == 4
     assert result["valid_quote_count"] == 3
     assert result["missing_quote_count"] == 1
@@ -141,9 +128,22 @@ def test_market_breadth_snapshot_counts_valid_quotes_without_limit_inference():
     assert result["declines"] == 1
     assert result["unchanged"] == 1
     assert result["breadth_coverage"] == 0.75
+    assert result["breadth"] == pytest.approx(1 / 3)
+    assert result["total_amount"] == 1000.0
+    assert result["total_amount_status"] == "complete_provider_snapshot_sum"
     assert not bool(result["historical_pit_eligible"])
     assert result["snapshot_scope"] == "current_provider_snapshot_only"
 
+
+def test_market_breadth_does_not_fabricate_turnover_when_missing_or_invalid():
+    missing = pd.DataFrame([{"代码": "000001", "最新价": 10, "涨跌幅": 1}])
+    result = normalize_market_breadth_snapshot(missing).iloc[0]
+    assert result["total_amount"] is None
+    assert result["total_amount_status"] == "missing_provider_field"
+    invalid = missing.assign(成交额=[float("inf")])
+    result = normalize_market_breadth_snapshot(invalid).iloc[0]
+    assert result["total_amount"] is None
+    assert result["total_amount_status"] == "invalid_or_incomplete_provider_values"
 
 
 def test_market_breadth_snapshot_excludes_infinite_quotes_from_coverage():
