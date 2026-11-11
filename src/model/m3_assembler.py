@@ -141,17 +141,18 @@ def assemble_m3_history(
     ]).copy()
     complete = complete.sort_values("trade_date").reset_index(drop=True)
 
-    # Every one of the last 60 index trading sessions must have its own complete
-    # breadth/turnover/limit snapshot; sparse dates are not silently skipped.
-    last_index_days = idx.trade_date.tail(60).tolist()
+    # Sixty percentile observations each need an MA60/volatility feature row.
+    # Without index warm-up predating the archive, that means 119 consecutive
+    # aligned daily market snapshots. Never skip a missing session in the window.
+    last_index_days = idx.trade_date.tail(119).tolist()
     complete_days = set(complete.trade_date.tolist())
     missing_days = [day for day in last_index_days if day not in complete_days]
-    if len(idx) < 60 or missing_days:
+    if len(idx) < 119 or missing_days:
         return {
             "status": "INSUFFICIENT_DATA",
-            "reason": "fewer_than_60_complete_consecutive_sessions",
+            "reason": "fewer_than_119_complete_consecutive_sessions",
             "valid_sessions": int(len(complete)),
-            "required_sessions": 60,
+            "required_sessions": 119,
             "missing_recent_dates": missing_days[-10:],
             "quality_warnings": reasons[-10:],
             "history": complete,
