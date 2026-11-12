@@ -34,7 +34,7 @@ jobs:
       # Pull requests validate code only; do not spend runner time on a live market-data scan.
       # GitHub does not expose repository secrets to fork PRs, and scan output is not a PR check.
       - name: Run research scan
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-scan]'))
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
@@ -42,7 +42,7 @@ jobs:
           AI_MODEL: ${{ secrets.AI_MODEL }}
         run: python -m src.fhm100
       - name: Commit forward-only stock history archive
-        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-scan]'))
         run: |
           for archive_path in data/forward_archive/stock_daily data/forward_archive/stock_daily_manifest; do
             if [ -d "$archive_path" ]; then
@@ -58,7 +58,7 @@ jobs:
             echo "No new stock history records."
           fi
       - name: Upload research report
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-scan]')))
         uses: actions/upload-artifact@v4
         with:
           name: fhm100-report-${{ github.run_number }}
