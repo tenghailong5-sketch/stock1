@@ -10,7 +10,6 @@ Raw OHLC must remain the source for order placement and same-session geometry.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Iterable
 
 import numpy as np
@@ -32,13 +31,6 @@ COVERAGE_REQUIRED = {
 SUPPORTED_ACTIONS = {"cash_dividend", "split", "bonus"}
 
 
-@dataclass(frozen=True)
-class PITBuildResult:
-    prices: pd.DataFrame
-    status: str
-    reason: str
-
-
 def _utc(value, field: str) -> pd.Timestamp:
     ts = pd.Timestamp(value)
     if ts.tzinfo is None:
@@ -53,14 +45,14 @@ def _timestamps(frame: pd.DataFrame, column: str, label: str) -> pd.Series:
     return values.dt.tz_convert("UTC")
 
 
-def _blocked(prices: pd.DataFrame, status: str, reason: str) -> PITBuildResult:
+def _blocked(prices: pd.DataFrame, status: str, reason: str) -> pd.DataFrame:
     out = prices.copy()
     for col in ("pit_total_return_close", "pit_total_return_high",
                 "pit_total_return_available_time"):
         out[col] = pd.NaT if col.endswith("available_time") else np.nan
     out["corporate_action_status"] = status
     out["pit_total_return_reason"] = reason
-    return PITBuildResult(out, status, reason)
+    return out
 
 
 def build_pit_total_return_prices(
@@ -100,7 +92,7 @@ def build_pit_total_return_prices(
         try:
             p["trade_date"] = pd.to_datetime(p["trade_date"], errors="coerce").dt.normalize()
             if p["trade_date"].isna().any() or p["trade_date"].duplicated().any():
-                outputs.append(_blocked(p, "INVALID_PRICE_DATES", "invalid_or_duplicate_trade_date").prices)
+                outputs.append(_blocked(p, "INVALID_PRICE_DATES", "invalid_or_duplicate_trade_date"))
                 continue
             if (p[["source_id", "source_revision"]].isna().any().any()
                     or p["source_id"].astype(str).str.strip().eq("").any()
