@@ -137,6 +137,10 @@ def prepare(
     )
     formal = known_delisted_instruments(config, end)
     listing_symbols = set(identity.get("listing_dates", {}))
+    if any(not symbol.endswith((".SH", ".SZ")) for symbol in listing_symbols):
+        raise RuntimeError("identity snapshot contains symbols outside SH/SZ stock scope")
+    if any(not symbol.endswith((".SH", ".SZ")) for symbol in formal):
+        raise RuntimeError("formal identity set contains symbols outside SH/SZ stock scope")
     sanitized, audit = sanitize_catalog(
         existing_catalog, raw_catalog, formal, listing_symbols
     )
@@ -158,6 +162,8 @@ def prepare(
     report = {
         **audit,
         "identity_source": identity.get("source"),
+        "identity_universe_scope": identity.get("universe_scope"),
+        "identity_asset_type_filter": identity.get("asset_type_filter"),
         "identity_observed_at": identity.get("observed_at"),
         "identity_listing_rows": len(identity.get("listing_dates", {})),
         "identity_formal_delisted_rows": len(identity.get("delisted_symbols", {})),
