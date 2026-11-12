@@ -116,3 +116,16 @@ def test_empty_scan_result_contains_columns_required_by_report_sort():
         ascending=[False, False, False],
     )
     assert sorted_watchlist.empty
+
+
+def test_all_failed_history_scan_gets_sortable_empty_watchlist_schema():
+    # scan() can return zero valid rows without raising, while preserving per-stock errors.
+    raw_empty = pd.DataFrame()
+    watchlist = fhm100.ensure_watchlist_schema(raw_empty)
+    assert watchlist.empty
+    assert {"技术观察通过", "流动性观察通过", "当日成交额"}.issubset(watchlist.columns)
+    assert watchlist.columns.is_unique
+    assert watchlist.sort_values(
+        ["技术观察通过", "流动性观察通过", "当日成交额"],
+        ascending=[False, False, False],
+    ).empty
