@@ -1,5 +1,5 @@
-import numpy as np
 import pandas as pd
+import pytest
 
 from src.model.pit_corporate_actions import build_pit_total_return_prices
 
@@ -51,7 +51,7 @@ def test_builds_total_return_index_from_verified_action_and_complete_pit_coverag
     assert out.pit_total_return_close.iloc[0] == 100.0
     # A 1.00 cash dividend offsets the raw close drop from 10.00 to 9.50.
     assert out.pit_total_return_close.iloc[1] == 105.0
-    assert out.pit_total_return_close.iloc[2] == 108.3157894736842
+    assert out.pit_total_return_close.iloc[2] == pytest.approx(108.3157894736842)
     assert out.pit_total_return_high.iloc[1] == 110.0
     assert out.pit_total_return_available_time.max() <= pd.Timestamp(CUTOFF)
 
@@ -98,4 +98,13 @@ def test_naive_price_availability_is_rejected():
     prices.loc[0, "available_time"] = "2026-11-09 08:00:00"
     out = build_pit_total_return_prices(prices, actions, coverage, decision_time=CUTOFF)
     assert out.corporate_action_status.eq("PIT_BUILD_REJECTED").all()
+    assert out.pit_total_return_close.isna().all()
+
+
+
+def test_action_rows_must_match_the_attested_ledger_snapshot():
+    prices, actions, coverage = fixtures()
+    actions.loc[0, "ledger_snapshot_id"] = "different-ledger"
+    out = build_pit_total_return_prices(prices, actions, coverage, decision_time=CUTOFF)
+    assert out.corporate_action_status.eq("INVALID_ACTION_LINEAGE").all()
     assert out.pit_total_return_close.isna().all()
