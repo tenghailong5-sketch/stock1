@@ -14,7 +14,7 @@ concurrency:
 jobs:
   cnequity-bj:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,10 +24,13 @@ jobs:
         run: pip install "cnequity==0.23.0"
       - name: Probe Beijing Exchange historical bars
         run: |
-          cne init --profile demo --symbols 830799.BJ --days 119 \
-            --data-root output/cnequity-bj \
-            --config-out output/cnequity-bj.toml \
-            --trade-date 2026-11-11
+          mkdir -p output
+          cat > output/cnequity-bj.toml <<'EOF'
+          extends = "builtin"
+          [data]
+          root = "${{ github.workspace }}/output/cnequity-bj-lake"
+          EOF
+          cne init --profile quick --since 2026-05-01 --config output/cnequity-bj.toml
           python scripts/probe_cnequity_bj.py
       - name: Upload CNEquity qualification report
         if: always()
