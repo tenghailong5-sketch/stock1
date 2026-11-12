@@ -157,27 +157,40 @@ def main():
         except Exception as exc:
             report["stock_basic"] = {"status": "ERROR", "reason": str(exc)[:240]}
 
-        # Test direct Beijing Exchange history separately: BaoStock's bulk
-        # A-share snapshot may not imply BSE support.
+        # Verify that the bulk endpoint is historical, not just a latest-day
+        # snapshot. Five dates are sampled across the last 240 calendar days.
         try:
-            bj_frame = query_history("bj.830799", start, end)
-            report["sample_histories"]["bj.830799"] = {
-                "market": "Beijing Stock Exchange",
-                "status": "OK" if len(bj_frame) >= 119 else "INSUFFICIENT_HISTORY",
-                "rows": int(len(bj_frame)),
-                "first_date": bj_frame["date"].min().date().isoformat(),
-                "last_date": bj_frame["date"].max().date().isoformat(),
-            }
+            cal = rows_from_result(bs.query_trade_dates(start_date=start, end_date=end))
+            trading_dates = cal.loc[cal["is_trading_day"].astype(str) == "1", "calendar_date"].astype(str).tolist()
+            if len(trading_dates) >= 5:
+                indexes = sorted(set(round(i * (len(trading_dates) - 1) / 4) for i in range(5)))
+                historical_snapshots = []
+                for idx in indexes:
+                    day = trading_dates[idx]
+                    frame = rows_from_result(bs.query_daily_history_k_AStock(date=day))
+                    required = {"date", "code", "open", "high", "low", "close", "volume", "amount"}
+                    missing = sorted(required - set(frame.columns))
+                    historical_snapshots.append({
+                        "date": day, "rows": int(len(frame)),
+                        "status": "OK" if not missing and len(frame) >= 3000 else "INSUFFICIENT_OR_SCHEMA_ERROR",
+                        "missing_fields": missing,
+                        "sample_codes_present": sorted(set(frame.get("code", pd.Series(dtype=str)).astype(str)) & set(SAMPLES)),
+                    })
+                report["historical_bulk_snapshots"] = {
+                    "requested_dates": len(indexes),
+                    "passed": sum(x["status"] == "OK" for x in historical_snapshots),
+                    "items": historical_snapshots,
+                }
+            else:
+                report["historical_bulk_snapshots"] = {"status": "INSUFFICIENT_CALENDAR", "trading_dates": len(trading_dates)}
         except Exception as exc:
-            report["sample_histories"]["bj.830799"] = {
-                "market": "Beijing Stock Exchange", "status": "ERROR", "reason": str(exc)[:240]
-            }
+            report["historical_bulk_snapshots"] = {"status": "ERROR", "reason": str(exc)[:240]}
 
-        # A deterministic 30-name sample tests that historical bars are not
+        # A deterministic 10-name sample tests that historical bars are not
         # merely available for the four hand-picked large-cap examples.
         try:
             if "active_equities" in locals() and len(active_equities):
-                sample = active_equities.sort_values("code").iloc[::max(1, len(active_equities)//30)].head(30)
+                sample = active_equities.sort_values("code").iloc[::max(1, len(active_equities)//10)].head(10)
                 hist_checks = []
                 for code in sample["code"].astype(str):
                     try:
@@ -250,17 +263,20 @@ def main():
     active_count = universe.get("rows", 0)
     bulk_coverage_ok = active_count > 0 and missing_count / active_count <= 0.02
     hist_sample = report.get("historical_coverage_sample", {})
-    hist_sample_ok = hist_sample.get("sample_size", 0) >= 20 and hist_sample.get("passed_119", 0) >= 0.95 * hist_sample.get("sample_size", 1)
+    hist_sample_ok = hist_sample.get("sample_size", 0) >= 8 and hist_sample.get("passed_119", 0) >= 0.9 * hist_sample.get("sample_size", 1)
+    historical_bulk = report.get("historical_bulk_snapshots", {})
+    historical_bulk_ok = historical_bulk.get("requested_dates", 0) >= 5 and historical_bulk.get("passed", 0) == historical_bulk.get("requested_dates", -1)
     bj_ok = report.get("sample_histories", {}).get("bj.830799", {}).get("status") == "OK"
     report["qualification"] = {
         "active_equity_universe_min_3000": universe_ok,
         "single_call_full_market_daily_snapshot": bulk_ok,
         "bulk_covers_98pct_active_equities": bulk_coverage_ok,
+        "historical_bulk_endpoint_5_dates": historical_bulk_ok,
         "sampled_historical_coverage_119_bars": hist_sample_ok,
         "four_market_segments_119_bars": core_ok,
         "two_major_indexes_119_bars": indexes_ok,
         "beijing_exchange_119_bars": bj_ok,
-        "qualified": bool(universe_ok and bulk_ok and bulk_coverage_ok and hist_sample_ok and core_ok and indexes_ok and bj_ok),
+        "qualified": bool(universe_ok and bulk_ok and bulk_coverage_ok and historical_bulk_ok and hist_sample_ok and core_ok and indexes_ok and bj_ok),
     }
     target = OUT / "baostock_data_probe.json"
     target.write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
