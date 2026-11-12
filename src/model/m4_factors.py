@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 REQUIRED_BARS = {"symbol", "trade_date", "open", "high", "low", "close",
-                 "volume", "amount", "available_time"}
+                 "volume", "amount", "available_time", "source_id", "source_revision"}
 
 
 def _numeric(frame: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
@@ -44,6 +44,11 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
     x["available_time"] = raw_available.dt.tz_convert("UTC")
     cutoff_utc = cutoff.tz_convert("UTC")
     x = x.loc[x["available_time"] <= cutoff_utc].copy()
+    for column in ("source_id", "source_revision"):
+        values = x[column]
+        if values.isna().any() or values.astype(str).str.strip().eq("").any():
+            raise ValueError(f"invalid {column}")
+        x[column] = values.astype(str).str.strip()
     x = x.sort_values(["symbol", "trade_date"]).copy()
     if x["symbol"].isna().any() or x["symbol"].astype(str).str.strip().eq("").any():
         raise ValueError("invalid symbol values")
@@ -174,7 +179,7 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
 
 def _pit_frame(frame: pd.DataFrame, decision_time, name: str,
                identity_cols: tuple[str, ...] = ()) -> pd.DataFrame:
-    required = {"available_time", "trade_date", *identity_cols}
+    required = {"available_time", "trade_date", "source_id", "source_revision", *identity_cols}
     missing = required - set(frame.columns)
     if missing:
         raise ValueError(f"{name} missing required columns: " + ",".join(sorted(missing)))
@@ -189,6 +194,11 @@ def _pit_frame(frame: pd.DataFrame, decision_time, name: str,
     # First discard rows not yet known. Then validate the dates and identifiers
     # of every row that could actually enter this decision snapshot.
     out = out.loc[out["available_time"] <= cutoff.tz_convert("UTC")].copy()
+    for column in ("source_id", "source_revision"):
+        values = out[column]
+        if values.isna().any() or values.astype(str).str.strip().eq("").any():
+            raise ValueError(f"{name} contains invalid {column}")
+        out[column] = values.astype(str).str.strip()
     out["trade_date"] = pd.to_datetime(out["trade_date"], errors="coerce")
     if out["trade_date"].isna().any():
         raise ValueError(f"{name} contains invalid trade_date")
