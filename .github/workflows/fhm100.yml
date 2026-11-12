@@ -8,7 +8,7 @@ on:
   schedule:
     - cron: "0 9 * * 1-5" # 17:00 Beijing time; run after the 16:30 forward archive
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: fhm100-daily
   cancel-in-progress: false
@@ -38,6 +38,18 @@ jobs:
           AI_API_BASE_URL: ${{ secrets.AI_API_BASE_URL }}
           AI_MODEL: ${{ secrets.AI_MODEL }}
         run: python -m src.fhm100
+      - name: Commit forward-only stock history archive
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+        run: |
+          git add data/forward_archive/stock_daily data/forward_archive/stock_daily_manifest
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Archive forward-only stock daily history"
+            git push
+          else
+            echo "No new stock history records."
+          fi
       - name: Upload research report
         if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
