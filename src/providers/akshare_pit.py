@@ -210,7 +210,7 @@ def fetch_sina_current_industry_membership_snapshot(
                 "Sina constituent detail missing/empty for industry " + sector.industry_code
             )
         members = detail[["code", "name"]].copy()
-        members["symbol"] = members["code"].astype(str).str.extract(r"(\\d{6})", expand=False)
+        members["symbol"] = members["code"].astype(str).str.extract(r"(\d{6})", expand=False)
         if members["symbol"].isna().any():
             raise ValueError("Sina constituent detail contains invalid stock codes: " + sector.industry_code)
         members["symbol"] = members["symbol"].astype(str).str.zfill(6)
