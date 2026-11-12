@@ -317,3 +317,40 @@ def test_partial_archive_uses_tencent_breadth_when_eastmoney_is_rate_limited(tmp
     assert report["partial"] is True
     assert report["source_status"]["industry_membership"].startswith("unavailable:")
     assert report["source_status"]["market_breadth"] == "ok: tencent.stock_zh_a_spot_tx"
+
+
+def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tmp_path):
+    class SinaFallbackProvider(FakeArchiveAkshare):
+        def stock_board_industry_name_em(self):
+            raise type("Push2RateLimitError", (Exception,), {})("Eastmoney cooldown")
+
+        def stock_sector_spot(self, indicator):
+            assert indicator == "新浪行业"
+            rows = []
+            for index in range(10):
+                rows.extend([
+                    {"label": f"industry_{index:02d}", "板块": f"行业{index}", "股票代码": "000001"},
+                    {"label": f"industry_{index:02d}", "板块": f"行业{index}", "股票代码": "600000"},
+                ])
+            return pd.DataFrame(rows)
+
+    counts = collect(
+        SinaFallbackProvider(),
+        tmp_path,
+        captured_at="2026-11-12T08:30:00Z",
+        allow_partial=True,
+    )
+    assert counts["industry_membership"] == 20
+    report = json.loads(
+        (tmp_path / "collection_report" / "2026-11-12.json").read_text(encoding="utf-8")
+    )
+    assert report["source_status"]["industry_membership"].startswith(
+        "ok: akshare.stock_sector_spot_sina"
+    )
+    path = tmp_path / "industry_membership" / "2026-11-12.jsonl"
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 20
+    assert {row["source_id"] for row in rows} == {"akshare.stock_sector_spot_sina"}
+    assert {row["expected_industry_count"] for row in rows} == {10}
+    assert all(row["historical_pit_eligible"] is False for row in rows)
+    assert all("valid_from" not in row and "valid_to" not in row for row in rows)
