@@ -1,9 +1,7 @@
 name: Formal Delisted History Recovery
 
 on:
-  # Push is acknowledged without running recovery; expensive recovery is manual-only.
-  push:
-    branches: [main]
+  # Expensive recovery is intentionally manual-only.
   workflow_dispatch:
 
 permissions:
@@ -14,13 +12,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  trigger-ack:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Confirm push without starting recovery
-        run: echo "Push acknowledged; delisted history recovery remains manual-only."
-
   recover:
     if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
