@@ -299,6 +299,7 @@ def build_m5_diagnostic_input(watchlist, market_context):
 
 def empty_scan_result(error):
     """Return explicit empty outputs when the live universe provider is unavailable."""
+    # Keep this empty-result schema unique: main() applies the same final sort to all scans.
     columns = [
         "代码", "名称", "最新价", "涨跌幅%", "当日成交额", "20日平均成交额",
         "5日收益%", "20日收益%", "CLV", "20日高点回撤%",
