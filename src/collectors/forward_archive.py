@@ -230,7 +230,9 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 raise
             breadth_raw = _tencent_breadth_frame(ak_module)
             breadth_source = "tencent.stock_zh_a_spot_tx"
-        breadth = normalize_market_breadth_snapshot(breadth_raw, fetched_at=captured)
+        breadth = normalize_market_breadth_snapshot(
+            breadth_raw, fetched_at=captured, source_id=breadth_source
+        )
         breadth_records = _records(breadth)
         source_status["market_breadth"] = f"ok: {breadth_source}"
     except Exception as exc:

@@ -166,3 +166,16 @@ def test_market_breadth_snapshot_rejects_duplicate_symbols():
     ])
     with pytest.raises(ValueError, match="duplicate symbols"):
         normalize_market_breadth_snapshot(raw)
+
+
+def test_market_breadth_preserves_explicit_provider_provenance():
+    raw = pd.DataFrame([
+        {"代码": "000001", "最新价": 10, "涨跌幅": 2.0, "成交额": 100.0},
+    ])
+    result = normalize_market_breadth_snapshot(
+        raw,
+        fetched_at="2026-11-12T22:28:02Z",
+        source_id="tencent.stock_zh_a_spot_tx",
+    ).iloc[0]
+    assert result["source_id"] == "tencent.stock_zh_a_spot_tx"
+    assert len(result["source_revision"]) == 64

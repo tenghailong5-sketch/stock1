@@ -8,13 +8,8 @@ on:
     # their tests, dependencies, or this workflow change—not for docs-only PRs.
     paths:
       - "src/providers/cnequity.py"
-      - "src/providers/akshare_pit.py"
-      - "src/providers/akshare_limit_pools.py"
-      - "src/collectors/**"
       - "src/model/data_layer.py"
       - "tests/test_cnequity*.py"
-      - "tests/test_akshare_pit*.py"
-      - "tests/test_akshare_limit_pools*.py"
       - "requirements.txt"
       - "pyproject.toml"
   workflow_dispatch:

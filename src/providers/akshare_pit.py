@@ -173,7 +173,7 @@ def fetch_current_industry_membership_snapshot(
     return result
 
 
-def normalize_market_breadth_snapshot(frame: pd.DataFrame, *, fetched_at=None) -> pd.DataFrame:
+def normalize_market_breadth_snapshot(frame: pd.DataFrame, *, fetched_at=None, source_id: str = "akshare.stock_zh_a_spot_em") -> pd.DataFrame:
     """Summarize one current A-share quote snapshot; never infer historical limit events."""
     required = {"代码", "最新价", "涨跌幅"}
     if frame is None:
@@ -229,11 +229,11 @@ def normalize_market_breadth_snapshot(frame: pd.DataFrame, *, fetched_at=None) -
         "snapshot_scope": "current_provider_snapshot_only",
         "historical_pit_eligible": False,
     }
+    summary["source_id"] = source_id
     summary["source_revision"] = hashlib.sha256(
         json_dumps_stable({k: v for k, v in summary.items() if k != "snapshot_time"}).encode("utf-8")
     ).hexdigest()
     summary["available_time"] = captured
-    summary["source_id"] = "akshare.stock_zh_a_spot_em"
     return pd.DataFrame([summary])
 
 
