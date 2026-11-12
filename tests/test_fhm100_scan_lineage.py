@@ -102,3 +102,10 @@ def test_tencent_history_fallback_is_normalized_and_keeps_source_lineage(monkeyp
 
     assert {"日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额", "换手率"}.issubset(result.columns)
     assert result.attrs["source_id"] == "akshare.stock_zh_a_hist_tx"
+
+
+def test_empty_scan_result_contains_columns_required_by_report_sort():
+    watchlist, errors = fhm100.empty_scan_result(RuntimeError("provider unavailable"))
+
+    assert watchlist.empty
+    assert {"技术观察通过", "流动性观察通过", "当日成交额"}.issubset(watchlist.columns)
