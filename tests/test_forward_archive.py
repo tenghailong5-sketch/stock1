@@ -349,7 +349,7 @@ def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tm
         (tmp_path / "collection_report" / "2026-11-12.json").read_text(encoding="utf-8")
     )
     assert report["source_status"]["industry_membership"].startswith(
-        "ok: akshare.stock_sector_spot_sina"
+        "ok: akshare.stock_sector_detail_sina"
     )
     path = tmp_path / "industry_membership" / "2026-11-12.jsonl"
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
