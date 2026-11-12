@@ -64,4 +64,4 @@ def test_scan_passes_lineage_into_m4_instead_of_dropping_every_symbol(monkeypatc
     assert len(watchlist) == 1
     assert watchlist.iloc[0]["代码"] == "000001"
     assert watchlist.iloc[0]["M4跨日价格状态"] == "MISSING_PIT_TOTAL_RETURN_FIELDS"
-    assert "retrieval" not in watchlist.iloc[0]["M4数据口径"] or "抓取时间戳" in watchlist.iloc[0]["M4数据口径"]
+    assert "本次抓取时间戳不具备历史PIT资格" in watchlist.iloc[0]["M4数据口径"]
