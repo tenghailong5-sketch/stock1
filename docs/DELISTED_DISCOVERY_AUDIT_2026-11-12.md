@@ -54,7 +54,41 @@ Cache not found for input keys: delisted-catalog-main-43149026053, delisted-cata
 
 The cache path list had changed when the identity-evidence file was added alongside the catalogue, changing the Actions cache version. Consequently this run did **not** continue the earlier cache's probe cursor; it re-probed a bounded first chunk. At job completion, Actions saved the new cache under key `delisted-catalog-main-43149026053` successfully.
 
-The cache path list must remain stable for subsequent runs to restore this new checkpoint version. The next main-branch discovery run is the verification point: it must log a successful cache restore before advancing to the next chunk.
+The next main-branch run verified the new cache version and continued the cursor successfully.
+
+## Incremental checkpoint verification — run 43150217437
+
+- Main-branch commit: `0aa7b193545fc6361907d46bf9fbffcef0b9cbbf`
+- Artifact: `delisted-discovery-evidence` (artifact ID `13913059885`)
+- Cache restore: `Cache restored from key: delisted-catalog-main-43149026053`
+- Cache save: `Cache saved with key: delisted-catalog-main-43150217437`
+
+The log begins with `600410.SH`, the single failed symbol from the prior run, and records it as a successful retry. This confirms the checkpoint resumed instead of restarting at the beginning of the code space.
+
+### Second bounded batch and cumulative discovery state
+
+| Measure | Second run | Cumulative checkpoint |
+|---|---:|---:|
+| Probe slots | 500 | 1,000 |
+| Completed probes | 500 | 999 |
+| Positive Sina history responses | 453 | 874 |
+| No-history responses | 47 | 125 |
+| Failed probes remaining | 0 | 0 |
+| Pending code probes | 34,751 | 34,751 |
+
+The cumulative total is the persisted catalogue after the second run. The earlier pre-schema-change run is not added again because the cache-version miss caused the first post-change run to repeat that bounded chunk.
+
+### Updated Baostock cross-check
+
+The same current Baostock snapshot (7,291 rows; 5,565 SH/SZ stocks; 341 formal delistings; 5,224 currently listed stocks) was compared with all 874 cumulative positive Sina hits:
+
+| Classification | Count | Share of positive probes |
+|---|---:|---:|
+| Matched Baostock formal delistings | 128 | 14.6% |
+| Matched currently listed stocks | 746 | 85.4% |
+| Not present in this Baostock snapshot | 0 | 0.0% |
+
+The 128 formal matches are still only a subset of Baostock's 341 formal SH/SZ delistings. Discovery remains incomplete. The 746 current-listing matches again show that a positive Sina history response cannot be treated as a delisting label.
 
 ## Eligibility and model impact
 
