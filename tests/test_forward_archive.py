@@ -310,6 +310,7 @@ def test_partial_archive_uses_tencent_breadth_when_eastmoney_is_rate_limited(tmp
     assert breadth["advances"] == 1
     assert breadth["declines"] == 1
     assert breadth["total_amount"] == 3000000.0
+    assert breadth["source_id"] == "tencent.stock_zh_a_spot_tx"
     report = json.loads(
         (tmp_path / "collection_report" / "2026-11-12.json").read_text(encoding="utf-8")
     )
