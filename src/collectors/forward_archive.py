@@ -159,21 +159,26 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             )
             if fallback is None or fallback.empty:
                 raise RuntimeError(f"Tencent index fallback returned empty data for {code}") from exc
-            required = {"date", "open", "high", "low", "close", "amount"}
+            required = {"date", "open", "high", "low", "close", "volume"}
             if required - set(fallback.columns):
                 raise RuntimeError(
                     f"Tencent index fallback schema changed for {code}: "
                     + ",".join(sorted(required - set(fallback.columns)))
                 ) from exc
-            raw = pd.DataFrame({
+            raw_data = {
                 "日期": fallback["date"],
                 "开盘": fallback["open"],
                 "最高": fallback["high"],
                 "最低": fallback["low"],
                 "收盘": fallback["close"],
-                # Tencent's index 'amount' is trading volume (手), not turnover.
-                "成交量": fallback["amount"],
-            })
+                "成交量": fallback["volume"],
+            }
+            # Current AKShare exposes Tencent turnover as amount (yuan).
+            # Older releases exposed amount as volume (lots); do not guess that
+            # legacy schema or silently relabel turnover as volume.
+            if "amount" in fallback.columns:
+                raw_data["成交额"] = fallback["amount"]
+            raw = pd.DataFrame(raw_data)
         normalized = normalize_index_history_snapshot(
             raw, symbol=code, fetched_at=captured
         )
