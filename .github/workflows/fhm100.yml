@@ -41,7 +41,11 @@ jobs:
       - name: Commit forward-only stock history archive
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
         run: |
-          git add data/forward_archive/stock_daily data/forward_archive/stock_daily_manifest
+          for archive_path in data/forward_archive/stock_daily data/forward_archive/stock_daily_manifest; do
+            if [ -d "$archive_path" ]; then
+              git add -A "$archive_path"
+            fi
+          done
           if ! git diff --cached --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
