@@ -77,27 +77,34 @@ def normalize_index_history_snapshot(
     """Normalize index_zh_a_hist output as retrieval-time-only observations."""
     columns = {
         "日期": "trade_date", "开盘": "open", "最高": "high", "最低": "low",
-        "收盘": "close", "成交量": "volume", "成交额": "amount",
+        "收盘": "close", "成交量": "volume",
     }
     missing = set(columns) - set(frame.columns)
     if missing:
         raise ValueError("AKShare index history schema missing: " + ",".join(sorted(missing)))
     captured = _utc(fetched_at)
-    out = frame[list(columns)].rename(columns=columns).copy()
+    selected = list(columns) + (["成交额"] if "成交额" in frame.columns else [])
+    out = frame[selected].rename(columns={**columns, "成交额": "amount"}).copy()
+    if "amount" not in out.columns:
+        # Some independent providers expose index volume but not traded value.
+        # Keep turnover explicitly missing; never relabel volume as amount.
+        out["amount"] = float("nan")
     out.insert(0, "index_symbol", str(symbol).zfill(6))
     out["trade_date"] = pd.to_datetime(out["trade_date"], errors="coerce")
     for col in ("open", "high", "low", "close", "volume", "amount"):
         out[col] = pd.to_numeric(out[col], errors="coerce")
     if out["trade_date"].isna().any() or out.duplicated(["index_symbol", "trade_date"]).any():
         raise ValueError("AKShare index history contains invalid or duplicate dates")
-    numeric = out[["open", "high", "low", "close", "volume", "amount"]]
-    if numeric.isna().any().any() or not numeric.apply(lambda c: c.map(pd.notna)).all().all():
-        raise ValueError("AKShare index history contains non-numeric values")
+    numeric = out[["open", "high", "low", "close", "volume"]]
+    if numeric.isna().any().any():
+        raise ValueError("AKShare index history contains non-numeric OHLC/volume values")
+    if (out["amount"].dropna() < 0).any():
+        raise ValueError("AKShare index history contains negative turnover values")
     if ((out[["open", "high", "low", "close"]] <= 0).any().any()
-            or (out[["volume", "amount"]] < 0).any().any()
+            or (out["volume"] < 0).any()
             or (out["high"] < out[["open", "low", "close"]].max(axis=1)).any()
             or (out["low"] > out[["open", "high", "close"]].min(axis=1)).any()):
-        raise ValueError("AKShare index history contains invalid OHLC/volume/amount values")
+        raise ValueError("AKShare index history contains invalid OHLC/volume values")
     # Per-row hashes prevent a rolling 180-day request window from causing
     # unchanged historical index bars to be appended again every day.
     out["source_revision"] = out.apply(_row_revision, axis=1)
