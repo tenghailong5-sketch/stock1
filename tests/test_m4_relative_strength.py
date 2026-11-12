@@ -81,7 +81,7 @@ def test_residual_strength_uses_prior_daily_returns_and_audits_stock_pool():
         for date in dates:
             industry_rows.append({
                 "trade_date": date, "industry_code": code,
-                "industry_return": 0.0005 * scale,
+                "industry_return": 0.0005 * scale + 0.0002 * np.sin(dates.get_loc(date) * 0.7),
                 "industry_return_5": 0.012 * scale,
                 "available_time": available,
             })
