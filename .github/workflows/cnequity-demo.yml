@@ -32,7 +32,7 @@ permissions:
 
 concurrency:
   group: cnequity-demo-validation-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   demo:
@@ -97,6 +97,7 @@ jobs:
           else
             BAR_END="$(TZ=Asia/Shanghai date +%F)"
           fi
+          echo "BAR_END=$BAR_END" >> "$GITHUB_ENV"
           BAR_START="$(TZ=Asia/Shanghai date -d '180 days ago' +%F)"
           echo "Bounded daily-bar validation window: ${BAR_START}..${BAR_END} (Asia/Shanghai ${LOCAL_HHMM})"
           cne backfill daily_bars --start "$BAR_START" --end "$BAR_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/daily-bars-plan.log
@@ -168,7 +169,8 @@ jobs:
       - name: Discover confirmed delisted securities (resumable bounded sweep)
         run: |
           set -euo pipefail
-          python cnequity-source/scripts/delisted_ops.py --config "$DELISTED_CONFIG" discover --limit 500 2>&1 | tee validation/cnequity-demo/delisted-discovery.log
+          # The upstream discovery sweep checkpoints every 100 probes. Keep each Actions run to one checkpointed chunk so it can finish inside the job timeout; later runs resume from the cached catalogue.
+          python cnequity-source/scripts/delisted_ops.py --config "$DELISTED_CONFIG" discover --limit 100 2>&1 | tee validation/cnequity-demo/delisted-discovery.log
           cne delisted status --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-before-backfill.log
       - name: Plan and backfill confirmed delisted-security daily bars
         run: |
@@ -178,6 +180,7 @@ jobs:
           cne delisted status --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-after-backfill.log
           python - <<'PY'
           import json
+          import os
           import re
           from pathlib import Path
 
@@ -188,7 +191,7 @@ jobs:
           report = {
               "profile": "delisted",
               "start": "2016-01-01",
-              "end": "2026-11-10",
+              "end": os.environ["BAR_END"],
               "rows_written_reported": rows[-1].replace(",", "") if rows else None,
               "symbol_count_reported": symbols[-1].replace(",", "") if symbols else None,
               "log_tail": log[-6000:],
@@ -202,8 +205,8 @@ jobs:
       - name: Extend trading calendar over recovered delisted history
         run: |
           set -euo pipefail
-          cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/trading-calendar-plan.log
-          cne backfill trading_calendar --start 2016-01-01 --end 2026-11-10 --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/trading-calendar-backfill.log
+          cne backfill trading_calendar --start 2016-01-01 --end "$BAR_END" --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/trading-calendar-plan.log
+          cne backfill trading_calendar --start 2016-01-01 --end "$BAR_END" --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/trading-calendar-backfill.log
       - name: Derive and validate adjustment factors
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
