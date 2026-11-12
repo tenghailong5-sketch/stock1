@@ -108,6 +108,7 @@ jobs:
           else
             BAR_END="$(TZ=Asia/Shanghai date +%F)"
           fi
+          echo "BAR_START=$BAR_START" >> "$GITHUB_ENV"
           echo "BAR_END=$BAR_END" >> "$GITHUB_ENV"
           python scripts/prepare_formal_delisted_recovery.py \
             --config "$DELISTED_CONFIG" \
