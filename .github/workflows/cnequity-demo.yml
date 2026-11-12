@@ -97,6 +97,8 @@ jobs:
           else
             BAR_END="$(TZ=Asia/Shanghai date +%F)"
           fi
+          # Reuse the same Shanghai-local cutoff in downstream history/calendar
+          # evidence rather than leaving a stale hard-coded date in the workflow.
           echo "BAR_END=$BAR_END" >> "$GITHUB_ENV"
           BAR_START="$(TZ=Asia/Shanghai date -d '180 days ago' +%F)"
           echo "Bounded daily-bar validation window: ${BAR_START}..${BAR_END} (Asia/Shanghai ${LOCAL_HHMM})"
@@ -127,44 +129,77 @@ jobs:
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
         run: |
-          cne backfill corporate_actions --start 2023-01-01 --end 2026-11-10 --symbols "$DEMO_SYMBOLS" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-plan.log
-          cne backfill corporate_actions --start 2023-01-01 --end 2026-11-10 --symbols "$DEMO_SYMBOLS" 2>&1 | tee validation/cnequity-demo/corporate-actions-backfill.log
+          set -euo pipefail
+          # The main sample lake feeds the main sample adjustment-factor derivation.
+          ACTION_END="$(TZ=Asia/Shanghai date -d 'yesterday' +%F)"
+          export ACTION_END
+          cne backfill corporate_actions --start 2023-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-main-plan.log
+          cne backfill corporate_actions --start 2023-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/corporate-actions-main-backfill.log
+          # The delisted-history lake is also bootstrapped with a one-session
+          # demo sample; keep its action ledger aligned with those sample bars.
+          cne backfill corporate_actions --start 1990-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-delisted-sample-plan.log
+          cne backfill corporate_actions --start 1990-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/corporate-actions-delisted-sample-backfill.log
           python - <<'PY'
           import json
           import os
           from pathlib import Path
           import pandas as pd
+          from cnequity.config import load_config
           from cnequity.query import load
 
           symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
-          actions = load("corporate_actions", symbols=symbols, start="2023-01-01", end="2026-11-10")
+          config = load_config(os.environ["CNE_CONFIG"])
+          actions = load("corporate_actions", symbols=symbols, start="2023-01-01",
+                         end=os.environ["ACTION_END"], config=config)
           if hasattr(actions, "to_pandas"):
               actions = actions.to_pandas()
           required = {"symbol", "ex_date", "action_type", "source"}
           missing = sorted(required - set(actions.columns))
           if missing:
-              raise RuntimeError(f"Corporate-action schema missing fields: {missing}")
+              raise RuntimeError(f"Main sample corporate-action schema missing fields: {missing}")
           if actions.empty:
-              raise RuntimeError("No corporate-action rows returned for the bounded sample")
+              raise RuntimeError("No corporate-action rows returned for the bounded main sample")
           if actions.duplicated(["symbol", "ex_date", "action_type"]).any():
-              raise RuntimeError("Duplicate corporate-action primary keys")
+              raise RuntimeError("Duplicate main sample corporate-action primary keys")
           if actions[list(required)].isna().any().any():
-              raise RuntimeError("Corporate-action identity/source fields contain nulls")
+              raise RuntimeError("Main sample corporate-action identity/source fields contain nulls")
           report = {
-              "requested_symbols": sorted(symbols),
-              "row_count": int(len(actions)),
-              "symbols_with_events": sorted(actions["symbol"].astype(str).unique().tolist()),
+              "requested_symbols": sorted(symbols), "window": {"start": "2023-01-01", "end": os.environ["ACTION_END"]},
+              "row_count": int(len(actions)), "symbols_with_events": sorted(actions["symbol"].astype(str).unique().tolist()),
               "symbols_with_events_count": int(actions["symbol"].nunique()),
               "event_types": sorted(actions["action_type"].astype(str).unique().tolist()),
               "sources": sorted(actions["source"].astype(str).unique().tolist()),
               "ex_date_min": str(pd.to_datetime(actions["ex_date"]).min().date()),
               "ex_date_max": str(pd.to_datetime(actions["ex_date"]).max().date()),
               "historical_pit_eligible": False,
-              "note": "Backfilled event history; fetched_at is not proof of historical public availability."
+              "note": "Backfilled event history; fetched_at is not proof of historical public availability.",
           }
-          Path("validation/cnequity-demo/corporate-actions-validation.json").write_text(
+          Path("validation/cnequity-demo/corporate-actions-main-validation.json").write_text(
               json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
           print(json.dumps(report, ensure_ascii=False, indent=2))
+          delisted_config = load_config(os.environ["DELISTED_CONFIG"])
+          delisted_sample = load(
+              "corporate_actions", symbols=symbols, start="1990-01-01",
+              end=os.environ["ACTION_END"], config=delisted_config,
+          )
+          if hasattr(delisted_sample, "to_pandas"):
+              delisted_sample = delisted_sample.to_pandas()
+          if delisted_sample.empty:
+              raise RuntimeError("No corporate-action rows for the delisted lake's bootstrapped demo symbols")
+          missing = sorted(required - set(delisted_sample.columns))
+          if missing:
+              raise RuntimeError(f"Delisted sample corporate-action schema missing fields: {missing}")
+          if delisted_sample[list(required)].isna().any().any():
+              raise RuntimeError("Delisted sample corporate-action identity/source fields contain nulls")
+          if delisted_sample.duplicated(["symbol", "ex_date", "action_type"]).any():
+              raise RuntimeError("Duplicate corporate-action keys in the delisted lake's demo sample")
+          Path("validation/cnequity-demo/corporate-actions-delisted-sample-validation.json").write_text(
+              json.dumps({
+                  "requested_symbols": sorted(symbols),
+                  "row_count": int(len(delisted_sample)),
+                  "symbols_with_events": sorted(delisted_sample["symbol"].astype(str).unique().tolist()),
+                  "historical_pit_eligible": False,
+              }, ensure_ascii=False, indent=2), encoding="utf-8")
           PY
       - name: Discover confirmed delisted securities (resumable bounded sweep)
         run: |
@@ -172,6 +207,65 @@ jobs:
           # The upstream discovery sweep checkpoints every 100 probes. Keep each Actions run to one checkpointed chunk so it can finish inside the job timeout; later runs resume from the cached catalogue.
           python cnequity-source/scripts/delisted_ops.py --config "$DELISTED_CONFIG" discover --limit 100 2>&1 | tee validation/cnequity-demo/delisted-discovery.log
           cne delisted status --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-before-backfill.log
+      - name: Backfill corporate actions for confirmed delisted securities
+        run: |
+          set -euo pipefail
+          # Use the confirmed catalog, not today's demo symbols, so recovered
+          # delisted bars and their action ledger cover the same securities.
+          DELISTED_SYMBOLS="$(python - <<'PY'
+          import os
+          from cnequity.config import load_config
+          from cnequity.quality.delisted_coverage import load_delisted_catalog
+
+          config = load_config(os.environ["DELISTED_CONFIG"])
+          print(",".join(sorted(load_delisted_catalog(config))))
+          PY
+          )"
+          test -n "$DELISTED_SYMBOLS"
+          export DELISTED_SYMBOLS
+          ACTION_END="$(TZ=Asia/Shanghai date -d 'yesterday' +%F)"
+          export ACTION_END
+          cne backfill corporate_actions --start 1990-01-01 --end "$ACTION_END" --symbols "$DELISTED_SYMBOLS" --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-delisted-plan.log
+          cne backfill corporate_actions --start 1990-01-01 --end "$ACTION_END" --symbols "$DELISTED_SYMBOLS" --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/corporate-actions-delisted-backfill.log
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import pandas as pd
+          from cnequity.config import load_config
+          from cnequity.query import load
+
+          symbols = [s for s in os.environ["DELISTED_SYMBOLS"].split(",") if s]
+          config = load_config(os.environ["DELISTED_CONFIG"])
+          actions = load("corporate_actions", symbols=symbols, start="1990-01-01",
+                         end=os.environ["ACTION_END"], config=config)
+          if hasattr(actions, "to_pandas"):
+              actions = actions.to_pandas()
+          required = {"symbol", "ex_date", "action_type", "source"}
+          missing = sorted(required - set(actions.columns))
+          if missing:
+              raise RuntimeError(f"Delisted corporate-action schema missing fields: {missing}")
+          if actions.empty:
+              raise RuntimeError("No corporate-action rows returned for confirmed delisted securities")
+          if actions.duplicated(["symbol", "ex_date", "action_type"]).any():
+              raise RuntimeError("Duplicate delisted corporate-action primary keys")
+          if actions[list(required)].isna().any().any():
+              raise RuntimeError("Delisted corporate-action identity/source fields contain nulls")
+          report = {
+              "catalog_symbols": sorted(symbols), "catalog_symbol_count": len(symbols),
+              "row_count": int(len(actions)), "symbols_with_events": sorted(actions["symbol"].astype(str).unique().tolist()),
+              "symbols_with_events_count": int(actions["symbol"].nunique()),
+              "event_types": sorted(actions["action_type"].astype(str).unique().tolist()),
+              "sources": sorted(actions["source"].astype(str).unique().tolist()),
+              "ex_date_min": str(pd.to_datetime(actions["ex_date"]).min().date()),
+              "ex_date_max": str(pd.to_datetime(actions["ex_date"]).max().date()),
+              "historical_pit_eligible": False,
+              "note": "Backfilled event history; fetched_at is not proof of historical public availability.",
+          }
+          Path("validation/cnequity-demo/corporate-actions-delisted-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
       - name: Plan and backfill confirmed delisted-security daily bars
         run: |
           set -euo pipefail
@@ -279,6 +373,79 @@ jobs:
           Path("validation/cnequity-demo/strict-adjustment-check.json").write_text(
               json.dumps({"raw_rows": int(len(bars)), "strict_hfq_rows": int(len(adjusted)),
                           "strict_hfq_close_finite": True}, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
+      - name: Derive and validate adjustment factors for recovered delisted history
+        run: |
+          set -euo pipefail
+          cne derive adj_factors --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-adj-factors.log
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import numpy as np
+          from cnequity.config import load_config
+          from cnequity.query import load
+
+          config = load_config(os.environ["DELISTED_CONFIG"])
+          bars = load("daily_bars", adjust=None, config=config)
+          factors = load("adj_factors", config=config)
+          if hasattr(bars, "to_pandas"):
+              bars = bars.to_pandas()
+          if hasattr(factors, "to_pandas"):
+              factors = factors.to_pandas()
+          if bars is None or bars.empty:
+              raise RuntimeError("No daily bars in isolated delisted-history lake")
+          if factors is None or factors.empty:
+              raise RuntimeError("No adjustment factors in isolated delisted-history lake")
+          required = {"symbol", "trade_date", "adjust_type", "factor", "source"}
+          missing = sorted(required - set(factors.columns))
+          if missing:
+              raise RuntimeError(f"Delisted adjustment-factor schema missing fields: {missing}")
+          if factors.duplicated(["symbol", "trade_date", "adjust_type"]).any():
+              raise RuntimeError("Duplicate delisted adjustment-factor primary keys")
+          values = factors["factor"].to_numpy(dtype=float)
+          if not np.isfinite(values).all() or (values <= 0).any():
+              raise RuntimeError("Delisted adjustment factors contain non-finite or non-positive values")
+          hfq = factors[factors["adjust_type"].astype(str).str.lower() == "hfq"]
+          if hfq.empty:
+              raise RuntimeError("No hfq adjustment factors for recovered delisted history")
+          keys = bars[["symbol", "trade_date"]].drop_duplicates()
+          matched = keys.merge(hfq[["symbol", "trade_date"]], on=["symbol", "trade_date"], how="left", indicator=True)
+          coverage = []
+          for symbol in sorted(keys["symbol"].astype(str).unique()):
+              subset = matched[matched["symbol"].astype(str) == symbol]
+              total = int(len(subset))
+              count = int((subset["_merge"] == "both").sum())
+              coverage.append({
+                  "symbol": symbol,
+                  "matched_sessions": count,
+                  "bar_sessions": total,
+                  "coverage": round(count / total, 4) if total else 0.0,
+              })
+          report = {
+              "bar_rows": int(len(bars)),
+              "factor_rows": int(len(factors)),
+              "hfq_factor_rows": int(len(hfq)),
+              "factor_sources": sorted(factors["source"].astype(str).unique().tolist()),
+              "factor_coverage": coverage,
+              "all_factors_finite_positive": True,
+              "primary_keys_unique": True,
+              "historical_pit_eligible": False,
+              "note": "Recovered historical bars and derived factors are not historical point-in-time certified.",
+          }
+          Path("validation/cnequity-demo/delisted-adj-factor-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          low = [x["symbol"] for x in coverage if x["coverage"] < 0.8]
+          if low:
+              raise RuntimeError(f"Insufficient delisted hfq factor coverage (<80%): {low[:50]}")
+          adjusted = load("daily_bars", adjust="hfq", strict_adj=True, config=config)
+          if hasattr(adjusted, "to_pandas"):
+              adjusted = adjusted.to_pandas()
+          if len(adjusted) != len(bars):
+              raise RuntimeError(f"Delisted strict hfq row count mismatch: raw={len(bars)}, adjusted={len(adjusted)}")
+          if adjusted["close"].isna().any() or not np.isfinite(adjusted["close"].to_numpy(dtype=float)).all():
+              raise RuntimeError("Delisted strict hfq adjusted close contains missing/non-finite values")
           PY
       - name: Capture full CNEquity quality and coverage audit
         if: success()
