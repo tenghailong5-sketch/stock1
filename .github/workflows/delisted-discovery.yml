@@ -61,6 +61,8 @@ jobs:
           key: delisted-catalog-main-${{ github.run_id }}
           restore-keys: |
             delisted-catalog-main-
+          # Keep completed 100-code checkpoints even if a later step/job fails.
+          save-always: true
       - name: Initialize minimal isolated lake
         run: |
           set -euo pipefail
@@ -112,6 +114,7 @@ jobs:
           print(json.dumps(summary, ensure_ascii=False, indent=2))
           PY
       - name: Cross-check probe hits against Baostock security master
+        timeout-minutes: 5
         continue-on-error: true
         run: |
           set -euo pipefail
