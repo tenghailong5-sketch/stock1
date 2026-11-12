@@ -1,0 +1,39 @@
+name: CNEquity Beijing Data Qualification
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/probe_cnequity_bj.py"
+      - ".github/workflows/cnequity-bj-probe.yml"
+permissions:
+  contents: read
+concurrency:
+  group: cnequity-bj-probe
+  cancel-in-progress: true
+jobs:
+  cnequity-bj:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install free CNEquity data lake
+        run: pip install "cnequity==0.23.0"
+      - name: Probe Beijing Exchange historical bars
+        run: |
+          cne init --profile demo --symbols 830799.BJ --days 119 \
+            --data-root output/cnequity-bj \
+            --config-out output/cnequity-bj.toml \
+            --trade-date 2026-11-11
+          python scripts/probe_cnequity_bj.py
+      - name: Upload CNEquity qualification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cnequity-beijing-data-qualification
+          path: output/cnequity_bj_probe.json
+          if-no-files-found: warn
+          retention-days: 30
