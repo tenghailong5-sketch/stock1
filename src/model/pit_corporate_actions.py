@@ -188,7 +188,7 @@ def build_pit_total_return_prices(
                 if prev_close <= 0 or wealth_close <= 0 or wealth_high <= 0:
                     raise ValueError("non_positive_total_return_wealth")
                 close_index.append(close_index[-1] * wealth_close / prev_close)
-                high_index.append(close_index[-2] * wealth_high / prev_close)
+                high_index.append(close_index[-1] * wealth_high / prev_close)
                 cumulative_available = max(cumulative_available, row.available_time)
                 if not pd.isna(event_available):
                     cumulative_available = max(cumulative_available, event_available)
