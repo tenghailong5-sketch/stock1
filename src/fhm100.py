@@ -34,7 +34,7 @@ def archive_stock_history_snapshot(frame, symbol, *, captured_at, archive_root=P
         orient="records", date_format="iso", force_ascii=False
     ))
     rows_added = append_jsonl_atomic(
-        archive_root / "stock_daily" / f"{day}.jsonl",
+        archive_root / "stock_daily" / f"{str(symbol).zfill(6)}.jsonl",
         records,
         ("symbol", "trade_date", "source_revision"),
     )
@@ -54,7 +54,7 @@ def archive_stock_history_snapshot(frame, symbol, *, captured_at, archive_root=P
         "snapshot_scope": "current_symbol_history_retrieval",
     }]
     manifests_added = append_jsonl_atomic(
-        archive_root / "stock_daily_manifest" / f"{day}.jsonl",
+        archive_root / "stock_daily_manifest" / f"{str(symbol).zfill(6)}.jsonl",
         manifest,
         ("symbol", "snapshot_id"),
     )
