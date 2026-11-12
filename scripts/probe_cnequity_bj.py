@@ -1,4 +1,4 @@
-"""Qualify CNEquity's free Beijing-board history path in a tiny isolated lake."""
+"""Qualify CNEquity's free Beijing-board history path via full-market ingestion."""
 from __future__ import annotations
 import json, os
 from pathlib import Path
@@ -27,9 +27,16 @@ try:
         report["first_date"] = str(pd.to_datetime(frame[date_col]).min().date())
         report["last_date"] = str(pd.to_datetime(frame[date_col]).max().date())
         report["symbols"] = sorted(frame["symbol"].astype(str).unique().tolist()) if "symbol" in frame else []
-    required = {"open", "high", "low", "close", "volume", "amount"}
+    required = {"open", "high", "low", "close", "volume", "amount", "symbol"}
     report["missing_fields"] = sorted(required - set(frame.columns))
-    report["qualified"] = len(frame) >= 30 and not report["missing_fields"]
+    date_col = "trade_date" if "trade_date" in frame.columns else "date"
+    report["unique_sessions"] = int(pd.to_datetime(frame[date_col]).nunique()) if len(frame) and date_col in frame else 0
+    report["target_symbol_present"] = bool(len(frame) and set(frame["symbol"].astype(str)) == {"830799.BJ"})
+    report["qualified"] = (
+        report["unique_sessions"] >= 119
+        and report["target_symbol_present"]
+        and not report["missing_fields"]
+    )
 except Exception as exc:
     report["qualified"] = False
     report["error"] = f"{type(exc).__name__}: {str(exc)[:400]}"
