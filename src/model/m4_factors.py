@@ -162,17 +162,34 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
     x["volume_ma5"] = grouped["volume"].transform(lambda s: s.rolling(5, min_periods=5).mean())
     x["volume_ma20"] = grouped["volume"].transform(lambda s: s.rolling(20, min_periods=20).mean())
     x["volume_ma5_to_ma20"] = x["volume_ma5"] / x["volume_ma20"]
-    x["price_up_volume_confirmation"] = (
-        (x["close"] > grouped["close"].shift(1)) &
-        (x["amount"] > x["amount_ma20"])
+
+    # These price/volume confirmations compare different trading sessions.
+    # Raw OHLC can jump mechanically across ex-dates, so use only the verified
+    # point-in-time total-return close. If it is unavailable, preserve NA rather
+    # than silently turning an unknown condition into False.
+    comparison_close = pd.to_numeric(
+        x.get("pit_total_return_close", pd.Series(np.nan, index=x.index)),
+        errors="coerce",
+    ).where(x["cross_session_price_status"].eq("READY"))
+    previous_comparison_close = comparison_close.groupby(x["symbol"]).shift(1)
+    comparable = comparison_close.notna() & previous_comparison_close.notna()
+
+    def _nullable_flag(condition: pd.Series) -> pd.Series:
+        result = pd.Series(pd.NA, index=x.index, dtype="boolean")
+        result.loc[comparable] = condition.loc[comparable].astype(bool)
+        return result
+
+    x["price_up_volume_confirmation"] = _nullable_flag(
+        (comparison_close > previous_comparison_close)
+        & (x["amount"] > x["amount_ma20"])
     )
-    x["high_volume_stall"] = (
-        (x["amount"] > 1.5 * x["amount_ma20"]) &
-        (x["close"] <= grouped["close"].shift(1))
+    x["high_volume_stall"] = _nullable_flag(
+        (x["amount"] > 1.5 * x["amount_ma20"])
+        & (comparison_close <= previous_comparison_close)
     )
-    x["low_volume_pullback"] = (
-        (x["close"] < grouped["close"].shift(1)) &
-        (x["volume"] < x["volume_ma5"])
+    x["low_volume_pullback"] = _nullable_flag(
+        (comparison_close < previous_comparison_close)
+        & (x["volume"] < x["volume_ma5"])
     )
     return x
 
