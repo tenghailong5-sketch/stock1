@@ -142,8 +142,22 @@ def build_total_return_index(prices: pd.DataFrame, actions: pd.DataFrame, *,
         g["total_return_index"] = idx
         g["corporate_action_status"] = status
         out.append(g)
-    return pd.concat(out, ignore_index=True) if out else prices.assign(
+    result = pd.concat(out, ignore_index=True) if out else prices.assign(
         total_return_index=np.nan, corporate_action_status="NO_DATA")
+    # Express the raw intraday high on the same point-in-time total-return
+    # wealth scale as the close. This is valid only for rows whose action ledger
+    # was explicitly attested complete and whose total-return path is VERIFIED.
+    verified = result["corporate_action_status"].eq("VERIFIED")
+    total_return = pd.to_numeric(result["total_return_index"], errors="coerce")
+    raw_close = pd.to_numeric(result["close"], errors="coerce") if "close" in result else pd.Series(np.nan, index=result.index)
+    result["pit_total_return_close"] = total_return.where(verified)
+    if "high" in result.columns:
+        raw_high = pd.to_numeric(result["high"], errors="coerce")
+        valid = verified & total_return.notna() & raw_close.gt(0) & raw_high.gt(0)
+        result["pit_total_return_high"] = (raw_high * total_return / raw_close).where(valid)
+    else:
+        result["pit_total_return_high"] = np.nan
+    return result
 
 
 def _pit_filter(frame: pd.DataFrame, decision_time, name: str) -> pd.DataFrame:
