@@ -1,0 +1,34 @@
+name: Free Data Provider Qualification
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/probe_baostock.py"
+      - ".github/workflows/data-provider-probe.yml"
+permissions:
+  contents: read
+concurrency:
+  group: data-provider-probe
+  cancel-in-progress: false
+jobs:
+  baostock-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install probe dependencies
+        run: pip install "baostock==0.9.4" "pandas>=2.2,<3"
+      - name: Probe free data coverage
+        run: python scripts/probe_baostock.py
+      - name: Upload provider qualification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: free-data-provider-qualification
+          path: output/baostock_data_probe.json
+          if-no-files-found: warn
+          retention-days: 30
