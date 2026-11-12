@@ -20,7 +20,7 @@ def _provider_history(rows=30):
 
 def _normalized_history(rows=30):
     raw = _provider_history(rows)
-    captured = pd.Timestamp("2026-11-12T08:00:00Z")
+    captured = pd.Timestamp("2026-11-11T08:00:00Z")
     lineage = fhm100.normalize_daily_history_snapshot(
         raw, symbol="000001", fetched_at=captured
     )[["trade_date", "available_time", "source_id", "source_revision"]]
