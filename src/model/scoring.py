@@ -150,10 +150,14 @@ def score_factor_bundle(frame, factor_map, *, date_col="trade_date"):
         if not isinstance(spec, tuple) or len(spec) != 2:
             raise ValueError("invalid factor mapping for " + output_name)
         raw_col, higher_is_better = spec
+        if not isinstance(raw_col, str) or not raw_col:
+            raise ValueError("raw factor column must be a non-empty string")
+        if not isinstance(higher_is_better, bool):
+            raise ValueError("higher_is_better must be an explicit boolean for " + output_name)
         if raw_col not in out:
             raise ValueError("missing raw factor column: " + raw_col)
         out[output_name] = rank_factor_by_date(out, raw_col, date_col=date_col,
-                                               higher_is_better=bool(higher_is_better))
+                                               higher_is_better=higher_is_better)
     return out
 
 
