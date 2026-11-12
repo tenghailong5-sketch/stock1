@@ -7,7 +7,7 @@ on:
         description: "Fetch and validate providers without writing archive data"
         required: true
         type: boolean
-        default: true
+        default: false
   schedule:
     - cron: "30 8 * * 1-5" # 16:30 Beijing time; schedule runs from the default branch only
 
@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: fhm100-forward-archive
+  group: fhm100-daily
   cancel-in-progress: false
 
 jobs:
