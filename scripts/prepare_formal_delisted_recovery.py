@@ -121,6 +121,8 @@ def prepare(
         or identity.get("claim") != "delisted_security_identity"
         or identity.get("evidence_version") != 1
         or identity.get("source") != "baostock.query_stock_basic"
+        or identity.get("universe_scope") != "sh_sz_stock"
+        or identity.get("asset_type_filter") != "stock"
         or not isinstance(identity.get("listing_dates"), dict)
         or not isinstance(identity.get("delisted_symbols"), dict)
     ):
