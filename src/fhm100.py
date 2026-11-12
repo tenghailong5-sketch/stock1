@@ -359,6 +359,7 @@ def main():
     try:
         u=universe()
         w,e=scan(u)
+        # [live-scan] verify all-failed history reporting and archive persistence
         w=ensure_watchlist_schema(w)
         if not w.empty:
             w, observation_audit = rank_price_observations(
