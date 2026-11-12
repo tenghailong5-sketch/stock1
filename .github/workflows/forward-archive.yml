@@ -10,6 +10,12 @@ on:
         default: false
   schedule:
     - cron: "30 8 * * 1-5" # 16:30 Beijing time; schedule runs from the default branch only
+  push:
+    branches: [main]
+    paths:
+      - "src/collectors/forward_archive.py"
+      - "src/providers/**"
+      - ".github/workflows/forward-archive.yml"
 
 permissions:
   contents: write
