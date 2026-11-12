@@ -125,7 +125,28 @@ def _records(frame: pd.DataFrame) -> list[dict]:
     return json.loads(payload)
 
 
-def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None) -> dict[str, int]:
+def _tencent_breadth_frame(ak_module):
+    """Convert Tencent's independent spot snapshot into the normalized AKShare shape."""
+    provider = getattr(ak_module, "stock_zh_a_spot_tx", None)
+    if not callable(provider):
+        raise RuntimeError("Tencent spot fallback is unavailable")
+    frame = provider()
+    required = {"code", "zxj", "zdf", "turnover"}
+    if frame is None or frame.empty or required - set(frame.columns):
+        missing = sorted(required - set(frame.columns)) if frame is not None else sorted(required)
+        raise RuntimeError("Tencent spot fallback schema changed: " + ",".join(missing))
+    out = pd.DataFrame({
+        "代码": frame["code"].astype(str).str.strip().str.lower().str[-6:].str.zfill(6),
+        "最新价": pd.to_numeric(frame["zxj"], errors="coerce"),
+        "涨跌幅": pd.to_numeric(frame["zdf"], errors="coerce"),
+        "成交额": pd.to_numeric(frame["turnover"], errors="coerce") * 10000,
+    })
+    if out.empty or out["代码"].duplicated().any():
+        raise RuntimeError("Tencent spot fallback is empty or contains duplicate symbols")
+    return out
+
+
+def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, allow_partial: bool = False) -> dict[str, int]:
     ak_module = _RetryingProvider(ak_module, sleep_fn=retry_sleep)
     captured = pd.Timestamp(
         captured_at if captured_at is not None else datetime.now(ZoneInfo("Asia/Shanghai"))
@@ -186,23 +207,54 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
 
     # Industry availability must be stamped when each provider response finishes,
     # not with the collector's batch-start timestamp. Tests may inject a clock.
-    industry = fetch_current_industry_membership_snapshot(
-        ak_module, clock=industry_clock, pause_seconds=0.15
-    )
-    industry_records = _records(industry)
-    breadth = normalize_market_breadth_snapshot(
-        ak_module.stock_zh_a_spot_em(), fetched_at=captured
-    )
-    breadth_records = _records(breadth)
-    limit_pools = fetch_limit_pool_snapshots(
-        ak_module,
-        trade_date=captured.tz_convert("Asia/Shanghai").strftime("%Y%m%d"),
-        captured_at=captured,
-    )
-    limit_pool_records = _records(limit_pools)
-    sentiment = summarize_limit_pool_sentiment(limit_pools)
-    sentiment["trade_date"] = captured.tz_convert("Asia/Shanghai").strftime("%Y-%m-%d")
-    sentiment["capture_time"] = captured.isoformat()
+    source_status = {}
+    industry_records: list[dict] = []
+    try:
+        industry = fetch_current_industry_membership_snapshot(
+            ak_module, clock=industry_clock, pause_seconds=0.15
+        )
+        industry_records = _records(industry)
+        source_status["industry_membership"] = "ok"
+    except Exception as exc:
+        source_status["industry_membership"] = f"unavailable: {type(exc).__name__}: {str(exc)[:240]}"
+        if not allow_partial:
+            raise
+
+    breadth_records: list[dict] = []
+    try:
+        try:
+            breadth_raw = ak_module.stock_zh_a_spot_em()
+            breadth_source = "akshare.stock_zh_a_spot_em"
+        except Exception as exc:
+            if type(exc).__name__ != "Push2RateLimitError":
+                raise
+            breadth_raw = _tencent_breadth_frame(ak_module)
+            breadth_source = "tencent.stock_zh_a_spot_tx"
+        breadth = normalize_market_breadth_snapshot(breadth_raw, fetched_at=captured)
+        breadth_records = _records(breadth)
+        source_status["market_breadth"] = f"ok: {breadth_source}"
+    except Exception as exc:
+        source_status["market_breadth"] = f"unavailable: {type(exc).__name__}: {str(exc)[:240]}"
+        if not allow_partial:
+            raise
+
+    limit_pool_records: list[dict] = []
+    sentiment = None
+    try:
+        limit_pools = fetch_limit_pool_snapshots(
+            ak_module,
+            trade_date=captured.tz_convert("Asia/Shanghai").strftime("%Y%m%d"),
+            captured_at=captured,
+        )
+        limit_pool_records = _records(limit_pools)
+        sentiment = summarize_limit_pool_sentiment(limit_pools)
+        sentiment["trade_date"] = captured.tz_convert("Asia/Shanghai").strftime("%Y-%m-%d")
+        sentiment["capture_time"] = captured.isoformat()
+        source_status["limit_pools"] = "ok"
+    except Exception as exc:
+        source_status["limit_pools"] = f"unavailable: {type(exc).__name__}: {str(exc)[:240]}"
+        if not allow_partial:
+            raise
 
     if not write:
         return {
@@ -210,7 +262,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             "industry_membership": len(industry_records),
             "market_breadth": len(breadth_records),
             "limit_pools": len(limit_pool_records),
-            "market_sentiment": 1,
+            "market_sentiment": int(sentiment is not None),
         }
 
     counts: dict[str, int] = {}
@@ -227,22 +279,33 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         archive_root / "industry_membership" / f"{day}.jsonl",
         industry_records,
         ("snapshot_id", "symbol", "industry_code", "source_revision"),
-    )
+    ) if industry_records else 0
     counts["market_breadth"] = append_jsonl_atomic(
         archive_root / "market_breadth" / f"{day}.jsonl",
         breadth_records,
         ("snapshot_time", "source_revision"),
-    )
+    ) if breadth_records else 0
     counts["limit_pools"] = append_jsonl_atomic(
         archive_root / "limit_pools" / f"{day}.jsonl",
         limit_pool_records,
         ("event_type", "trade_date", "source_revision"),
-    )
+    ) if limit_pool_records else 0
     counts["market_sentiment"] = append_jsonl_atomic(
         archive_root / "market_sentiment" / f"{day}.jsonl",
         [sentiment],
         ("trade_date", "capture_time"),
-    )
+    ) if sentiment is not None else 0
+    if allow_partial:
+        report = {
+            "captured_at": captured.isoformat(),
+            "source_status": source_status,
+            "rows_appended": counts,
+            "partial": any(not status.startswith("ok") for status in source_status.values()),
+            "note": "Unavailable sources are explicitly recorded; missing data is not imputed.",
+        }
+        report_path = archive_root / "collection_report" / f"{day}.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return counts
 
 
@@ -253,7 +316,7 @@ def main() -> None:
     args = parser.parse_args()
     import akshare as ak
 
-    counts = collect(ak, Path(args.output), write=not args.dry_run)
+    counts = collect(ak, Path(args.output), write=not args.dry_run, allow_partial=True)
     print(json.dumps({"mode": "dry_run" if args.dry_run else "archive", "validated_rows": counts}, ensure_ascii=False, sort_keys=True))
 
 
