@@ -1,8 +1,6 @@
 name: Formal Delisted History Recovery
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
   schedule:
     # Saturday 04:00 Asia/Shanghai; Friday's market session is complete.
