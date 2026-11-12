@@ -6,8 +6,8 @@
 
 - `src/model/r21_core.py` 定义 A/B/C 三套权重，权重分别合计 100。
 - `scoring.py` 要求每个加权因子都存在且为有限数值；硬门槛独立判定，缺失或失败不能被高分抵消。
-- `pipeline.py` 仅接收已经构造好的因子百分位和门槛字段，是评分适配器，不负责从原始行情生成完整因子。
-- `src/fhm100.py` 当前传入 M5 的字段只有 `symbol` 与 `market_state`。因此正式因子全部缺失，M5 输出只能作为阻塞诊断，不得解释为正式分数或买入候选。
+- `pipeline.py` 仅接收已经构造好的因子百分位和门槛字段，是评分适配器，不负责从原始行情生成完整因子。M3 的市场环境映射是已定义的独立因子，不等于市场状态枚举本身。
+- `src/fhm100.py` 仅在 M3 独立达到 `READY` 时，向 A/C 传入按 R1 映射计算的 `market_environment`（0—100）；其他加权因子和硬门槛仍未完整，因此 M5 输出仍只能作为阻塞诊断，不得解释为正式分数或买入候选。B 的 `industry_market_environment` 不由单一市场分数替代。
 - 80 分为最低准入线；NEUTRAL 市场状态由管线提高至 85 分；RISK_OFF 由策略评分拒绝。不得下调门槛或以缺失值填分。
 
 ## 2. A/B/C 权重与数据就绪矩阵
@@ -20,7 +20,7 @@
 | A | stock_residual_strength | 25 | 个股对市场及行业收益的滚动残差强度 | BLOCKED | 历史行业归属、同步收益序列、滚动窗口与缺失规则验证 |
 | A | price_structure | 15 | 价格结构复合因子；现有 OHLC 可计算部分原语，但尚未映射成正式复合百分位 | PARTIAL | 明确原始模型子因子公式、公司行为总收益口径、完整横截面 |
 | A | trade_quality | 15 | 成交质量；成交额/量比仅为部分观察，不可替代换手率/订单流 | PARTIAL | 定义必需字段和缺失策略，验证换手率与量价口径 |
-| A | market_environment | 15 | 市场环境因子；M3 当前仅在前瞻档案 READY 时提供状态 | PARTIAL | 完整历史市场状态及因子百分位、可回放 PIT 数据 |
+| A | market_environment | 15 | M3 READY 时按 R1 映射输出 0—100 市场环境分；非 READY 不提供 | PARTIAL | 完整历史市场状态及因子百分位、可回放 PIT 数据 |
 | A | catalyst | 10 | 催化因子；AI 点评不是结构化事件源 | UNAVAILABLE | 公告/新闻原文、首次可用时间、事件分类/去重及风险标签 |
 | B | event_type | 20 | 事件类型 | UNAVAILABLE | 经过核验的事件池与适用涨跌停规则 |
 | B | pre_event_trend | 15 | 事件发生前趋势 | PARTIAL | 事件发生时点、事件前 PIT 行情与正式因子定义 |
@@ -32,7 +32,7 @@
 | C | pre_pullback_strength | 15 | 回撤前强度 | PARTIAL | 仅用回撤前可见数据计算，补齐行业/残差定义和横截面 |
 | C | pullback_reversal_structure | 25 | 回撤/反转结构 | PARTIAL | 明确原模型复合公式，验证交易日序列、停牌和公司行为 |
 | C | trade_quality | 20 | 成交质量 | PARTIAL | 同 A 成交质量完整字段与覆盖验证 |
-| C | market_environment | 15 | 市场环境 | PARTIAL | 完整 PIT 市场因子，而非仅有市场状态枚举 |
+| C | market_environment | 15 | M3 READY 时复用同一 R1 市场环境分；非 READY 不提供 | PARTIAL | 完整 PIT 市场因子，而非仅有市场状态枚举 |
 | C | catalyst_risk | 10 | 催化与风险 | UNAVAILABLE | 可追溯事件数据和风险标签 |
 
 ## 3. 硬门槛（不得并入权重抵消）
