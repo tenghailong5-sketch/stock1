@@ -1,4 +1,5 @@
 import pandas as pd
+import requests
 
 from src import fhm100
 
@@ -67,7 +68,7 @@ def test_scan_passes_lineage_into_m4_instead_of_dropping_every_symbol(monkeypatc
     assert "本次抓取时间戳不具备历史PIT资格" in watchlist.iloc[0]["M4数据口径"]
 
     
-def test_universe_uses_sina_only_after_eastmoney_rate_limit(monkeypatch):
+def test_universe_uses_sina_only_after_tencent_fallback_fails(monkeypatch):
     class Push2RateLimitError(Exception):
         pass
 
@@ -77,10 +78,50 @@ def test_universe_uses_sina_only_after_eastmoney_rate_limit(monkeypatch):
     })
     monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_em",
                         lambda: (_ for _ in ()).throw(Push2RateLimitError("cooldown")))
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_tx",
+                        lambda: (_ for _ in ()).throw(TimeoutError("Tencent timeout")))
     monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot", lambda: spot.copy())
 
     result = fhm100.universe()
 
+    assert result["code"].tolist() == ["000001"]
+    assert result.iloc[0]["amount"] == 300_000_000
+
+
+def test_universe_prefers_tencent_snapshot_and_converts_turnover_to_yuan(monkeypatch):
+    class Push2RateLimitError(Exception):
+        pass
+
+    tencent = pd.DataFrame({
+        "code": ["sz000001", "sh600000"],
+        "name": ["平安银行", "浦发银行"],
+        "zxj": [10.0, 9.0],
+        "zdf": [1.2, -0.5],
+        "volume": [1_000_000, 2_000_000],
+        "turnover": [30_000, 20_000],
+    })
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_em",
+                        lambda: (_ for _ in ()).throw(Push2RateLimitError("cooldown")))
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_tx", lambda: tencent.copy())
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot",
+                        lambda: (_ for _ in ()).throw(AssertionError("Sina must not be called")))
+
+    result = fhm100.universe()
+
+    assert result["code"].tolist() == ["000001", "600000"]
+    assert result.set_index("code").loc["000001", "amount"] == 300_000_000
+    assert result.set_index("code").loc["600000", "amount"] == 200_000_000
+
+
+def test_universe_falls_back_to_tencent_on_eastmoney_timeout(monkeypatch):
+    tencent = pd.DataFrame({
+        "code": ["sz000001"], "name": ["平安银行"], "zxj": [10.0],
+        "zdf": [1.2], "volume": [1_000_000], "turnover": [30_000],
+    })
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_em",
+                        lambda: (_ for _ in ()).throw(requests.exceptions.ReadTimeout("timeout")))
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_tx", lambda: tencent.copy())
+    result = fhm100.universe()
     assert result["code"].tolist() == ["000001"]
     assert result.iloc[0]["amount"] == 300_000_000
 
