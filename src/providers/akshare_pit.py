@@ -8,6 +8,7 @@ historical rows as unsuitable for historical point-in-time backtests.
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 import uuid
 from math import isfinite
@@ -172,6 +173,56 @@ def fetch_current_industry_membership_snapshot(
         raise ValueError("duplicate symbol/industry membership in one snapshot")
     return result
 
+
+
+def fetch_sina_current_industry_membership_snapshot(
+    ak_module, *, clock=None
+) -> pd.DataFrame:
+    """Capture Sina's current industry-to-stock rows as a forward-only snapshot.
+
+    This is an independent fallback for Eastmoney Push2 outages. The endpoint
+    exposes current labels and member codes, not historical validity intervals;
+    therefore this adapter never fabricates valid_from/valid_to or PIT status.
+    """
+    now = clock or (lambda: datetime.now(timezone.utc))
+    raw = ak_module.stock_sector_spot(indicator="新浪行业")
+    required = {"label", "板块", "股票代码"}
+    if raw is None or raw.empty or required - set(raw.columns):
+        missing = sorted(required - set(raw.columns)) if raw is not None else sorted(required)
+        raise ValueError("Sina industry snapshot schema changed or is empty: " + ",".join(missing))
+
+    source = raw[["label", "板块", "股票代码"]].copy()
+    source["industry_code"] = source["label"].astype(str).str.strip()
+    source["industry_name"] = source["板块"].astype(str).str.strip()
+    source["symbol"] = source["股票代码"].astype(str).str.extract(r"(\\d{6})", expand=False)
+    if (source["industry_code"].eq("").any() or source["industry_name"].eq("").any()
+            or source["symbol"].isna().any()):
+        raise ValueError("Sina industry snapshot contains blank labels or invalid stock codes")
+    source["symbol"] = source["symbol"].astype(str).str.zfill(6)
+    source = source[["symbol", "industry_code", "industry_name"]].drop_duplicates()
+    if source.empty or source.duplicated(["symbol", "industry_code"]).any():
+        raise ValueError("Sina industry snapshot is empty or has duplicate memberships")
+
+    captured = _utc(now())
+    snapshot_id = str(uuid.uuid4())
+    expected_industry_count = int(source["industry_code"].nunique())
+    if expected_industry_count < 10:
+        raise ValueError("Sina industry snapshot has implausibly few industry groups")
+    source["snapshot_id"] = snapshot_id
+    source["expected_industry_count"] = expected_industry_count
+    source["observed_at"] = captured
+    source["available_time"] = captured
+    source["availability_basis"] = "retrieval_time_only"
+    source["historical_pit_eligible"] = False
+    source["source_id"] = "akshare.stock_sector_spot_sina"
+    source["snapshot_scope"] = "current_membership_observation_only"
+    revisions = (
+        source.groupby("industry_code", sort=True)[["symbol", "industry_code", "industry_name"]]
+        .apply(_revision)
+        .to_dict()
+    )
+    source["source_revision"] = source["industry_code"].map(revisions)
+    return source.reset_index(drop=True)
 
 def normalize_market_breadth_snapshot(frame: pd.DataFrame, *, fetched_at=None, source_id: str = "akshare.stock_zh_a_spot_em") -> pd.DataFrame:
     """Summarize one current A-share quote snapshot; never infer historical limit events."""
