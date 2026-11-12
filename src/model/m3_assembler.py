@@ -12,7 +12,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.model.market_state import apply_state_cooldown, calculate_state_scores
+from src.model.market_state import (
+    apply_state_cooldown, calculate_state_scores, market_environment_score,
+)
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -189,6 +191,10 @@ def assemble_m3_history(
         "latest_trade_date": str(latest.trade_date.date()),
         "market_state": state,
         "state_score": None if pd.isna(latest.StateScore) else float(latest.StateScore),
+        "market_environment_score": (
+            market_environment_score(latest)
+            if state in {"RISK_ON", "NEUTRAL", "RISK_OFF"} else None
+        ),
         "position_scale": None if pd.isna(latest.position_scale) else float(latest.position_scale),
         "history": scored,
         "historical_backtest_eligible": False,
