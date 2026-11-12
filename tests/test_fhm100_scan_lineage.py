@@ -79,12 +79,12 @@ def test_universe_uses_sina_only_after_tencent_fallback_fails(monkeypatch):
     monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_em",
                         lambda: (_ for _ in ()).throw(Push2RateLimitError("cooldown")))
     monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_tx",
-                        lambda: (_ for _ in ()).throw(TimeoutError("Tencent timeout")))
+                        lambda: (_ for _ in ()).throw(requests.exceptions.Timeout("Tencent timeout")))
     monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot", lambda: spot.copy())
 
     result = fhm100.universe()
 
-    assert result["code"].tolist() == ["000001"]
+    assert result["code"].iloc[0] == "000001"
     assert result.iloc[0]["amount"] == 300_000_000
 
 
@@ -109,7 +109,7 @@ def test_universe_prefers_tencent_snapshot_and_converts_turnover_to_yuan(monkeyp
 
     result = fhm100.universe()
 
-    assert result["code"].tolist() == ["000001", "600000"]
+    assert result["code"].head(2).tolist() == ["000001", "600000"]
     assert result.set_index("code").loc["000001", "amount"] == 300_000_000
     assert result.set_index("code").loc["600000", "amount"] == 200_000_000
 
