@@ -149,6 +149,35 @@ def test_tencent_history_fallback_is_normalized_and_keeps_source_lineage(monkeyp
     assert result.attrs["source_id"] == "akshare.stock_zh_a_hist_tx"
 
 
+def test_tencent_history_fallback_after_eastmoney_transport_timeouts(monkeypatch):
+    calls = {"eastmoney": 0, "tencent": 0}
+    tencent = pd.DataFrame({
+        "date": pd.bdate_range("2026-09-01", periods=30).strftime("%Y-%m-%d"),
+        "open": [10.0] * 30, "high": [10.2] * 30, "low": [9.8] * 30,
+        "close": [10.1] * 30, "volume": [1_000_000] * 30,
+        "amount": [200_000_000] * 30,
+    })
+
+    def eastmoney(**kwargs):
+        calls["eastmoney"] += 1
+        raise requests.exceptions.ReadTimeout("Eastmoney timed out")
+
+    def tencent_history(**kwargs):
+        calls["tencent"] += 1
+        return tencent.copy()
+
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_hist", eastmoney)
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_hist_tx", tencent_history)
+    monkeypatch.setattr(fhm100.time, "sleep", lambda *_: None)
+
+    result = fhm100._download_history("000001", "20260901")
+
+    assert calls == {"eastmoney": 3, "tencent": 1}
+    assert len(result) == 30
+    assert result.attrs["source_id"] == "akshare.stock_zh_a_hist_tx"
+    assert result["成交额"].eq(200_000_000).all()
+
+
 def test_empty_scan_result_contains_columns_required_by_report_sort():
     watchlist, errors = fhm100.empty_scan_result(RuntimeError("provider unavailable"))
 
