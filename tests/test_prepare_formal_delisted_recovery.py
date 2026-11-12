@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from datetime import datetime, timedelta, timezone\n\nfrom scripts.prepare_formal_delisted_recovery import sanitize_catalog, validate_snapshot_freshness
+from datetime import datetime, timedelta, timezone
+
+from scripts.prepare_formal_delisted_recovery import sanitize_catalog, validate_snapshot_freshness
 
 
 def test_sanitize_catalog_keeps_only_formal_stocks_and_latest_terminal():
