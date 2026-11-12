@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.prepare_formal_delisted_recovery import sanitize_catalog
+from datetime import datetime, timedelta, timezone\n\nfrom scripts.prepare_formal_delisted_recovery import sanitize_catalog, validate_snapshot_freshness
 
 
 def test_sanitize_catalog_keeps_only_formal_stocks_and_latest_terminal():
@@ -92,3 +92,21 @@ def test_sanitize_catalog_rejects_invalid_terminal_date():
             {"600001.SH": "2020-02-01"},
             {"600001.SH"},
         )
+
+
+def test_identity_snapshot_freshness_accepts_recent_timezone_aware_observation():
+    now = datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc)
+    observed = (now - timedelta(days=1)).isoformat()
+    assert validate_snapshot_freshness(observed, now=now) == pytest.approx(24.0)
+
+
+def test_identity_snapshot_freshness_rejects_stale_observation():
+    now = datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc)
+    observed = (now - timedelta(days=15)).isoformat()
+    with pytest.raises(ValueError, match="stale"):
+        validate_snapshot_freshness(observed, now=now)
+
+
+def test_identity_snapshot_freshness_rejects_naive_timestamp():
+    with pytest.raises(ValueError, match="timezone-aware"):
+        validate_snapshot_freshness("2026-11-12T12:00:00")
