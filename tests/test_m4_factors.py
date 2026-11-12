@@ -59,6 +59,21 @@ def test_price_structure_disables_cross_session_features_when_action_ledger_unve
     assert out.Pullback.isna().all()
 
 
+
+def test_price_structure_rejects_pit_total_return_series_available_after_cutoff():
+    x = bars()
+    x["pit_total_return_close"] = 100.0 + np.arange(len(x)) * 0.5
+    x["pit_total_return_high"] = x["pit_total_return_close"] + 0.8
+    x["pit_total_return_available_time"] = pd.Timestamp("2026-11-10T09:30:00Z")
+    x["corporate_action_status"] = "VERIFIED"
+    out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
+    assert out.cross_session_price_status.eq(
+        "PIT_TOTAL_RETURN_NOT_AVAILABLE_AT_DECISION"
+    ).all()
+    assert out.return_5.isna().all()
+
+
+
 def test_industry_excess_returns():
     available = pd.Timestamp("2026-01-02T08:00:00Z")
     industry = pd.DataFrame({"trade_date": ["2026-01-01"], "industry_code": ["I1"],
