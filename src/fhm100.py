@@ -379,6 +379,32 @@ def main():
     m5.to_csv(OUT/"m5_diagnostics.csv",index=False,encoding="utf-8-sig")
     m5_blockers = summarize_m5_blockers(m5)
     m5_blockers.to_csv(OUT/"m5_blocker_summary.csv",index=False,encoding="utf-8-sig")
+
+    # A successful research run is not equivalent to a formal FHM-100 signal.
+    # Keep data blockers separate from unfinished model integration so an empty
+    # universe can never be misreported as "no stocks passed the strategy".
+    formal_blockers = []
+    if len(u) == 0:
+        formal_blockers.append("LIVE_UNIVERSE_UNAVAILABLE")
+    if len(w) == 0:
+        formal_blockers.append("NO_VALID_STOCK_HISTORY")
+    if m3.get("status") != "READY":
+        formal_blockers.append("M3_NOT_READY:" + str(m3.get("status")))
+    formal_blockers.extend([
+        "M5_FACTOR_PIPELINE_NOT_CONNECTED_TO_LIVE_CANDIDATES",
+        "M6_OUT_OF_SAMPLE_PREDICTION_NOT_VALIDATED",
+        "M8_PORTFOLIO_RISK_PIPELINE_NOT_CONNECTED",
+        "M9_EXECUTION_AWARE_BACKTEST_NOT_ADMITTED",
+    ])
+    formal_status = "BLOCKED_FORMAL_SIGNAL" if formal_blockers else "READY"
+    (OUT/"formal_gate.json").write_text(json.dumps({
+        "status": formal_status,
+        "blockers": formal_blockers,
+        "live_universe_count": int(len(u)),
+        "valid_history_count": int(len(w)),
+        "m3_status": str(m3.get("status")),
+        "m5_is_diagnostic_only": True,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
     (OUT/"m3_market_context.json").write_text(json.dumps(m3, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     w.to_csv(OUT/"watchlist.csv",index=False,encoding="utf-8-sig")
     e.to_csv(OUT/"data_errors.csv",index=False,encoding="utf-8-sig")
@@ -394,9 +420,11 @@ def main():
       f"- M3市场状态：{m3['status']}；状态={m3['market_state'] or '未确认'}；有效会话={m3['valid_sessions']}；最新日期={m3['latest_trade_date'] or '无'}",
       f"- M3仓位系数：{m3['position_scale'] if m3['position_scale'] is not None else '不可用'}；原因={m3['reason'] or '无'}",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
-      f"- M5阻塞原因：{len(m5_blockers)}种；详见m5_blocker_summary.csv",
+      f"- 正式模型状态：{formal_status}",
+      "## 正式模型阻塞项",
+      *[f"- {reason}" for reason in formal_blockers],
       "## M5主要阻塞项",
-      (m5_blockers.head(15).to_string(index=False) if len(m5_blockers) else "本次没有可统计的M5阻塞原因。"), "",
+      (m5_blockers.head(15).to_string(index=False) if len(m5_blockers) else "本次没有股票诊断记录；这不代表模型阻塞项为零。"), "",
       "## 模型状态（重要）",
       "**本次不是正式FHM-100信号。** 行业相对强度、市场/行业滚动Beta残差、完整涨跌停事件、经样本外校准的M6收益预测、M8组合风险及M9回测尚未完成。",
       "M4已新增CLV、BodyStrength、5/10/20日收益、20日突破和上影线的横截面观察分位，并输出m4_observation_audit.csv。分位仅在同一交易日、声明的当前高成交额股票池完整覆盖且因子覆盖率达到95%时生成；不完整则全部留空。它们不是价格结构/成交质量复合分，也未接入M5。M3仅在前瞻归档状态READY时传入M5；行业/残差分位及策略硬门槛仍未全部接入，因此M5仍是诊断而非正式评分。",
@@ -414,7 +442,8 @@ def main():
         status = "PushPlus推送失败：" + str(exc)[:300]
         push_error = exc
     (OUT/"run_status.json").write_text(json.dumps({"time":now.isoformat(),"universe":len(u),
-      "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status},ensure_ascii=False,indent=2),encoding="utf-8")
+      "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
+      "formal_status":formal_status,"formal_blockers":formal_blockers},ensure_ascii=False,indent=2),encoding="utf-8")
     print(report); print(status)
     if push_error is not None:
         raise RuntimeError(status) from push_error
