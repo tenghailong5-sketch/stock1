@@ -312,6 +312,17 @@ def empty_scan_result(error):
     }])
 
 
+def ensure_watchlist_schema(watchlist):
+    """Ensure an all-failed history scan still has the report's sortable columns."""
+    required = {"技术观察通过", "流动性观察通过", "当日成交额"}
+    if watchlist.empty and not required.issubset(watchlist.columns):
+        empty_watchlist, _ = empty_scan_result(
+            RuntimeError("no valid stock-history rows returned by scan")
+        )
+        return empty_watchlist
+    return watchlist
+
+
 def summarize_m5_blockers(frame):
     """Count explicit M5 rejection reasons without converting diagnostics into signals."""
     columns = ["strategy", "blocker", "count"]
@@ -348,6 +359,7 @@ def main():
     try:
         u=universe()
         w,e=scan(u)
+        w=ensure_watchlist_schema(w)
         if not w.empty:
             w, observation_audit = rank_price_observations(
                 w, expected_universe_size=len(u), scope_id="top_350_turnover_snapshot"
