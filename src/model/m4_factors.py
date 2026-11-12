@@ -89,10 +89,15 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
     else:
         x["pit_total_return_close"] = pd.to_numeric(x["pit_total_return_close"], errors="coerce")
         x["pit_total_return_high"] = pd.to_numeric(x["pit_total_return_high"], errors="coerce")
-        pit_available = pd.to_datetime(x["pit_total_return_available_time"], errors="coerce")
-        pit_time_valid = pit_available.notna().all() and pit_available.dt.tz is not None
-        if pit_time_valid:
-            x["pit_total_return_available_time"] = pit_available.dt.tz_convert("UTC")
+        try:
+            pit_available = pd.to_datetime(x["pit_total_return_available_time"], errors="coerce")
+            pit_time_valid = bool(
+                pit_available.notna().all() and pit_available.dt.tz is not None
+            )
+            if pit_time_valid:
+                x["pit_total_return_available_time"] = pit_available.dt.tz_convert("UTC")
+        except (AttributeError, TypeError, ValueError):
+            pit_time_valid = False
         grouped = x.groupby("symbol", group_keys=False)
         x["cross_session_price_status"] = "READY"
         for symbol, indexes in grouped.groups.items():
