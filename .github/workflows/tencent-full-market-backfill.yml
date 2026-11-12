@@ -48,7 +48,10 @@ jobs:
             --notes "Versioned batch archive. Raw unadjusted daily bars retrieved via Tencent/AKShare. Retrieval-time data is not historical point-in-time data." \
             --target "$GITHUB_SHA"
           MANIFEST="$(find output/tencent_history -maxdepth 1 -name 'batch_*.manifest.json' -print -quit)"
-          test -n "$MANIFEST"
+          if [ -z "$MANIFEST" ]; then
+            echo "No new batch: the universe cursor is exhausted and no retries remain."
+            exit 0
+          fi
           FILES=("$MANIFEST")
           PAYLOAD="${MANIFEST%.manifest.json}.csv.gz"
           if [ -f "$PAYLOAD" ]; then FILES+=("$PAYLOAD"); fi
