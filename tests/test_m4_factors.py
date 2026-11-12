@@ -17,7 +17,15 @@ def bars():
         "close": np.arange(10.5, 35.5, dtype=float),
         "volume": [100.0]*25, "amount": [2e8]*25,
         "available_time": [pd.Timestamp("2026-11-10T08:00:00Z")]*25,
+        "source_id": ["fixture"]*25, "source_revision": ["fixture-v1"]*25,
     })
+
+
+def with_lineage(frame):
+    out = frame.copy()
+    out["source_id"] = "fixture"
+    out["source_revision"] = "fixture-v1"
+    return out
 
 
 def test_price_structure_computes_core_factors_and_flat_range_missing():
@@ -96,7 +104,7 @@ def test_industry_excess_returns():
     market = pd.DataFrame({"trade_date": ["2026-01-01"],
                            "market_return_5": [.03], "market_return_20": [.05],
                            "available_time": [available]})
-    out = industry_relative_strength(industry, market, decision_time="2026-01-02T09:00:00Z")
+    out = industry_relative_strength(with_lineage(industry), with_lineage(market), decision_time="2026-01-02T09:00:00Z")
     assert out.industry_excess_5.iloc[0] == pytest.approx(.05)
     assert out.industry_excess_20.iloc[0] == pytest.approx(.10)
 
@@ -166,11 +174,11 @@ def test_industry_relative_strength_rejects_future_and_naive_availability():
         "trade_date": ["2026-01-02"], "market_return_5": [.01], "market_return_20": [.02],
         "available_time": [pd.Timestamp("2026-01-02T08:00:00Z")]
     })
-    out = industry_relative_strength(industry, market, "2026-01-02T09:00:00Z")
+    out = industry_relative_strength(with_lineage(industry), with_lineage(market), "2026-01-02T09:00:00Z")
     assert out.empty
     industry["available_time"] = "2026-01-02 08:00:00"
     with pytest.raises(ValueError):
-        industry_relative_strength(industry, market, "2026-01-02T09:00:00Z")
+        industry_relative_strength(with_lineage(industry), with_lineage(market), "2026-01-02T09:00:00Z")
 
 
 
@@ -228,7 +236,7 @@ def test_industry_relative_strength_rejects_future_trade_date_with_forged_availa
         "market_return_20": [.02], "available_time": [available],
     })
     with pytest.raises(ValueError, match="future trade_date"):
-        industry_relative_strength(industry, market, "2026-01-02T09:00:00Z")
+        industry_relative_strength(with_lineage(industry), with_lineage(market), "2026-01-02T09:00:00Z")
 
 
 def test_industry_relative_strength_rejects_blank_historical_industry_code():
@@ -242,7 +250,7 @@ def test_industry_relative_strength_rejects_blank_historical_industry_code():
         "market_return_20": [.02], "available_time": [available],
     })
     with pytest.raises(ValueError, match="invalid industry_code"):
-        industry_relative_strength(industry, market, "2026-01-02T09:00:00Z")
+        industry_relative_strength(with_lineage(industry), with_lineage(market), "2026-01-02T09:00:00Z")
 
 
 def test_residual_strength_matches_r21_formula_without_subtracting_regression_intercept():
@@ -274,7 +282,7 @@ def test_residual_strength_matches_r21_formula_without_subtracting_regression_in
         "available_time": [available] * len(dates),
     })
     out = residual_strength(
-        stocks, market, industry, window=60, min_periods=40,
+        with_lineage(stocks), with_lineage(market), with_lineage(industry), window=60, min_periods=40,
         decision_time="2026-03-10T11:00:00Z",
     )
     # R2.1 defines residual return using only the two benchmark betas.
@@ -284,3 +292,41 @@ def test_residual_strength_matches_r21_formula_without_subtracting_regression_in
         0.02 - beta_market * 0.01 - beta_industry * 0.002,
         abs=1e-8,
     )
+
+
+def test_price_structure_requires_source_lineage():
+    x = bars().drop(columns=["source_revision"])
+    with pytest.raises(ValueError, match="missing"):
+        price_structure(x, decision_time="2026-11-10T09:00:00Z")
+
+
+def test_industry_relative_strength_requires_source_lineage():
+    available = pd.Timestamp("2026-01-02T08:00:00Z")
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-01"], "industry_code": ["I1"],
+        "return_5": [.08], "return_20": [.15], "available_time": [available],
+        "source_id": ["provider"], "source_revision": ["v1"],
+    })
+    market = pd.DataFrame({
+        "trade_date": ["2026-01-01"], "market_return_5": [.03],
+        "market_return_20": [.05], "available_time": [available],
+        "source_id": ["provider"],
+    })
+    with pytest.raises(ValueError, match="source_revision"):
+        industry_relative_strength(industry, market, decision_time="2026-01-02T09:00:00Z")
+
+
+def test_industry_relative_strength_rejects_blank_source_lineage():
+    available = pd.Timestamp("2026-01-02T08:00:00Z")
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-01"], "industry_code": ["I1"],
+        "return_5": [.08], "return_20": [.15], "available_time": [available],
+        "source_id": ["provider"], "source_revision": ["  "],
+    })
+    market = pd.DataFrame({
+        "trade_date": ["2026-01-01"], "market_return_5": [.03],
+        "market_return_20": [.05], "available_time": [available],
+        "source_id": ["provider"], "source_revision": ["v1"],
+    })
+    with pytest.raises(ValueError, match="invalid source_revision"):
+        industry_relative_strength(industry, market, decision_time="2026-01-02T09:00:00Z")
