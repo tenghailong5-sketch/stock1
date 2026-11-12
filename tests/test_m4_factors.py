@@ -330,3 +330,36 @@ def test_industry_relative_strength_rejects_blank_source_lineage():
     })
     with pytest.raises(ValueError, match="invalid source_revision"):
         industry_relative_strength(industry, market, decision_time="2026-01-02T09:00:00Z")
+
+
+def test_residual_strength_rejects_rank_deficient_market_industry_regression():
+    dates = pd.bdate_range(end="2026-11-10", periods=61)
+    available = pd.Timestamp("2026-11-11T10:00:00Z")
+    market_values = np.linspace(-0.002, 0.002, len(dates))
+    market = pd.DataFrame({
+        "trade_date": dates,
+        "market_return": market_values,
+        "market_return_5": [0.01] * len(dates),
+        "available_time": [available] * len(dates),
+    })
+    industries = pd.DataFrame({
+        "trade_date": dates,
+        "industry_code": ["I1"] * len(dates),
+        "industry_return": market_values,
+        "industry_return_5": [0.012] * len(dates),
+        "available_time": [available] * len(dates),
+    })
+    stocks = pd.DataFrame({
+        "symbol": ["000001"] * len(dates),
+        "industry_code": ["I1"] * len(dates),
+        "trade_date": dates,
+        "daily_return": np.linspace(-0.001, 0.003, len(dates)),
+        "return_5": [0.025] * len(dates),
+        "available_time": [available] * len(dates),
+    })
+    result = residual_strength(
+        with_lineage(stocks), with_lineage(market), with_lineage(industries),
+        window=60, min_periods=40,
+        decision_time="2026-11-11T10:00:00Z",
+    )
+    assert result["residual_return_5"].isna().all()
