@@ -12,7 +12,7 @@ import pandas as pd
 
 OUT = Path("output")
 OUT.mkdir(exist_ok=True)
-PREFIX_MARKET = {"6": "sh", "0": "sz", "3": "sz", "4": "bj", "8": "bj"}
+PREFIX_MARKET = {"6": "sh", "0": "sz", "3": "sz", "4": "bj", "8": "bj", "9": "bj"}
 CODE_COLUMNS = ("证券代码", "A股代码", "股票代码", "代码", "证券代码 ")
 NAME_COLUMNS = ("证券简称", "A股简称", "股票简称", "名称", "证券名称")
 
