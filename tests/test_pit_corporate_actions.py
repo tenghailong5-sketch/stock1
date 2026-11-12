@@ -108,3 +108,18 @@ def test_action_rows_must_match_the_attested_ledger_snapshot():
     out = build_pit_total_return_prices(prices, actions, coverage, decision_time=CUTOFF)
     assert out.corporate_action_status.eq("INVALID_ACTION_LINEAGE").all()
     assert out.pit_total_return_close.isna().all()
+
+
+def test_empty_event_ledger_is_accepted_only_with_complete_attestation():
+    prices, _, coverage = fixtures()
+    empty_actions = pd.DataFrame(columns=[
+        "symbol", "ex_date", "action_type", "cash_per_share", "share_factor",
+        "verified_status", "available_time", "source_id", "source_revision",
+        "ledger_snapshot_id",
+    ])
+    out = build_pit_total_return_prices(
+        prices, empty_actions, coverage, decision_time=CUTOFF,
+    )
+    assert out.corporate_action_status.eq("VERIFIED").all()
+    assert out.pit_total_return_close.iloc[0] == 100.0
+    assert out.pit_total_return_close.iloc[1] == 95.0
