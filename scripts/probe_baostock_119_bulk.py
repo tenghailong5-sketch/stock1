@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import signal
+import socket
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +20,38 @@ OUT = Path("output")
 OUT.mkdir(exist_ok=True)
 REQUIRED = {"date", "code", "open", "high", "low", "close", "volume", "amount"}
 SAMPLE_CODES = {"sh.600000", "sz.000001", "sz.300750", "sh.688981"}
+socket.setdefaulttimeout(35)
+
+
+class RequestTimeout(TimeoutError):
+    pass
+
+
+def _alarm_handler(signum, frame):
+    raise RequestTimeout("BaoStock request exceeded 45 seconds")
+
+
+def timed_request(fn, *args, **kwargs):
+    previous = signal.signal(signal.SIGALRM, _alarm_handler)
+    signal.alarm(45)
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def save_checkpoint(frames, report):
+    if frames:
+        combined = pd.concat(frames, ignore_index=True)
+        combined = combined.sort_values(["date", "code"]).reset_index(drop=True)
+        target = OUT / "baostock_119_sessions.parquet"
+        combined.to_parquet(target, index=False, compression="zstd")
+        payload = target.read_bytes()
+        report["checkpoint_rows"] = int(len(combined))
+        report["checkpoint_sessions"] = int(combined["date"].nunique())
+        report["checkpoint_bytes"] = len(payload)
+        report["checkpoint_sha256"] = hashlib.sha256(payload).hexdigest()
 
 
 def read_result(rs):
@@ -64,10 +98,12 @@ def main():
 
         frames = []
         total_started = time.monotonic()
+        consecutive_errors = 0
         for i, day in enumerate(sessions, 1):
             started = time.monotonic()
             try:
-                frame = read_result(bs.query_daily_history_k_AStock(date=day))
+                rs = timed_request(bs.query_daily_history_k_AStock, date=day)
+                frame = read_result(rs)
                 missing = sorted(REQUIRED - set(frame.columns))
                 if missing:
                     raise RuntimeError(f"missing_fields={missing}")
@@ -103,6 +139,7 @@ def main():
                     "status": "OK",
                 }
                 report["passed_sessions"] += 1
+                consecutive_errors = 0
             except Exception as exc:
                 item = {
                     "date": day,
@@ -111,10 +148,17 @@ def main():
                     "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
                 }
                 report["failed_sessions"].append(item)
+                consecutive_errors += 1
                 if "missing_segment_samples" in item.get("reason", ""):
                     report["sample_codes_missing_by_session"].append(item["date"])
             report["session_rows"].append(item)
+            if len(frames) and (len(frames) % 5 == 0 or i == len(sessions)):
+                save_checkpoint(frames, report)
             print(json.dumps({"progress": f"{i}/119", **item}, ensure_ascii=False), flush=True)
+            if consecutive_errors >= 3:
+                report["aborted_early"] = True
+                report["abort_reason"] = "three consecutive BaoStock request/validation failures"
+                break
 
         report["elapsed_total_seconds"] = round(time.monotonic() - total_started, 2)
         report["total_rows"] = int(sum(len(x) for x in frames))
@@ -130,10 +174,8 @@ def main():
             set().union(*(set(x.get("sample_codes_present", [])) for x in report["session_rows"]))
         )
         if frames:
-            combined = pd.concat(frames, ignore_index=True)
-            combined = combined.sort_values(["date", "code"]).reset_index(drop=True)
+            save_checkpoint(frames, report)
             target = OUT / "baostock_119_sessions.parquet"
-            combined.to_parquet(target, index=False, compression="zstd")
             payload = target.read_bytes()
             report["artifact_file"] = str(target)
             report["artifact_bytes"] = len(payload)
