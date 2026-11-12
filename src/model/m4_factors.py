@@ -338,8 +338,10 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
     return pd.concat(output, ignore_index=True) if output else x.assign(residual_return_5=np.nan)
 
 def rank_factor(values: pd.Series, higher_is_better: bool = True) -> pd.Series:
-    """Cross-sectional percentile rank; NaN remains missing and is never imputed."""
-    return values.rank(pct=True, ascending=higher_is_better, method="average") * 100
+    """Rank finite numeric observations; malformed/non-finite values stay missing."""
+    numeric = pd.to_numeric(values, errors="coerce")
+    numeric = numeric.where(np.isfinite(numeric))
+    return numeric.rank(pct=True, ascending=higher_is_better, method="average") * 100
 
 
 
