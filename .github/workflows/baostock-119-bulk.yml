@@ -1,0 +1,36 @@
+name: BaoStock 119-Session Full-Market History Test
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/probe_baostock_119_bulk.py"
+      - ".github/workflows/baostock-119-bulk.yml"
+permissions:
+  contents: read
+concurrency:
+  group: baostock-119-bulk
+  cancel-in-progress: true
+jobs:
+  bulk-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install free provider dependencies
+        run: pip install "baostock==0.9.4" "pandas==2.2.3" "pyarrow>=18,<30"
+      - name: Download and validate 119 full-market sessions
+        run: python scripts/probe_baostock_119_bulk.py
+      - name: Upload 119-session data and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baostock-119-session-full-market
+          path: |
+            output/baostock_119_sessions.parquet
+            output/baostock_119_bulk_report.json
+          if-no-files-found: warn
+          retention-days: 30
