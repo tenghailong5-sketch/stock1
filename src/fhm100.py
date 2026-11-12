@@ -20,10 +20,10 @@ MIN_AMOUNT=100_000_000
 def numeric(s): return pd.to_numeric(s,errors="coerce")
 
 
-def archive_stock_history_snapshot(frame, symbol, *, captured_at, archive_root=Path("data/forward_archive")):
+def archive_stock_history_snapshot(frame, symbol, *, captured_at, archive_root=Path("data/forward_archive"), source_id="akshare.stock_zh_a_hist"):
     """Append raw daily bars with their real retrieval time; never backdate availability."""
     normalized = normalize_daily_history_snapshot(
-        frame, symbol=str(symbol).zfill(6), fetched_at=captured_at
+        frame, symbol=str(symbol).zfill(6), fetched_at=captured_at, source_id=source_id
     )
     snapshot_id = str(uuid.uuid4())
     normalized["snapshot_id"] = snapshot_id
@@ -44,7 +44,7 @@ def archive_stock_history_snapshot(frame, symbol, *, captured_at, archive_root=P
         "symbol": str(symbol).zfill(6),
         "snapshot_id": snapshot_id,
         "captured_at": pd.Timestamp(captured_at).tz_convert("UTC").isoformat(),
-        "source_id": "akshare.stock_zh_a_hist",
+        "source_id": source_id,
         "source_revision": batch_revision,
         "row_count": int(len(normalized)),
         "first_trade_date": normalized["trade_date"].min().strftime("%Y-%m-%d"),
@@ -61,8 +61,30 @@ def archive_stock_history_snapshot(frame, symbol, *, captured_at, archive_root=P
     return {"rows_appended": rows_added, "manifests_appended": manifests_added}
 
 
+def _is_eastmoney_rate_limit(error):
+    return type(error).__name__ == "Push2RateLimitError" or isinstance(
+        error, getattr(ak, "RateLimitError", type(None))
+    )
+
+
+def _normalize_spot_snapshot(frame):
+    required = ["代码", "名称", "最新价", "成交额", "涨跌幅"]
+    if frame is None or frame.empty or any(column not in frame.columns for column in required):
+        raise RuntimeError("A-share fallback snapshot schema changed or is empty")
+    return frame[required].copy()
+
+
 def universe():
-    d=ak.stock_zh_a_spot_em()
+    try:
+        d=ak.stock_zh_a_spot_em()
+    except Exception as exc:
+        if not _is_eastmoney_rate_limit(exc):
+            raise
+        # One alternate provider attempt only. Do not hammer Eastmoney while
+        # its documented temporary IP cooldown is active.
+        d=_normalize_spot_snapshot(ak.stock_zh_a_spot())
+    if d is None or d.empty:
+        raise RuntimeError("A-share spot snapshot is empty")
     required=["代码","名称","最新价","成交额","涨跌幅"]
     if d is None or d.empty or any(c not in d.columns for c in required):
         raise RuntimeError("A-share snapshot empty or schema changed")
@@ -83,7 +105,30 @@ def _download_history(code, start, max_attempts=3):
                 symbol=code, period="daily", start_date=start,
                 end_date=datetime.now().strftime("%Y%m%d"), adjust=""
             )  # raw prices only; no look-ahead-adjusted history
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+        except Exception as exc:
+            if _is_eastmoney_rate_limit(exc):
+                # Tencent is an independent free daily-K source. Its schema is
+                # normalized below; retrieval time remains the only availability
+                # timestamp and no historical PIT eligibility is implied.
+                prefix = "sh" if str(code).startswith("6") else "sz"
+                frame = ak.stock_zh_a_hist_tx(
+                    symbol=prefix + str(code).zfill(6), start_date=start,
+                    end_date=datetime.now().strftime("%Y%m%d"), adjust=""
+                )
+                if frame is None or frame.empty:
+                    raise RuntimeError("Tencent fallback returned empty daily history") from exc
+                aliases = {
+                    "date": "日期", "open": "开盘", "high": "最高", "low": "最低",
+                    "close": "收盘", "volume": "成交量", "amount": "成交额",
+                }
+                if any(column not in frame.columns for column in aliases):
+                    raise RuntimeError("Tencent fallback daily-history schema changed") from exc
+                normalized = frame.rename(columns=aliases).copy()
+                normalized["换手率"] = np.nan
+                normalized.attrs["source_id"] = "akshare.stock_zh_a_hist_tx"
+                return normalized
+            if not isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
+                raise
             if attempt + 1 >= max_attempts:
                 raise
             time.sleep(2 ** attempt)
@@ -103,14 +148,17 @@ def history(code,start,archive_root=Path("data/forward_archive")):
     archive_frame=raw.loc[h.index].copy()
     if "换手率" not in archive_frame.columns:
         archive_frame["换手率"]=np.nan  # unavailable stays missing; never impute zero
+    source_id = str(raw.attrs.get("source_id", "akshare.stock_zh_a_hist"))
     archive_stock_history_snapshot(
-        archive_frame, code, captured_at=captured_at, archive_root=archive_root
+        archive_frame, code, captured_at=captured_at, archive_root=archive_root,
+        source_id=source_id,
     )
     # The factor engine requires row-level lineage. Preserve the provider's
     # actual retrieval timestamp and content hash for every historical bar;
     # never replace these with the trade date or a batch-wide fabricated value.
     lineage = normalize_daily_history_snapshot(
-        archive_frame, symbol=str(code).zfill(6), fetched_at=captured_at
+        archive_frame, symbol=str(code).zfill(6), fetched_at=captured_at,
+        source_id=source_id,
     )[["trade_date", "available_time", "source_id", "source_revision"]]
     h["date"] = pd.to_datetime(h["date"], errors="coerce")
     h = h.merge(lineage, left_on="date", right_on="trade_date", how="left",
