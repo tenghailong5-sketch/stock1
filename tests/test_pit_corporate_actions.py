@@ -29,6 +29,7 @@ def fixtures():
         "available_time": ["2026-11-10T09:00:00Z"],
         "source_id": ["test-actions"],
         "source_revision": ["a1"],
+        "ledger_snapshot_id": ["ledger-20261111-01"],
     })
     coverage = pd.DataFrame({
         "symbol": ["600000.SH"],
@@ -38,6 +39,7 @@ def fixtures():
         "available_time": ["2026-11-11T09:00:00Z"],
         "source_id": ["test-coverage"],
         "source_revision": ["c1"],
+        "ledger_snapshot_id": ["ledger-20261111-01"],
     })
     return prices, actions, coverage
 
@@ -60,7 +62,7 @@ def test_missing_or_unknown_coverage_fails_closed_even_when_no_actions_returned(
     out = build_pit_total_return_prices(
         prices, pd.DataFrame(columns=[
             "symbol", "ex_date", "action_type", "cash_per_share", "share_factor",
-            "verified_status", "available_time", "source_id", "source_revision"
+            "verified_status", "available_time", "source_id", "source_revision", "ledger_snapshot_id"
         ]), coverage, decision_time=CUTOFF,
     )
     assert out.corporate_action_status.eq("COVERAGE_NOT_VERIFIED").all()
