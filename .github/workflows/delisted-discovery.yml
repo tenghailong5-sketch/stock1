@@ -103,7 +103,7 @@ jobs:
               "never_issued_total": len(never_issued),
               "pending_recomputed": len(pending_codes(config)),
               "historical_pit_eligible": False,
-              "probe_semantics": "A positive Sina history probe is not proof of formal delisting; the Baostock cross-check below supplies a separate SH/SZ identity classification.",
+              "probe_semantics": "A positive Sina history probe is not proof of formal delisting; the Baostock cross-check attempts a separate SH/SZ identity classification when the source is available.",
               "note": "Discovery evidence only; does not certify price-history completeness or point-in-time eligibility.",
           }
           Path("discovery-summary.json").write_text(
@@ -132,13 +132,16 @@ jobs:
           if basics.is_empty():
               raise RuntimeError("Baostock returned an empty security master; refusing to publish identity evidence.")
 
-          identity_path = write_delisted_identity_evidence(config, basics)
-          shutil.copyfile(identity_path, "baostock-identity-evidence.json")
-
           stocks = basics.filter(
               (pl.col("asset_type") == "stock")
               & pl.col("exchange").is_in(["SH", "SZ"])
           )
+          if stocks.is_empty():
+              raise RuntimeError("Baostock returned no SH/SZ stock rows; refusing to publish identity evidence.")
+
+          identity_path = write_delisted_identity_evidence(config, stocks)
+          shutil.copyfile(identity_path, "baostock-identity-evidence.json")
+          identity = json.loads(identity_path.read_text(encoding="utf-8"))
           formal = set(
               stocks.filter(pl.col("delist_date").is_not_null())["symbol"].to_list()
           )
@@ -152,6 +155,7 @@ jobs:
               "source": "baostock.query_stock_basic",
               "source_scope": "Baostock-reported SH/SZ stock identity; excludes Beijing listings and does not claim complete all-market coverage.",
               "source_rows_total": basics.height,
+              "source_observed_at": identity["observed_at"],
               "sh_sz_stock_rows": stocks.height,
               "formal_delisted_sh_sz_total": len(formal),
               "currently_listed_sh_sz_total": len(listed),
