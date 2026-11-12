@@ -39,6 +39,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run automated regression tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: pytest -q
       - name: Validate providers without writes
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
