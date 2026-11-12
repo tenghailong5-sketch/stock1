@@ -424,6 +424,8 @@ def test_cross_session_price_volume_flags_use_verified_total_return_close():
     x["pit_total_return_high"] = x["pit_total_return_close"] + 0.8
     x["pit_total_return_available_time"] = pd.Timestamp("2026-11-10T08:00:00Z")
     x["corporate_action_status"] = "VERIFIED"
+    # Make the final session genuinely higher-volume than its 20-session baseline.
+    x.loc[x.index[-1], "amount"] = 3e8
     out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
     assert out["price_up_volume_confirmation"].iloc[-1] == True
     assert out["high_volume_stall"].iloc[-1] == False
