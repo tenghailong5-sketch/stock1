@@ -1,6 +1,11 @@
-name: Tencent Resumable Full-Market History Backfill
+name: Tencent Resumable Currently-Listed A-Share History Backfill
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/backfill_tencent_history.py"
+      - ".github/workflows/tencent-full-market-backfill.yml"
   workflow_dispatch:
     inputs:
       batch_size:
