@@ -35,9 +35,9 @@ def _row_revision(row: pd.Series) -> str:
 
 
 def normalize_daily_history_snapshot(
-    frame: pd.DataFrame, *, symbol: str, fetched_at=None
+    frame: pd.DataFrame, *, symbol: str, fetched_at=None, source_id="akshare.stock_zh_a_hist"
 ) -> pd.DataFrame:
-    """Normalize stock_zh_a_hist output without inventing historical availability.
+    """Normalize daily history output without inventing historical availability.
 
     All rows receive the retrieval timestamp, not their trade date. This is
     deliberately conservative: the provider does not supply original
@@ -64,7 +64,7 @@ def normalize_daily_history_snapshot(
     # every unchanged historical observation on every daily retrieval.
     out["source_revision"] = out.apply(_row_revision, axis=1)
     out["available_time"] = captured
-    out["source_id"] = "akshare.stock_zh_a_hist"
+    out["source_id"] = str(source_id)
     out["availability_basis"] = "retrieval_time_only"
     out["historical_pit_eligible"] = False
     return out
