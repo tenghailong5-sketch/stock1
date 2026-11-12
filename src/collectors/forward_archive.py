@@ -22,6 +22,7 @@ from src.model.market_sentiment import summarize_limit_pool_sentiment
 from src.providers.akshare_limit_pools import fetch_limit_pool_snapshots
 from src.providers.akshare_pit import (
     fetch_current_industry_membership_snapshot,
+    fetch_sina_current_industry_membership_snapshot,
     normalize_index_history_snapshot,
     normalize_market_breadth_snapshot,
 )
@@ -214,11 +215,25 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             ak_module, clock=industry_clock, pause_seconds=0.15
         )
         industry_records = _records(industry)
-        source_status["industry_membership"] = "ok"
-    except Exception as exc:
-        source_status["industry_membership"] = f"unavailable: {type(exc).__name__}: {str(exc)[:240]}"
-        if not allow_partial:
-            raise
+        source_status["industry_membership"] = "ok: akshare.stock_board_industry_cons_em"
+    except Exception as eastmoney_exc:
+        try:
+            industry = fetch_sina_current_industry_membership_snapshot(
+                ak_module, clock=industry_clock
+            )
+            industry_records = _records(industry)
+            source_status["industry_membership"] = (
+                "ok: akshare.stock_sector_spot_sina "
+                f"(Eastmoney fallback after {type(eastmoney_exc).__name__})"
+            )
+        except Exception as sina_exc:
+            source_status["industry_membership"] = (
+                "unavailable: Eastmoney "
+                f"{type(eastmoney_exc).__name__}: {str(eastmoney_exc)[:120]} | "
+                f"Sina {type(sina_exc).__name__}: {str(sina_exc)[:120]}"
+            )
+            if not allow_partial:
+                raise RuntimeError(source_status["industry_membership"]) from sina_exc
 
     breadth_records: list[dict] = []
     try:
