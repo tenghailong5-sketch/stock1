@@ -123,3 +123,12 @@ def test_empty_event_ledger_is_accepted_only_with_complete_attestation():
     assert out.corporate_action_status.eq("VERIFIED").all()
     assert out.pit_total_return_close.iloc[0] == 100.0
     assert out.pit_total_return_close.iloc[1] == 95.0
+
+def test_action_ex_date_without_matching_price_bar_blocks_series():
+    prices, actions, coverage = fixtures()
+    # Keep the attested interval but remove the ex-date bar, simulating a
+    # missing session or a provider date/coverage mismatch.
+    prices = prices.loc[prices.trade_date != "2026-11-10"].copy()
+    out = build_pit_total_return_prices(prices, actions, coverage, decision_time=CUTOFF)
+    assert out.corporate_action_status.eq("ACTION_DATE_OUTSIDE_PRICE_COVERAGE").all()
+    assert out.pit_total_return_close.isna().all()
