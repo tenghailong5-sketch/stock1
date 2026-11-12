@@ -150,7 +150,7 @@ jobs:
           identity["universe_scope"] = "sh_sz_stock"
           identity["asset_type_filter"] = "stock"
           identity_path.write_text(
-              json.dumps(identity, ensure_ascii=False, indent=2) + "\\n",
+              json.dumps(identity, ensure_ascii=False, indent=2) + "\n",
               encoding="utf-8",
           )
           shutil.copyfile(identity_path, "baostock-identity-evidence.json")
