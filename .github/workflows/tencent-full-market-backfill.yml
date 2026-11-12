@@ -1,19 +1,14 @@
 name: Tencent Resumable Currently-Listed A-Share History Backfill
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/backfill_tencent_history.py"
-      - ".github/workflows/tencent-full-market-backfill.yml"
+  # Full-market historical backfill is intentionally manual-only.
+  # FHM-100 uses its own daily scan and forward-only archive workflows.
   workflow_dispatch:
     inputs:
       batch_size:
         description: "Number of securities to process in this run (1-200)"
         required: false
         default: "50"
-  schedule:
-    - cron: "0 1,7,13,19 * * 1-5"
 
 permissions:
   contents: write
