@@ -135,6 +135,7 @@ def main():
     manifest={"batch_number":bn,"provider":"Tencent/AKShare stock_zh_a_hist_tx","adjust":"none",
       "requested_start":a.start_date,"requested_end":end,"fetched_at_utc":fetched,
       "universe_size":len(u),"universe_sha256":uhash,"universe_sources":diag,
+      "universe_scope":"currently listed SSE/SZSE/BSE A-shares; delisted securities are not yet included",
       "cursor_start":new_start,"cursor_end":state["next_index"],"symbols_attempted":len(work),
       "symbols_succeeded":sum(x["status"]=="ok" for x in outcomes),
       "symbols_failed_this_batch":sum(x["status"]=="failed" for x in outcomes),
