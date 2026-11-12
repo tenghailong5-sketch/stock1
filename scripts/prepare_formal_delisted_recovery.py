@@ -12,7 +12,7 @@ import argparse
 import json
 import os
 import tempfile
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,30 @@ def _date(value: Any, *, label: str) -> date:
         return date.fromisoformat(str(value)[:10])
     except (TypeError, ValueError) as exc:
         raise ValueError(f"invalid {label}: {value!r}") from exc
+
+
+def validate_snapshot_freshness(
+    observed_at: str,
+    *,
+    now: datetime | None = None,
+    max_age: timedelta = timedelta(days=14),
+) -> float:
+    """Return snapshot age in hours; reject naive, future, or stale evidence."""
+    try:
+        observed = datetime.fromisoformat(str(observed_at).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("invalid Baostock identity observed_at timestamp") from exc
+    if observed.tzinfo is None:
+        raise ValueError("Baostock identity observed_at must be timezone-aware")
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        raise ValueError("current time must be timezone-aware")
+    age = current.astimezone(timezone.utc) - observed.astimezone(timezone.utc)
+    if age < timedelta(minutes=-5):
+        raise ValueError("Baostock identity snapshot timestamp is in the future")
+    if age > max_age:
+        raise ValueError("Baostock identity snapshot is stale")
+    return max(0.0, age.total_seconds() / 3600.0)
 
 
 def sanitize_catalog(
@@ -128,6 +152,7 @@ def prepare(
     ):
         raise RuntimeError("Baostock identity evidence is not a complete supported SH/SZ stock snapshot")
 
+    identity_age_hours = validate_snapshot_freshness(identity.get("observed_at", ""))
     raw_catalog = json.loads(raw_catalog_snapshot.read_text(encoding="utf-8"))
     catalog_file = Path(config.meta_root) / "state" / "delisted_catalog.json"
     existing_catalog = (
@@ -165,6 +190,7 @@ def prepare(
         "identity_universe_scope": identity.get("universe_scope"),
         "identity_asset_type_filter": identity.get("asset_type_filter"),
         "identity_observed_at": identity.get("observed_at"),
+        "identity_age_hours": round(identity_age_hours, 2),
         "identity_listing_rows": len(identity.get("listing_dates", {})),
         "identity_formal_delisted_rows": len(identity.get("delisted_symbols", {})),
         "formal_delistings_in_window": len(in_window),
