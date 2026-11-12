@@ -145,6 +145,7 @@ def scan(u,archive_root=Path("data/forward_archive")):
             if not structure: flags.append("CLV收盘结构未确认")
             if not pullback: flags.append("回撤过深/缺失")
             rows.append({"symbol":s.code,"trade_date":m4.trade_date.strftime("%Y-%m-%d"),
+              "available_time":available_at.isoformat(),
               "BodyStrength":m4.BodyStrength,"return_5":m4.return_5,"return_10":m4.return_10,
               "return_20":m4.return_20,"breakout20":m4.breakout20,
               "upper_shadow_ratio":m4.upper_shadow_ratio,
@@ -268,8 +269,6 @@ def summarize_m5_blockers(frame):
 
 
 def main():
-    now=datetime.now(timezone.utc).astimezone()
-    m3 = load_m3_market_context(decision_time=now)
     try:
         u=universe()
         w,e=scan(u)
@@ -284,6 +283,11 @@ def main():
         u=pd.DataFrame()
         w,e=empty_scan_result(exc)
         observation_audit = pd.DataFrame()
+    # Freeze one decision cutoff only after all live stock-history requests finish.
+    # M3 and every captured stock bar are therefore evaluated against the same
+    # cutoff; no provider response fetched after the cutoff can leak into the run.
+    now=datetime.now(timezone.utc)
+    m3 = load_m3_market_context(decision_time=now)
     w=w.sort_values(["技术观察通过","流动性观察通过","当日成交额"],ascending=[False,False,False])
     # M5 remains diagnostic-only: M3 state is supplied only when independently READY; factors and hard gates are still incomplete.
     m5_input = pd.DataFrame([{"symbol": str(code), "market_state": m3["market_state"]} for code in w["代码"]])
