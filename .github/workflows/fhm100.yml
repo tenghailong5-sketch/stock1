@@ -28,6 +28,9 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m pytest -q
+      - name: Validate GitHub Actions workflow YAML
+        run: |
+          ruby -e 'require "yaml"; Dir.glob(".github/workflows/*.{yml,yaml}").sort.each { |path| YAML.load_file(path); puts "valid YAML: #{path}" }'
       # Pull requests validate code only; do not spend runner time on a live market-data scan.
       # GitHub does not expose repository secrets to fork PRs, and scan output is not a PR check.
       - name: Run research scan
