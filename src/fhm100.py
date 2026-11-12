@@ -142,8 +142,29 @@ def universe():
 
 # [live-scan] Verify Tencent universe fallback with live market data
 
+def _download_tencent_history(code, start, *, cause):
+    """Fetch and strictly normalize Tencent daily bars after Eastmoney failure."""
+    prefix = "sh" if str(code).startswith("6") else "sz"
+    frame = ak.stock_zh_a_hist_tx(
+        symbol=prefix + str(code).zfill(6), start_date=start,
+        end_date=datetime.now().strftime("%Y%m%d"), adjust=""
+    )
+    if frame is None or frame.empty:
+        raise RuntimeError("Tencent fallback returned empty daily history") from cause
+    aliases = {
+        "date": "日期", "open": "开盘", "high": "最高", "low": "最低",
+        "close": "收盘", "volume": "成交量", "amount": "成交额",
+    }
+    if any(column not in frame.columns for column in aliases):
+        raise RuntimeError("Tencent fallback daily-history schema changed") from cause
+    normalized = frame.rename(columns=aliases).copy()
+    normalized["换手率"] = np.nan
+    normalized.attrs["source_id"] = "akshare.stock_zh_a_hist_tx"
+    return normalized
+
+
 def _download_history(code, start, max_attempts=3):
-    """Retry only transient transport failures; never hide schema/data errors."""
+    """Retry transient transport failures, then fail over to Tencent."""
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
     for attempt in range(max_attempts):
@@ -154,31 +175,15 @@ def _download_history(code, start, max_attempts=3):
             )  # raw prices only; no look-ahead-adjusted history
         except Exception as exc:
             if _is_eastmoney_rate_limit(exc):
-                # Tencent is an independent free daily-K source. Its schema is
-                # normalized below; retrieval time remains the only availability
-                # timestamp and no historical PIT eligibility is implied.
-                prefix = "sh" if str(code).startswith("6") else "sz"
-                frame = ak.stock_zh_a_hist_tx(
-                    symbol=prefix + str(code).zfill(6), start_date=start,
-                    end_date=datetime.now().strftime("%Y%m%d"), adjust=""
-                )
-                if frame is None or frame.empty:
-                    raise RuntimeError("Tencent fallback returned empty daily history") from exc
-                aliases = {
-                    "date": "日期", "open": "开盘", "high": "最高", "low": "最低",
-                    "close": "收盘", "volume": "成交量", "amount": "成交额",
-                }
-                if any(column not in frame.columns for column in aliases):
-                    raise RuntimeError("Tencent fallback daily-history schema changed") from exc
-                normalized = frame.rename(columns=aliases).copy()
-                normalized["换手率"] = np.nan
-                normalized.attrs["source_id"] = "akshare.stock_zh_a_hist_tx"
-                return normalized
+                return _download_tencent_history(code, start, cause=exc)
             if not isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
                 raise
-            if attempt + 1 >= max_attempts:
-                raise
-            time.sleep(2 ** attempt)
+            if attempt + 1 < max_attempts:
+                time.sleep(2 ** attempt)
+                continue
+            # Do not keep retrying a provider that timed out three times.
+            # Switch once to the independent free Tencent daily-history source.
+            return _download_tencent_history(code, start, cause=exc)
 
 
 def history(code,start,archive_root=Path("data/forward_archive")):
