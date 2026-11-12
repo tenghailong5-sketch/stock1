@@ -119,6 +119,32 @@ The cumulative total includes one successful retry of the single failed code fro
 
 The one unmatched code is not certified as delisted or listed by this snapshot. The 134 matches remain a subset of the 341 Baostock-reported formal SH/SZ delistings. The discovery universe and the historical PIT evidence are still incomplete.
 
+## Stock-only identity snapshot verification — run 43153468361
+
+- Main-branch commit: `309c8a07f95d58640542ad962e4fc51b05187959`
+- Cache restore: `Cache restored from key: delisted-catalog-main-43151517563`
+- Cache save: `Cache saved with key: delisted-catalog-main-43153468361`
+- The identity writer now persists only SH/SZ `asset_type=stock` rows, excluding ETF/CDR identities from the stock recovery set.
+
+| Measure | Run 43153468361 |
+|---|---:|
+| Probe slots / completed | 500 / 500 |
+| New positive Sina responses | 117 |
+| New no-history responses | 383 |
+| Failed probes | 0 |
+| Remaining probes | 33,751 |
+| Cumulative positive Sina responses | 1,108 |
+| Cumulative no-history responses | 891 |
+| Baostock SH/SZ stock identity rows | 5,565 |
+| Baostock formal SH/SZ stock delistings | 341 |
+| Positive probes matched to formal delistings | 136 |
+| Positive probes matched to currently listed stocks | 971 |
+| Positive probes absent from this snapshot | 1 |
+
+Among the 1,108 cumulative positive Sina responses, 12.3% match formal delistings, 87.6% match currently listed stocks, and 0.1% are unmatched. The raw probe catalogue must therefore not be used directly as a delisted-stock universe.
+
+This run predates the explicit `universe_scope=sh_sz_stock` marker added in the formal-recovery workflow change. The next main discovery run is expected to write that marker; the recovery preflight rejects older unmarked snapshots.
+
 ## Eligibility and model impact
 
 - The Baostock identity snapshot is a current vendor observation, not historical publication-time evidence.

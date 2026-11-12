@@ -1,0 +1,208 @@
+name: Formal Delisted History Recovery
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Saturday 04:00 Asia/Shanghai; Friday's market session is complete.
+    - cron: "0 20 * * 5"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/formal-delisted-history-recovery.yml"
+      - ".github/workflows/delisted-discovery.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: formal-delisted-history-recovery-main
+  cancel-in-progress: false
+
+jobs:
+  push-noop:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep branch-push validation lightweight
+        run: echo "Formal recovery runs only by schedule or manual dispatch on main."
+
+  recover:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CN_EQUITY_REF: 90ed0a5ad0df455af8d1e2610a79b642956a2f69
+      DELISTED_DATA_ROOT: ${{ runner.temp }}/cnequity-delisted-lake
+      DELISTED_CONFIG: ${{ runner.temp }}/cnequity-delisted.toml
+      RECOVERY_DIR: validation/formal-delisted-recovery
+    steps:
+      - name: Checkout stock model
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned CNEquity source
+        uses: actions/checkout@v4
+        with:
+          repository: rootSunc/CNEquity
+          ref: ${{ env.CN_EQUITY_REF }}
+          path: cnequity-source
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install free data pipeline dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./cnequity-source
+
+      - name: Initialize isolated recovery lake
+        run: |
+          set -euo pipefail
+          mkdir -p "$RECOVERY_DIR" "$RUNNER_TEMP/formal-recovery"
+          initialized=0
+          for attempt in 1 2 3; do
+            if cne init --profile demo --symbols "600519.SH" --days 1 \
+              --data-root "$DELISTED_DATA_ROOT" --config-out "$DELISTED_CONFIG" \
+              2>&1 | tee "$RECOVERY_DIR/init-attempt-$attempt.log"; then
+              initialized=1
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+          test "$initialized" -eq 1
+          cp "$RECOVERY_DIR/init-attempt-$attempt.log" "$RECOVERY_DIR/init.log"
+
+      - name: Restore latest main discovery catalogue and Baostock identity
+        id: discovery-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ runner.temp }}/cnequity-delisted-lake/meta/state/delisted_catalog.json
+            ${{ runner.temp }}/cnequity-delisted-lake/meta/quality/evidence/delisted_security_identity/baostock-v1.json
+          key: delisted-catalog-main-${{ github.run_id }}
+          restore-keys: |
+            delisted-catalog-main-
+
+      - name: Snapshot raw discovery catalogue before restoring recovery state
+        run: |
+          set -euo pipefail
+          CATALOG="$DELISTED_DATA_ROOT/meta/state/delisted_catalog.json"
+          IDENTITY="$DELISTED_DATA_ROOT/meta/quality/evidence/delisted_security_identity/baostock-v1.json"
+          test -s "$CATALOG"
+          test -s "$IDENTITY"
+          cp "$CATALOG" "$RUNNER_TEMP/formal-recovery/raw-discovery-catalog.json"
+          echo "Restored Baostock identity snapshot and raw discovery catalogue."
+
+      - name: Restore formal recovery lake and checkpoints
+        id: recovery-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/cnequity-delisted-lake/curated
+            ${{ runner.temp }}/cnequity-delisted-lake/meta/state/delisted_catalog.json
+            ${{ runner.temp }}/cnequity-delisted-lake/meta/state/delisted_daily_bars_recovery
+            ${{ runner.temp }}/cnequity-delisted-lake/meta/state/delisted_ingested.json
+          key: delisted-formal-recovery-main-${{ github.run_id }}
+          restore-keys: |
+            delisted-formal-recovery-main-
+          save-always: true
+
+      - name: Filter recovery catalogue to formal SH/SZ stocks
+        env:
+          BAR_START: "2016-01-01"
+        run: |
+          set -euo pipefail
+          LOCAL_HHMM="$(TZ=Asia/Shanghai date +%H%M)"
+          if (( 10#$LOCAL_HHMM < 1505 )); then
+            BAR_END="$(TZ=Asia/Shanghai date -d 'yesterday' +%F)"
+          else
+            BAR_END="$(TZ=Asia/Shanghai date +%F)"
+          fi
+          echo "BAR_START=$BAR_START" >> "$GITHUB_ENV"
+          echo "BAR_END=$BAR_END" >> "$GITHUB_ENV"
+          python scripts/prepare_formal_delisted_recovery.py \
+            --config "$DELISTED_CONFIG" \
+            --raw-catalog-snapshot "$RUNNER_TEMP/formal-recovery/raw-discovery-catalog.json" \
+            --start "$BAR_START" --end "$BAR_END" \
+            --output-dir "$RECOVERY_DIR"
+          FORMAL_ACTION_SYMBOLS="$(paste -sd, "$RECOVERY_DIR/formal-delisted-in-window-symbols.txt")"
+          echo "FORMAL_ACTION_SYMBOLS=$FORMAL_ACTION_SYMBOLS" >> "$GITHUB_ENV"
+
+      - name: Backfill corporate actions for in-window formal delistings
+        if: env.FORMAL_ACTION_SYMBOLS != ''
+        timeout-minutes: 20
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cne backfill corporate_actions --start 1990-01-01 --end "$BAR_END" \
+            --symbols "$FORMAL_ACTION_SYMBOLS" --config "$DELISTED_CONFIG" --plan \
+            2>&1 | tee "$RECOVERY_DIR/corporate-actions-plan.log"
+          cne backfill corporate_actions --start 1990-01-01 --end "$BAR_END" \
+            --symbols "$FORMAL_ACTION_SYMBOLS" --config "$DELISTED_CONFIG" \
+            2>&1 | tee "$RECOVERY_DIR/corporate-actions-backfill.log"
+
+      - name: Backfill formal delisted daily bars
+        run: |
+          set -euo pipefail
+          cne backfill daily_bars --profile delisted --start "$BAR_START" \
+            --config "$DELISTED_CONFIG" --plan \
+            2>&1 | tee "$RECOVERY_DIR/daily-bars-plan.log"
+          cne backfill daily_bars --profile delisted --start "$BAR_START" \
+            --config "$DELISTED_CONFIG" \
+            2>&1 | tee "$RECOVERY_DIR/daily-bars-backfill.log"
+          cne delisted status --config "$DELISTED_CONFIG" \
+            2>&1 | tee "$RECOVERY_DIR/delisted-status.log"
+
+      - name: Extend trading calendar over recovered history
+        run: |
+          set -euo pipefail
+          cne backfill trading_calendar --start "$BAR_START" --end "$BAR_END" \
+            --config "$DELISTED_CONFIG" --plan \
+            2>&1 | tee "$RECOVERY_DIR/trading-calendar-plan.log"
+          cne backfill trading_calendar --start "$BAR_START" --end "$BAR_END" \
+            --config "$DELISTED_CONFIG" \
+            2>&1 | tee "$RECOVERY_DIR/trading-calendar-backfill.log"
+
+      - name: Audit recovered formal delisted coverage
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          set +e
+          python cnequity-source/scripts/delisted_ops.py --config "$DELISTED_CONFIG" \
+            coverage --start "$BAR_START" --end "$BAR_END" --universe all_a_sh_sz \
+            > "$RECOVERY_DIR/coverage-report.log" 2>&1
+          status=$?
+          set -e
+          echo "$status" > "$RECOVERY_DIR/coverage-exit-code.txt"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = Path("validation/formal-delisted-recovery/formal-recovery-preflight.json")
+          report = json.loads(p.read_text(encoding="utf-8"))
+          report["coverage_command_exit_code"] = int(
+              Path("validation/formal-delisted-recovery/coverage-exit-code.txt").read_text().strip()
+          )
+          report["coverage_log_tail"] = Path(
+              "validation/formal-delisted-recovery/coverage-report.log"
+          ).read_text(encoding="utf-8", errors="replace")[-6000:]
+          report["historical_pit_eligible"] = False
+          Path("validation/formal-delisted-recovery/formal-recovery-summary.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          print(json.dumps({k: v for k, v in report.items() if k != "coverage_log_tail"},
+                           ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload formal delisted recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: formal-delisted-history-recovery
+          path: |
+            validation/formal-delisted-recovery/
+            ${{ runner.temp }}/formal-recovery/raw-discovery-catalog.json
+            ${{ runner.temp }}/cnequity-delisted-lake/meta/state/delisted_daily_bars_recovery/
+          if-no-files-found: warn
+          retention-days: 30

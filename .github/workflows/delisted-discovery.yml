@@ -146,8 +146,14 @@ jobs:
           # Persist SH/SZ stock rows only; do not let ETF/CDR delistings enter
           # the stock recovery universe. Baostock does not provide BJ coverage.
           identity_path = write_delisted_identity_evidence(config, stocks)
-          shutil.copyfile(identity_path, "baostock-identity-evidence.json")
           identity = json.loads(identity_path.read_text(encoding="utf-8"))
+          identity["universe_scope"] = "sh_sz_stock"
+          identity["asset_type_filter"] = "stock"
+          identity_path.write_text(
+              json.dumps(identity, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          shutil.copyfile(identity_path, "baostock-identity-evidence.json")
           formal = set(
               stocks.filter(pl.col("delist_date").is_not_null())["symbol"].to_list()
           )
