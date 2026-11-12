@@ -22,7 +22,7 @@ def test_stock_history_archive_records_retrieval_time_and_pit_ineligibility(tmp_
     )
     assert result == {"rows_appended": 2, "manifests_appended": 1}
 
-    rows_path = tmp_path / "stock_daily" / "2026-11-12.jsonl"
+    rows_path = tmp_path / "stock_daily" / "000001.jsonl"
     rows = [json.loads(line) for line in rows_path.read_text().splitlines()]
     assert len(rows) == 2
     assert {row["symbol"] for row in rows} == {"000001"}
@@ -33,7 +33,7 @@ def test_stock_history_archive_records_retrieval_time_and_pit_ineligibility(tmp_
     assert len({row["snapshot_id"] for row in rows}) == 1
     assert {row["trade_date"][:10] for row in rows} == {"2026-11-10", "2026-11-11"}
 
-    manifest_path = tmp_path / "stock_daily_manifest" / "2026-11-12.jsonl"
+    manifest_path = tmp_path / "stock_daily_manifest" / "000001.jsonl"
     manifests = [json.loads(line) for line in manifest_path.read_text().splitlines()]
     assert len(manifests) == 1
     assert manifests[0]["row_count"] == 2
@@ -54,9 +54,9 @@ def test_stock_history_archive_is_idempotent_for_unchanged_bars_but_keeps_captur
     assert second["rows_appended"] == 0
     assert second["manifests_appended"] == 1
 
-    rows_path = tmp_path / "stock_daily" / "2026-11-12.jsonl"
+    rows_path = tmp_path / "stock_daily" / "000001.jsonl"
     assert len(rows_path.read_text().splitlines()) == 2
-    manifest_path = tmp_path / "stock_daily_manifest" / "2026-11-12.jsonl"
+    manifest_path = tmp_path / "stock_daily_manifest" / "000001.jsonl"
     assert len(manifest_path.read_text().splitlines()) == 2
 
 
@@ -69,7 +69,7 @@ def test_stock_history_archive_preserves_provider_revisions(tmp_path):
         _bars(close=10.1), "000001", captured_at="2026-11-12T08:40:00+00:00",
         archive_root=tmp_path,
     )
-    rows_path = tmp_path / "stock_daily" / "2026-11-12.jsonl"
+    rows_path = tmp_path / "stock_daily" / "000001.jsonl"
     rows = [json.loads(line) for line in rows_path.read_text().splitlines()]
     revised = [row for row in rows if row["trade_date"].startswith("2026-11-10")]
     assert len(revised) == 2
