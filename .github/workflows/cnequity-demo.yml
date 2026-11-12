@@ -97,6 +97,7 @@ jobs:
           else
             BAR_END="$(TZ=Asia/Shanghai date +%F)"
           fi
+          echo "BAR_END=$BAR_END" >> "$GITHUB_ENV"
           BAR_START="$(TZ=Asia/Shanghai date -d '180 days ago' +%F)"
           echo "Bounded daily-bar validation window: ${BAR_START}..${BAR_END} (Asia/Shanghai ${LOCAL_HHMM})"
           cne backfill daily_bars --start "$BAR_START" --end "$BAR_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/daily-bars-plan.log
