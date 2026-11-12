@@ -22,11 +22,11 @@ PRICE_REQUIRED = {
 }
 ACTION_REQUIRED = {
     "symbol", "ex_date", "action_type", "cash_per_share", "share_factor",
-    "verified_status", "available_time", "source_id", "source_revision",
+    "verified_status", "available_time", "source_id", "source_revision", "ledger_snapshot_id",
 }
 COVERAGE_REQUIRED = {
     "symbol", "coverage_start", "coverage_end", "coverage_status",
-    "available_time", "source_id", "source_revision",
+    "available_time", "source_id", "source_revision", "ledger_snapshot_id",
 }
 SUPPORTED_ACTIONS = {"cash_dividend", "split", "bonus"}
 
@@ -129,7 +129,9 @@ def build_pit_total_return_prices(
             if (str(att.coverage_status) != "COMPLETE" or pd.isna(cov_start) or pd.isna(cov_end)
                     or cov_start > first_date or cov_end < last_date or att_time > cutoff
                     or pd.isna(att.source_id) or pd.isna(att.source_revision)
-                    or not str(att.source_id).strip() or not str(att.source_revision).strip()):
+                    or pd.isna(att.ledger_snapshot_id)
+                    or not str(att.source_id).strip() or not str(att.source_revision).strip()
+                    or not str(att.ledger_snapshot_id).strip()):
                 outputs.append(_blocked(p, "COVERAGE_NOT_VERIFIED", "coverage_must_be_complete_cover_window_and_known_by_cutoff"))
                 continue
 
@@ -143,9 +145,11 @@ def build_pit_total_return_prices(
                 a = a[(a.ex_date >= first_date) & (a.ex_date <= last_date)].copy()
                 if not a.empty:
                     a["available_time"] = _timestamps(a, "available_time", "actions")
-                    if (a[["source_id", "source_revision"]].isna().any().any()
+                    if (a[["source_id", "source_revision", "ledger_snapshot_id"]].isna().any().any()
                             or a["source_id"].astype(str).str.strip().eq("").any()
-                            or a["source_revision"].astype(str).str.strip().eq("").any()):
+                            or a["source_revision"].astype(str).str.strip().eq("").any()
+                            or a["ledger_snapshot_id"].astype(str).str.strip().eq("").any()
+                            or not a["ledger_snapshot_id"].astype(str).eq(str(att.ledger_snapshot_id)).all()):
                         outputs.append(_blocked(p, "INVALID_ACTION_LINEAGE", "action_source_lineage_required"))
                         continue
                     if (a.available_time > cutoff).any():
