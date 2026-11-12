@@ -90,6 +90,16 @@ def test_factor_percentiles_are_scoped_to_each_date_and_preserve_missing():
     assert pd.isna(out.loc[3, "industry_relative_strength"])
 
 
+def test_factor_percentiles_reject_ambiguous_direction_flags():
+    import pandas as pd
+    from src.model.scoring import score_factor_bundle
+    frame = pd.DataFrame({"trade_date": ["2026-01-01"], "raw": [10.0]})
+    with pytest.raises(ValueError, match="explicit boolean"):
+        score_factor_bundle(frame, {"industry_relative_strength": ("raw", "false")})
+    with pytest.raises(ValueError, match="non-empty string"):
+        score_factor_bundle(frame, {"industry_relative_strength": ("", True)})
+
+
 def test_b_requires_one_of_four_distinct_event_subtypes():
     gates = {"event_data_verified": True, "liquidity_and_risk_pass": True, "announcement_risk_pass": True, "event_subtype": "unknown_event"}
     result = score_b(factors(B_WEIGHTS), gates, market_state=MarketState.NEUTRAL, stage="next_day")
