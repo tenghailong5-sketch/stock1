@@ -18,6 +18,12 @@ def test_score_refuses_missing_factor_instead_of_imputing_zero():
         weighted_score(A_WEIGHTS, {"industry_relative_strength": 80})
 
 
+@pytest.mark.parametrize("bad_weight", [float("nan"), float("inf"), True, "20"])
+def test_weight_validation_rejects_non_numeric_or_non_finite_values(bad_weight):
+    with pytest.raises(ValueError, match="finite non-negative numeric"):
+        weighted_score({"a": bad_weight, "b": 100}, {"a": 50, "b": 50})
+
+
 def test_point_in_time_excludes_future_and_unknown_availability():
     now = datetime(2026, 11, 10, 8, tzinfo=timezone.utc)
     rows = [
