@@ -102,6 +102,11 @@ def build_pit_total_return_prices(
             if p["trade_date"].isna().any() or p["trade_date"].duplicated().any():
                 outputs.append(_blocked(p, "INVALID_PRICE_DATES", "invalid_or_duplicate_trade_date").prices)
                 continue
+            if (p[["source_id", "source_revision"]].isna().any().any()
+                    or p["source_id"].astype(str).str.strip().eq("").any()
+                    or p["source_revision"].astype(str).str.strip().eq("").any()):
+                outputs.append(_blocked(p, "INVALID_PRICE_LINEAGE", "price_source_lineage_required").prices)
+                continue
             p["available_time"] = _timestamps(p, "available_time", "prices")
             if (p["available_time"] > cutoff).any():
                 outputs.append(_blocked(p, "PRICE_NOT_AVAILABLE_AT_DECISION", "price_observation_after_cutoff").prices)
@@ -131,6 +136,7 @@ def build_pit_total_return_prices(
                 continue
             if (str(att.coverage_status) != "COMPLETE" or pd.isna(cov_start) or pd.isna(cov_end)
                     or cov_start > first_date or cov_end < last_date or att_time > cutoff
+                    or pd.isna(att.source_id) or pd.isna(att.source_revision)
                     or not str(att.source_id).strip() or not str(att.source_revision).strip()):
                 outputs.append(_blocked(p, "COVERAGE_NOT_VERIFIED", "coverage_must_be_complete_cover_window_and_known_by_cutoff").prices)
                 continue
@@ -145,6 +151,11 @@ def build_pit_total_return_prices(
                 a = a[(a.ex_date >= first_date) & (a.ex_date <= last_date)].copy()
                 if not a.empty:
                     a["available_time"] = _timestamps(a, "available_time", "actions")
+                    if (a[["source_id", "source_revision"]].isna().any().any()
+                            or a["source_id"].astype(str).str.strip().eq("").any()
+                            or a["source_revision"].astype(str).str.strip().eq("").any()):
+                        outputs.append(_blocked(p, "INVALID_ACTION_LINEAGE", "action_source_lineage_required").prices)
+                        continue
                     if (a.available_time > cutoff).any():
                         outputs.append(_blocked(p, "ACTION_NOT_AVAILABLE_AT_DECISION", "relevant_action_retrieved_after_cutoff").prices)
                         continue
