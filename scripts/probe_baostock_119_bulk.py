@@ -40,6 +40,8 @@ def main():
         "passed_sessions": 0,
         "failed_sessions": [],
         "session_rows": [],
+        "sample_codes_required_each_session": sorted(SAMPLE_CODES),
+        "sample_codes_missing_by_session": [],
     }
     login = bs.login()
     if login.error_code != "0":
@@ -86,13 +88,17 @@ def main():
                     raise RuntimeError("invalid_high")
                 if (valid["low"] > valid[["open", "high", "close"]].min(axis=1)).any():
                     raise RuntimeError("invalid_low")
+                present_samples = sorted(set(frame["code"].astype(str)) & SAMPLE_CODES)
+                missing_samples = sorted(SAMPLE_CODES - set(present_samples))
+                if missing_samples:
+                    raise RuntimeError(f"missing_segment_samples={missing_samples}")
                 frame["date"] = day
                 frames.append(frame)
                 item = {
                     "date": day,
                     "rows": int(len(frame)),
                     "valid_rows": int(len(valid)),
-                    "sample_codes_present": sorted(set(frame["code"].astype(str)) & SAMPLE_CODES),
+                    "sample_codes_present": present_samples,
                     "elapsed_seconds": round(time.monotonic() - started, 2),
                     "status": "OK",
                 }
@@ -105,6 +111,8 @@ def main():
                     "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
                 }
                 report["failed_sessions"].append(item)
+                if "missing_segment_samples" in item.get("reason", ""):
+                    report["sample_codes_missing_by_session"].append(item["date"])
             report["session_rows"].append(item)
             print(json.dumps({"progress": f"{i}/119", **item}, ensure_ascii=False), flush=True)
 
@@ -135,6 +143,7 @@ def main():
             and len(report["failed_sessions"]) == 0
             and report["total_rows"] >= 119 * 4500
             and SAMPLE_CODES.issubset(set(report["four_market_samples_seen"]))
+            and len(report["sample_codes_missing_by_session"]) == 0
         )
         report["qualification_scope"] = "SH/SZ A-share full-market bulk history; BJ not covered by BaoStock"
     finally:
