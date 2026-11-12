@@ -5,11 +5,6 @@ on:
   schedule:
     # Saturday 04:00 Asia/Shanghai; Friday's market session is complete.
     - cron: "0 20 * * 5"
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/formal-delisted-history-recovery.yml"
-      - ".github/workflows/delisted-discovery.yml"
 
 permissions:
   contents: read
@@ -19,12 +14,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  push-noop:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Keep branch-push validation lightweight
-        run: echo "Formal recovery runs only by schedule or manual dispatch on main."
-
   recover:
     if: github.ref == 'refs/heads/main' && github.event_name != 'push'
     runs-on: ubuntu-latest
