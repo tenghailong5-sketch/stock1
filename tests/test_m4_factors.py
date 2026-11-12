@@ -406,3 +406,38 @@ def test_industry_relative_strength_rejects_infinite_numeric_observations():
     )
     assert pd.isna(result.loc[0, "industry_excess_5"])
     assert result.loc[0, "industry_excess_20"] == pytest.approx(0.10)
+
+
+def test_cross_session_price_volume_flags_remain_missing_without_verified_pit_prices():
+    out = price_structure(
+        bars(), decision_time="2026-11-10T09:00:00Z"
+    )
+    for column in (
+        "price_up_volume_confirmation", "high_volume_stall", "low_volume_pullback"
+    ):
+        assert out[column].isna().all()
+
+
+def test_cross_session_price_volume_flags_use_verified_total_return_close():
+    x = bars()
+    x["pit_total_return_close"] = 100.0 + np.arange(len(x)) * 0.5
+    x["pit_total_return_high"] = x["pit_total_return_close"] + 0.8
+    x["pit_total_return_available_time"] = pd.Timestamp("2026-11-10T08:00:00Z")
+    x["corporate_action_status"] = "VERIFIED"
+    out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
+    assert out["price_up_volume_confirmation"].iloc[-1] == True
+    assert out["high_volume_stall"].iloc[-1] == False
+    assert out["low_volume_pullback"].iloc[-1] == False
+
+
+def test_cross_session_price_volume_flags_stay_missing_for_unverified_actions():
+    x = bars()
+    x["pit_total_return_close"] = 100.0 + np.arange(len(x)) * 0.5
+    x["pit_total_return_high"] = x["pit_total_return_close"] + 0.8
+    x["pit_total_return_available_time"] = pd.Timestamp("2026-11-10T08:00:00Z")
+    x["corporate_action_status"] = "PENDING"
+    out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
+    for column in (
+        "price_up_volume_confirmation", "high_volume_stall", "low_volume_pullback"
+    ):
+        assert out[column].isna().all()
