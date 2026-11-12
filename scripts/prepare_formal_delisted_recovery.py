@@ -120,8 +120,11 @@ def prepare(
         identity.get("status") != "complete"
         or identity.get("claim") != "delisted_security_identity"
         or identity.get("evidence_version") != 1
+        or identity.get("source") != "baostock.query_stock_basic"
+        or not isinstance(identity.get("listing_dates"), dict)
+        or not isinstance(identity.get("delisted_symbols"), dict)
     ):
-        raise RuntimeError("Baostock identity evidence is not a complete supported snapshot")
+        raise RuntimeError("Baostock identity evidence is not a complete supported SH/SZ stock snapshot")
 
     raw_catalog = json.loads(raw_catalog_snapshot.read_text(encoding="utf-8"))
     catalog_file = Path(config.meta_root) / "state" / "delisted_catalog.json"
