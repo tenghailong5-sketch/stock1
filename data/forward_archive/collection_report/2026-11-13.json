@@ -1,7 +1,7 @@
 {
-  "captured_at": "2026-11-12T23:51:38.940404+00:00",
+  "captured_at": "2026-11-12T23:55:24.952061+00:00",
   "source_status": {
-    "industry_membership": "ok: akshare.stock_sector_spot_sina (Eastmoney fallback after Push2RateLimitError)",
+    "industry_membership": "ok: akshare.stock_sector_detail_sina (Eastmoney fallback after Push2RateLimitError)",
     "market_breadth": "ok: tencent.stock_zh_a_spot_tx",
     "limit_pools": "ok"
   },
@@ -11,7 +11,7 @@
     "index_399006": 0,
     "index_000688": 0,
     "index_000300": 0,
-    "industry_membership": 49,
+    "industry_membership": 2991,
     "market_breadth": 1,
     "limit_pools": 0,
     "market_sentiment": 1
