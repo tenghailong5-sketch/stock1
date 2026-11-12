@@ -1,0 +1,37 @@
+name: Tencent Free Data Provider Qualification
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/probe_tencent_history.py"
+      - ".github/workflows/tencent-provider-probe.yml"
+      - "requirements.txt"
+permissions:
+  contents: read
+concurrency:
+  group: tencent-provider-probe
+  cancel-in-progress: true
+jobs:
+  tencent-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pinned provider dependencies
+        run: pip install "akshare==1.20.37" "pandas>=2.2,<3"
+      - name: Probe Tencent historical daily bars
+        run: python scripts/probe_tencent_history.py
+      - name: Upload qualification report and sample bars
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tencent-provider-qualification
+          path: |
+            output/tencent_provider_probe.json
+            output/tencent_sample_daily_bars.csv
+          if-no-files-found: warn
+          retention-days: 30
