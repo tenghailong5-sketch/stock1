@@ -231,6 +231,16 @@ def industry_relative_strength(stock_industry_returns: pd.DataFrame,
     if market.duplicated(["trade_date"]).any():
         raise ValueError("duplicate point-in-time market rows")
     x = ind.merge(market, on="trade_date", how="left", validate="many_to_one")
+    # Provider adapters may emit numeric columns as strings. Normalize at the
+    # factor boundary and keep malformed/non-finite observations missing so the
+    # downstream coverage audit, rather than an arithmetic exception or an
+    # invented value, determines whether the cross-section is usable.
+    numeric_columns = [
+        "return_5", "return_20", "market_return_5", "market_return_20",
+    ]
+    for column in numeric_columns:
+        values = pd.to_numeric(x[column], errors="coerce")
+        x[column] = values.where(np.isfinite(values))
     x["industry_excess_5"] = x["return_5"] - x["market_return_5"]
     x["industry_excess_20"] = x["return_20"] - x["market_return_20"]
     return x
