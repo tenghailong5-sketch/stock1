@@ -1,9 +1,5 @@
 name: FHM-100 Daily Research
 on:
-  pull_request:
-    branches: [main, fix/numeric-factor-validation]
-  push:
-    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: "0 9 * * 1-5" # 17:00 Beijing time; run after the 16:30 forward archive
@@ -31,12 +27,7 @@ jobs:
       - name: Validate GitHub Actions workflow YAML
         run: |
           ruby -e 'require "yaml"; Dir.glob(".github/workflows/*.{yml,yaml}").sort.each { |path| YAML.load_file(path); puts "valid YAML: #{path}" }'
-      # A push whose commit message contains [live-scan] runs one immediate live scan.
-# This commit intentionally requests one real-data pipeline validation.
-      # Pull requests validate code only; do not spend runner time on a live market-data scan.
-      # GitHub does not expose repository secrets to fork PRs, and scan output is not a PR check.
       - name: Run research scan
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-scan]'))
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
@@ -44,7 +35,7 @@ jobs:
           AI_MODEL: ${{ secrets.AI_MODEL }}
         run: python -m src.fhm100
       - name: Commit forward-only stock history archive
-        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-scan]'))
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
         run: |
           for archive_path in data/forward_archive/stock_daily data/forward_archive/stock_daily_manifest; do
             if [ -d "$archive_path" ]; then
@@ -60,7 +51,7 @@ jobs:
             echo "No new stock history records."
           fi
       - name: Upload research report
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-scan]')))
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fhm100-report-${{ github.run_number }}
