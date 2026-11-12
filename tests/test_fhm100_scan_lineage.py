@@ -109,3 +109,10 @@ def test_empty_scan_result_contains_columns_required_by_report_sort():
 
     assert watchlist.empty
     assert {"技术观察通过", "流动性观察通过", "当日成交额"}.issubset(watchlist.columns)
+    assert watchlist.columns.is_unique
+    # The exact final-report sort must remain safe when the live universe is unavailable.
+    sorted_watchlist = watchlist.sort_values(
+        ["技术观察通过", "流动性观察通过", "当日成交额"],
+        ascending=[False, False, False],
+    )
+    assert sorted_watchlist.empty
