@@ -1,6 +1,6 @@
 name: Formal Delisted History Recovery
 
-on:
+"on":
   workflow_dispatch:
   schedule:
     # Saturday 04:00 Asia/Shanghai; Friday's market session is complete.
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   recover:
-    if: github.ref == 'refs/heads/main'
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
