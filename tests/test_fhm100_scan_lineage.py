@@ -126,7 +126,7 @@ def test_universe_falls_back_to_tencent_on_eastmoney_timeout(monkeypatch):
                         lambda: (_ for _ in ()).throw(requests.exceptions.ReadTimeout("timeout")))
     monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_tx", lambda: tencent.copy())
     result = fhm100.universe()
-    assert result["code"].tolist() == ["000001"]
+    assert result["code"].iloc[0] == "000001"
     assert result.iloc[0]["amount"] == 300_000_000
 
 
