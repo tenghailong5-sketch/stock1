@@ -363,3 +363,46 @@ def test_residual_strength_rejects_rank_deficient_market_industry_regression():
         decision_time="2026-11-11T10:00:00Z",
     )
     assert result["residual_return_5"].isna().all()
+
+def test_industry_relative_strength_normalizes_numeric_strings_and_keeps_invalid_values_missing():
+    available = pd.Timestamp("2026-01-02T08:00:00Z")
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-01", "2026-01-01"],
+        "industry_code": ["I1", "I2"],
+        "return_5": ["0.08", "not-a-number"],
+        "return_20": ["0.15", "0.20"],
+        "available_time": [available, available],
+    })
+    market = pd.DataFrame({
+        "trade_date": ["2026-01-01"],
+        "market_return_5": ["0.03"],
+        "market_return_20": ["0.05"],
+        "available_time": [available],
+    })
+    result = industry_relative_strength(
+        with_lineage(industry), with_lineage(market),
+        decision_time="2026-01-02T09:00:00Z",
+    ).set_index("industry_code")
+    assert result.loc["I1", "industry_excess_5"] == pytest.approx(0.05)
+    assert result.loc["I1", "industry_excess_20"] == pytest.approx(0.10)
+    assert pd.isna(result.loc["I2", "industry_excess_5"])
+    assert result.loc["I2", "industry_excess_20"] == pytest.approx(0.15)
+
+
+def test_industry_relative_strength_rejects_infinite_numeric_observations():
+    available = pd.Timestamp("2026-01-02T08:00:00Z")
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-01"], "industry_code": ["I1"],
+        "return_5": [np.inf], "return_20": [0.15],
+        "available_time": [available],
+    })
+    market = pd.DataFrame({
+        "trade_date": ["2026-01-01"], "market_return_5": [0.03],
+        "market_return_20": [0.05], "available_time": [available],
+    })
+    result = industry_relative_strength(
+        with_lineage(industry), with_lineage(market),
+        decision_time="2026-01-02T09:00:00Z",
+    )
+    assert pd.isna(result.loc[0, "industry_excess_5"])
+    assert result.loc[0, "industry_excess_20"] == pytest.approx(0.10)
