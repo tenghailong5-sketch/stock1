@@ -140,9 +140,40 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     # therefore cannot leave a partially refreshed set of archives.
     index_records: list[dict] = []
     for code in INDEXES:
-        raw = ak_module.index_zh_a_hist(
-            symbol=code, period="daily", start_date=start_date, end_date=end_date
-        )
+        try:
+            raw = ak_module.index_zh_a_hist(
+                symbol=code, period="daily", start_date=start_date, end_date=end_date
+            )
+        except Exception as exc:
+            # Eastmoney Push2 can temporarily block a runner IP. Switch provider
+            # once to Tencent; never retry the blocked Eastmoney endpoint.
+            if type(exc).__name__ != "Push2RateLimitError":
+                raise
+            if not hasattr(ak_module, "stock_zh_index_daily_tx"):
+                raise RuntimeError(
+                    f"Eastmoney index provider rate-limited and Tencent fallback is unavailable for {code}"
+                ) from exc
+            prefix = "sh" if code.startswith("0") else "sz"
+            fallback = ak_module.stock_zh_index_daily_tx(
+                symbol=prefix + code, start_date=start_date, end_date=end_date
+            )
+            if fallback is None or fallback.empty:
+                raise RuntimeError(f"Tencent index fallback returned empty data for {code}") from exc
+            required = {"date", "open", "high", "low", "close", "amount"}
+            if required - set(fallback.columns):
+                raise RuntimeError(
+                    f"Tencent index fallback schema changed for {code}: "
+                    + ",".join(sorted(required - set(fallback.columns)))
+                ) from exc
+            raw = pd.DataFrame({
+                "日期": fallback["date"],
+                "开盘": fallback["open"],
+                "最高": fallback["high"],
+                "最低": fallback["low"],
+                "收盘": fallback["close"],
+                # Tencent's index 'amount' is trading volume (手), not turnover.
+                "成交量": fallback["amount"],
+            })
         normalized = normalize_index_history_snapshot(
             raw, symbol=code, fetched_at=captured
         )
