@@ -165,3 +165,59 @@ def test_industry_membership_rejects_naive_availability_without_pit_cutoff():
     }])
     with pytest.raises(ValueError, match="timezone-aware"):
         assert_historical_industry_membership(frame)
+
+
+@pytest.mark.parametrize("column", ["symbol", "source_id", "source_revision"])
+def test_daily_data_rejects_blank_identity_or_source_lineage(column):
+    x = sample_bars()
+    x.loc[0, column] = "  "
+    clean, quality = validate_daily_bars(x, "2026-11-10T10:00:00Z")
+    assert clean.empty
+    assert not quality.accepted
+    assert quality.reason == f"invalid:{column}"
+
+
+def test_daily_data_rejects_future_trade_date_even_if_provider_claims_available():
+    x = sample_bars()
+    x.loc[0, "trade_date"] = "2026-11-11"
+    clean, quality = validate_daily_bars(x, "2026-11-10T10:00:00Z")
+    assert clean.empty
+    assert not quality.accepted
+    assert quality.reason == "future_trade_date"
+
+
+def test_daily_data_rejects_ambiguous_latest_source_revision():
+    x = sample_bars()
+    revision = x.iloc[[0]].copy()
+    revision["source_revision"] = "2"
+    x = pd.concat([x, revision], ignore_index=True)
+    clean, quality = validate_daily_bars(x, "2026-11-10T10:00:00Z")
+    assert clean.empty
+    assert not quality.accepted
+    assert quality.reason == "ambiguous_source_revision"
+
+
+def test_daily_data_rejects_multiple_providers_for_same_symbol_session():
+    x = sample_bars()
+    other = x.iloc[[0]].copy()
+    other["source_id"] = "other-provider"
+    other["source_revision"] = "other-v1"
+    x = pd.concat([x, other], ignore_index=True)
+    clean, quality = validate_daily_bars(x, "2026-11-10T10:00:00Z")
+    assert clean.empty
+    assert not quality.accepted
+    assert quality.reason == "multiple_sources_for_symbol_trade_date"
+
+
+def test_daily_data_selects_latest_visible_revision_from_same_provider():
+    x = sample_bars()
+    revision = x.iloc[[0]].copy()
+    revision["available_time"] = "2026-11-09T08:30:00Z"
+    revision["source_revision"] = "2"
+    revision["close"] = 10.6
+    x = pd.concat([x, revision], ignore_index=True)
+    clean, quality = validate_daily_bars(x, "2026-11-10T08:30:00Z")
+    assert quality.accepted
+    assert len(clean) == 1
+    assert clean.iloc[0].close == pytest.approx(10.6)
+    assert clean.iloc[0].source_revision == "2"
