@@ -48,7 +48,18 @@ jobs:
           git add data/forward_archive
           if ! git diff --cached --quiet; then
             git commit -m "Archive forward-only market data"
-            git push
+            for attempt in 1 2 3 4 5; do
+              git fetch origin main
+              git rebase origin/main
+              if git push origin HEAD:main; then
+                echo "Market archive pushed successfully."
+                exit 0
+              fi
+              echo "Push attempt ${attempt} failed; retrying after fetching latest main."
+              sleep $((attempt * 3))
+            done
+            echo "Unable to push market archive after 5 attempts."
+            exit 1
           else
             echo "No new archive records."
           fi
