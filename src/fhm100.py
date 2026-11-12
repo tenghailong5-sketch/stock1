@@ -106,6 +106,17 @@ def history(code,start,archive_root=Path("data/forward_archive")):
     archive_stock_history_snapshot(
         archive_frame, code, captured_at=captured_at, archive_root=archive_root
     )
+    # The factor engine requires row-level lineage. Preserve the provider's
+    # actual retrieval timestamp and content hash for every historical bar;
+    # never replace these with the trade date or a batch-wide fabricated value.
+    lineage = normalize_daily_history_snapshot(
+        archive_frame, symbol=str(code).zfill(6), fetched_at=captured_at
+    )[["trade_date", "available_time", "source_id", "source_revision"]]
+    h["date"] = pd.to_datetime(h["date"], errors="coerce")
+    h = h.merge(lineage, left_on="date", right_on="trade_date", how="left",
+                validate="one_to_one").drop(columns=["trade_date"])
+    if h[["available_time", "source_id", "source_revision"]].isna().any().any():
+        raise ValueError("daily history lineage could not be attached to every bar")
     return h
 
 def scan(u,archive_root=Path("data/forward_archive")):
@@ -116,11 +127,11 @@ def scan(u,archive_root=Path("data/forward_archive")):
             if h is None: raise ValueError("insufficient history or schema mismatch")
             # M4 price primitives use the raw bars captured in this run.
             # Retrieval timestamps do not certify historical PIT availability.
-            available_at = datetime.now(timezone.utc)
+            decision_at = datetime.now(timezone.utc)
             m4_bars = h.rename(columns={"date": "trade_date"}).copy()
             m4_bars["symbol"] = s.code
-            m4_bars["available_time"] = available_at
-            m4 = price_structure(m4_bars, decision_time=available_at.isoformat()).iloc[-1]
+            m4 = price_structure(m4_bars, decision_time=decision_at.isoformat()).iloc[-1]
+            available_at = pd.Timestamp(m4.available_time).to_pydatetime()
             liq=pd.notna(m4.amount_ma20) and m4.amount_ma20>=MIN_AMOUNT
             trend=(pd.notna(m4.return_5) and pd.notna(m4.return_20)
                    and m4.return_5>0 and m4.return_20>0)
