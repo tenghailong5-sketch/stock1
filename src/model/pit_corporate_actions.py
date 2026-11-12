@@ -143,6 +143,18 @@ def build_pit_total_return_prices(
                     continue
                 # Only events inside the covered price window affect this series.
                 a = a[(a.ex_date >= first_date) & (a.ex_date <= last_date)].copy()
+                # Never silently drop an event whose ex-date has no matching
+                # price bar. This can indicate a holiday/date convention issue
+                # or a missing trading session; either makes the wealth path
+                # incomplete and must block the entire symbol series.
+                price_dates = set(p.trade_date)
+                unmatched_action_dates = set(a.ex_date) - price_dates
+                if unmatched_action_dates:
+                    outputs.append(_blocked(
+                        p, "ACTION_DATE_OUTSIDE_PRICE_COVERAGE",
+                        "corporate_action_ex_date_has_no_matching_price_bar",
+                    ))
+                    continue
                 if not a.empty:
                     a["available_time"] = _timestamps(a, "available_time", "actions")
                     if (a[["source_id", "source_revision", "ledger_snapshot_id"]].isna().any().any()
