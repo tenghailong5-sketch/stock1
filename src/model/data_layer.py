@@ -46,16 +46,40 @@ def validate_daily_bars(frame: pd.DataFrame, decision_time) -> tuple[pd.DataFram
     x["trade_date"] = pd.to_datetime(x["trade_date"], errors="coerce")
     for col in ("open", "high", "low", "close", "volume", "amount"):
         x[col] = pd.to_numeric(x[col], errors="coerce")
-    x = x[x.available_time.notna() & (x.available_time <= cutoff)]
+    x = x[x.available_time.notna() & (x.available_time <= cutoff)].copy()
+
+    # A factor input must be reproducible: reject blank security identity or
+    # provider/revision lineage rather than silently accepting an untraceable row.
+    for col in ("symbol", "source_id", "source_revision"):
+        values = x[col]
+        if values.isna().any() or values.astype(str).str.strip().eq("").any():
+            return frame.iloc[0:0].copy(), DataQuality(False, f"invalid:{col}", 0)
+        x[col] = values.astype(str).str.strip()
+
     x = x.dropna(subset=["trade_date", "open", "high", "low", "close", "volume", "amount"])
+    decision_date = cutoff.tz_convert("Asia/Shanghai").date()
+    if (x["trade_date"].dt.date > decision_date).any():
+        return frame.iloc[0:0].copy(), DataQuality(False, "future_trade_date", 0)
+
     logical = ((x.open > 0) & (x.high > 0) & (x.low > 0) & (x.close > 0) &
                (x.high >= x[["open", "low", "close"]].max(axis=1)) &
                (x.low <= x[["open", "high", "close"]].min(axis=1)) &
                (x.volume >= 0) & (x.amount >= 0))
     x = x[logical].copy()
-    # Preserve source revisions; choose the latest available revision for the same source/date.
-    x = x.sort_values("available_time").drop_duplicates(
-        ["symbol", "trade_date", "source_id"], keep="last")
+
+    # A provider may publish revisions. Keep the latest visible revision, but
+    # fail closed if two revisions from the same provider tie on availability.
+    source_keys = ["symbol", "trade_date", "source_id"]
+    latest_available = x.groupby(source_keys)["available_time"].transform("max")
+    latest_rows = x.loc[x["available_time"].eq(latest_available)]
+    if latest_rows.duplicated(source_keys).any():
+        return frame.iloc[0:0].copy(), DataQuality(False, "ambiguous_source_revision", 0)
+    x = x.sort_values("available_time").drop_duplicates(source_keys, keep="last")
+
+    # Without an explicit provider-priority contract, two providers for the
+    # same symbol/session are ambiguous; never let row order choose the price.
+    if x.duplicated(["symbol", "trade_date"]).any():
+        return frame.iloc[0:0].copy(), DataQuality(False, "multiple_sources_for_symbol_trade_date", 0)
     x = x.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
     return x, DataQuality(True, "ok", len(x))
 
