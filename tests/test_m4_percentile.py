@@ -61,3 +61,20 @@ def test_scope_and_coverage_arguments_are_mandatory_and_validated():
     for bad in (0, float("nan"), float("inf"), "not-a-number"):
         with pytest.raises(ValueError, match="min_coverage"):
             audited_percentile_rank(frame, "raw", scope_id="pool", expected_universe_size=1, min_coverage=bad)
+
+def test_blank_symbol_is_rejected_before_membership_hashing():
+    frame = pool([1.0, 2.0])
+    frame.loc[1, "symbol"] = "   "
+    with pytest.raises(ValueError, match="blank"):
+        audited_percentile_rank(
+            frame, "raw", scope_id="declared_pool", expected_universe_size=2
+        )
+
+
+def test_duplicate_symbols_after_whitespace_normalization_are_rejected():
+    frame = pool([1.0, 2.0])
+    frame.loc[1, "symbol"] = " 000000 "
+    with pytest.raises(ValueError, match="duplicate"):
+        audited_percentile_rank(
+            frame, "raw", scope_id="declared_pool", expected_universe_size=2
+        )
