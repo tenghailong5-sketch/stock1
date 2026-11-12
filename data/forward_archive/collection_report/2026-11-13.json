@@ -1,19 +1,19 @@
 {
-  "captured_at": "2026-11-12T22:28:02.747667+00:00",
+  "captured_at": "2026-11-12T22:33:09.153072+00:00",
   "source_status": {
     "industry_membership": "unavailable: Push2RateLimitError: 东方财富 push2 行情服务器断开了连接，通常是短时间内请求过多，当前 IP 被临时限流。首次限流一般约 5 分钟后恢复，反复触发后可能需要 40 分钟以上；等待期间不要重复调用东方财富的行情接口，否则会延长限流。",
     "market_breadth": "ok: tencent.stock_zh_a_spot_tx",
     "limit_pools": "ok"
   },
   "rows_appended": {
-    "index_000001": 122,
-    "index_399001": 122,
-    "index_399006": 122,
-    "index_000688": 122,
-    "index_000300": 122,
+    "index_000001": 0,
+    "index_399001": 0,
+    "index_399006": 0,
+    "index_000688": 0,
+    "index_000300": 0,
     "industry_membership": 0,
     "market_breadth": 1,
-    "limit_pools": 5,
+    "limit_pools": 1,
     "market_sentiment": 1
   },
   "partial": true,
