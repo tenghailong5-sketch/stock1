@@ -246,3 +246,34 @@ def test_industry_availability_clock_is_captured_before_throttle_sleep():
         "response", "clock", "sleep",
         "response", "clock", "sleep",
     ]
+
+
+def test_collector_uses_tencent_index_fallback_after_push2_rate_limit(tmp_path):
+    class RateLimitedIndexProvider(FakeArchiveAkshare):
+        def __init__(self):
+            self.tencent_calls = []
+
+        def index_zh_a_hist(self, symbol, period, start_date, end_date):
+            raise type("Push2RateLimitError", (Exception,), {})("cooldown")
+
+        def stock_zh_index_daily_tx(self, symbol, start_date, end_date):
+            self.tencent_calls.append(symbol)
+            return pd.DataFrame([{
+                "date": "2026-11-11", "open": 3000, "high": 3050,
+                "low": 2990, "close": 3030, "amount": 100000,
+            }])
+
+    provider = RateLimitedIndexProvider()
+    counts = collect(
+        provider, tmp_path, captured_at="2026-11-12T08:30:00Z"
+    )
+
+    assert provider.tencent_calls == [
+        "sh000001", "sz399001", "sz399006", "sh000688", "sh000300"
+    ]
+    assert counts["index_000001"] == 1
+    archived = json.loads(
+        (tmp_path / "index_daily" / "000001.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    )
+    assert archived["volume"] == 100000
+    assert archived["amount"] is None
