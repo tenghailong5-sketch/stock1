@@ -92,14 +92,15 @@ def test_universe_prefers_tencent_snapshot_and_converts_turnover_to_yuan(monkeyp
     class Push2RateLimitError(Exception):
         pass
 
-    tencent = pd.DataFrame({
-        "code": ["sz000001", "sh600000"],
-        "name": ["平安银行", "浦发银行"],
-        "zxj": [10.0, 9.0],
-        "zdf": [1.2, -0.5],
-        "volume": [1_000_000, 2_000_000],
-        "turnover": [30_000, 20_000],
-    })
+    rows = [{
+        "code": f"sz{i:06d}", "name": f"普通股票{i}", "zxj": 10.0,
+        "zdf": 0.1, "volume": 1_000_000, "turnover": 1_000,
+    } for i in range(1, 1001)]
+    rows[0].update({"code": "sz000001", "name": "平安银行", "zxj": 10.0,
+                    "zdf": 1.2, "turnover": 30_000})
+    rows[1].update({"code": "sh600000", "name": "浦发银行", "zxj": 9.0,
+                    "zdf": -0.5, "turnover": 20_000})
+    tencent = pd.DataFrame(rows)
     monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_em",
                         lambda: (_ for _ in ()).throw(Push2RateLimitError("cooldown")))
     monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_tx", lambda: tencent.copy())
@@ -114,10 +115,13 @@ def test_universe_prefers_tencent_snapshot_and_converts_turnover_to_yuan(monkeyp
 
 
 def test_universe_falls_back_to_tencent_on_eastmoney_timeout(monkeypatch):
-    tencent = pd.DataFrame({
-        "code": ["sz000001"], "name": ["平安银行"], "zxj": [10.0],
-        "zdf": [1.2], "volume": [1_000_000], "turnover": [30_000],
-    })
+    rows = [{
+        "code": f"sz{i:06d}", "name": f"普通股票{i}", "zxj": 10.0,
+        "zdf": 0.1, "volume": 1_000_000, "turnover": 1_000,
+    } for i in range(1, 1001)]
+    rows[0].update({"code": "sz000001", "name": "平安银行", "zxj": 10.0,
+                    "zdf": 1.2, "turnover": 30_000})
+    tencent = pd.DataFrame(rows)
     monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_em",
                         lambda: (_ for _ in ()).throw(requests.exceptions.ReadTimeout("timeout")))
     monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_tx", lambda: tencent.copy())
