@@ -178,43 +178,64 @@ def fetch_current_industry_membership_snapshot(
 def fetch_sina_current_industry_membership_snapshot(
     ak_module, *, clock=None
 ) -> pd.DataFrame:
-    """Capture Sina's current industry-to-stock rows as a forward-only snapshot.
+    """Capture all current Sina industry constituents as a forward-only snapshot.
 
-    This is an independent fallback for Eastmoney Push2 outages. The endpoint
-    exposes current labels and member codes, not historical validity intervals;
-    therefore this adapter never fabricates valid_from/valid_to or PIT status.
+    stock_sector_spot returns one representative quote row per industry, not
+    the constituent list. For each industry label, stock_sector_detail must be
+    queried to obtain the actual member securities. Any failed/empty sector
+    detail blocks the whole snapshot so a leader-only partial list is never
+    mislabeled as complete membership.
     """
     now = clock or (lambda: datetime.now(timezone.utc))
-    raw = ak_module.stock_sector_spot(indicator="新浪行业")
-    required = {"label", "板块", "股票代码"}
-    if raw is None or raw.empty or required - set(raw.columns):
-        missing = sorted(required - set(raw.columns)) if raw is not None else sorted(required)
-        raise ValueError("Sina industry snapshot schema changed or is empty: " + ",".join(missing))
+    sectors = ak_module.stock_sector_spot(indicator="新浪行业")
+    required = {"label", "板块"}
+    if sectors is None or sectors.empty or required - set(sectors.columns):
+        missing = sorted(required - set(sectors.columns)) if sectors is not None else sorted(required)
+        raise ValueError("Sina industry list schema changed or is empty: " + ",".join(missing))
 
-    source = raw[["label", "板块", "股票代码"]].copy()
-    source["industry_code"] = source["label"].astype(str).str.strip()
-    source["industry_name"] = source["板块"].astype(str).str.strip()
-    source["symbol"] = source["股票代码"].astype(str).str.extract(r"(\d{6})", expand=False)
-    if (source["industry_code"].eq("").any() or source["industry_name"].eq("").any()
-            or source["symbol"].isna().any()):
-        raise ValueError("Sina industry snapshot contains blank labels or invalid stock codes")
-    source["symbol"] = source["symbol"].astype(str).str.zfill(6)
-    source = source[["symbol", "industry_code", "industry_name"]].drop_duplicates()
+    sectors = sectors[["label", "板块"]].copy()
+    sectors["industry_code"] = sectors["label"].astype(str).str.strip()
+    sectors["industry_name"] = sectors["板块"].astype(str).str.strip()
+    if (sectors["industry_code"].eq("").any() or sectors["industry_name"].eq("").any()
+            or sectors["industry_code"].duplicated().any()):
+        raise ValueError("Sina industry list contains blank or duplicate labels")
+    if len(sectors) < 10:
+        raise ValueError("Sina industry list has implausibly few groups")
+
+    detail_rows = []
+    for sector in sectors.itertuples(index=False):
+        detail = ak_module.stock_sector_detail(sector=sector.industry_code)
+        if detail is None or detail.empty or not {"code", "name"}.issubset(detail.columns):
+            raise ValueError(
+                "Sina constituent detail missing/empty for industry " + sector.industry_code
+            )
+        members = detail[["code", "name"]].copy()
+        members["symbol"] = members["code"].astype(str).str.extract(r"(\\d{6})", expand=False)
+        if members["symbol"].isna().any():
+            raise ValueError("Sina constituent detail contains invalid stock codes: " + sector.industry_code)
+        members["symbol"] = members["symbol"].astype(str).str.zfill(6)
+        members["industry_code"] = sector.industry_code
+        members["industry_name"] = sector.industry_name
+        detail_rows.append(members[["symbol", "industry_code", "industry_name"]])
+
+    source = pd.concat(detail_rows, ignore_index=True)
     if source.empty or source.duplicated(["symbol", "industry_code"]).any():
-        raise ValueError("Sina industry snapshot is empty or has duplicate memberships")
+        raise ValueError("Sina constituent snapshot is empty or has duplicate memberships")
+    observed_industries = set(source["industry_code"])
+    expected_industries = set(sectors["industry_code"])
+    if observed_industries != expected_industries:
+        raise ValueError("Sina constituent snapshot does not cover every listed industry")
 
     captured = _utc(now())
     snapshot_id = str(uuid.uuid4())
-    expected_industry_count = int(source["industry_code"].nunique())
-    if expected_industry_count < 10:
-        raise ValueError("Sina industry snapshot has implausibly few industry groups")
+    expected_industry_count = len(expected_industries)
     source["snapshot_id"] = snapshot_id
     source["expected_industry_count"] = expected_industry_count
     source["observed_at"] = captured
     source["available_time"] = captured
     source["availability_basis"] = "retrieval_time_only"
     source["historical_pit_eligible"] = False
-    source["source_id"] = "akshare.stock_sector_spot_sina"
+    source["source_id"] = "akshare.stock_sector_detail_sina"
     source["snapshot_scope"] = "current_membership_observation_only"
     revisions = (
         source.groupby("industry_code", sort=True)[["symbol", "industry_code", "industry_name"]]
@@ -223,6 +244,7 @@ def fetch_sina_current_industry_membership_snapshot(
     )
     source["source_revision"] = source["industry_code"].map(revisions)
     return source.reset_index(drop=True)
+
 
 def normalize_market_breadth_snapshot(frame: pd.DataFrame, *, fetched_at=None, source_id: str = "akshare.stock_zh_a_spot_em") -> pd.DataFrame:
     """Summarize one current A-share quote snapshot; never infer historical limit events."""
