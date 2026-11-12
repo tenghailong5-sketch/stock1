@@ -140,6 +140,8 @@ def universe():
     d=d[~d.name.str.contains(r"ST|退",na=False)]
     return d[(d.price>0)&(d.amount>0)].sort_values("amount",ascending=False).head(350)
 
+# [live-scan] Verify Tencent universe fallback with live market data
+
 def _download_history(code, start, max_attempts=3):
     """Retry only transient transport failures; never hide schema/data errors."""
     if max_attempts < 1:
