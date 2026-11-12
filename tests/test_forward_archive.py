@@ -260,7 +260,7 @@ def test_collector_uses_tencent_index_fallback_after_push2_rate_limit(tmp_path):
             self.tencent_calls.append(symbol)
             return pd.DataFrame([{
                 "date": "2026-11-11", "open": 3000, "high": 3050,
-                "low": 2990, "close": 3030, "amount": 100000,
+                "low": 2990, "close": 3030, "volume": 100000, "amount": 250000000,
             }])
 
     provider = RateLimitedIndexProvider()
@@ -276,4 +276,4 @@ def test_collector_uses_tencent_index_fallback_after_push2_rate_limit(tmp_path):
         (tmp_path / "index_daily" / "000001.jsonl").read_text(encoding="utf-8").splitlines()[0]
     )
     assert archived["volume"] == 100000
-    assert archived["amount"] is None
+    assert archived["amount"] == 250000000
