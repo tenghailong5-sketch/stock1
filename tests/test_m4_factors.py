@@ -441,3 +441,31 @@ def test_cross_session_price_volume_flags_stay_missing_for_unverified_actions():
         "price_up_volume_confirmation", "high_volume_stall", "low_volume_pullback"
     ):
         assert out[column].isna().all()
+
+def test_price_volume_flags_preserve_missing_rolling_baselines_as_na():
+    x = bars()
+    x["pit_total_return_close"] = 100.0 + np.arange(len(x)) * 0.5
+    x["pit_total_return_high"] = x["pit_total_return_close"] + 0.8
+    x["pit_total_return_available_time"] = pd.Timestamp("2026-11-10T08:00:00Z")
+    x["corporate_action_status"] = "VERIFIED"
+    out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
+    # The 20-session amount baseline is unavailable for the first 19 rows;
+    # the 5-session volume baseline is unavailable for the first 4 rows.
+    assert out["price_up_volume_confirmation"].iloc[:19].isna().all()
+    assert out["high_volume_stall"].iloc[:19].isna().all()
+    assert out["low_volume_pullback"].iloc[:4].isna().all()
+
+
+def test_price_structure_zero_activity_windows_do_not_create_infinite_ratios():
+    x = bars()
+    x["amount"] = 0.0
+    x["volume"] = 0.0
+    x["pit_total_return_close"] = 100.0 + np.arange(len(x)) * 0.5
+    x["pit_total_return_high"] = x["pit_total_return_close"] + 0.8
+    x["pit_total_return_available_time"] = pd.Timestamp("2026-11-10T08:00:00Z")
+    x["corporate_action_status"] = "VERIFIED"
+    out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
+    for column in ("LQ", "amount_ma5_to_ma20", "volume_ma5_to_ma20"):
+        assert out[column].isna().all()
+    assert out["price_up_volume_confirmation"].isna().all()
+    assert out["high_volume_stall"].isna().all()
