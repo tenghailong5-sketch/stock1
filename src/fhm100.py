@@ -70,25 +70,70 @@ def _is_eastmoney_rate_limit(error):
 def _normalize_spot_snapshot(frame):
     required = ["代码", "名称", "最新价", "成交额", "涨跌幅"]
     if frame is None or frame.empty or any(column not in frame.columns for column in required):
-        raise RuntimeError("A-share fallback snapshot schema changed or is empty")
+        raise RuntimeError("A-share Sina fallback snapshot schema changed or is empty")
     return frame[required].copy()
+
+
+def _normalize_tencent_spot_snapshot(frame, *, minimum_rows=1):
+    """Normalize Tencent raw A-share quote fields; turnover is in 10k yuan."""
+    required = {"code", "name", "zxj", "zdf", "volume", "turnover"}
+    if frame is None or frame.empty or required - set(frame.columns):
+        missing = sorted(required - set(frame.columns)) if frame is not None else sorted(required)
+        raise RuntimeError("Tencent A-share snapshot schema changed or is empty: " + ",".join(missing))
+    if len(frame) < minimum_rows:
+        raise RuntimeError(
+            f"Tencent A-share snapshot appears incomplete: {len(frame)} rows; expected at least {minimum_rows}"
+        )
+    out = frame[["code", "name", "zxj", "zdf", "turnover"]].copy()
+    out["code"] = out["code"].astype(str).str.strip().str.lower().str[-6:].str.zfill(6)
+    out["name"] = out["name"].astype(str).str.strip()
+    out["price"] = numeric(out["zxj"])
+    out["pct_chg"] = numeric(out["zdf"])
+    # Tencent raw turnover is denominated in ten-thousand yuan.
+    out["amount"] = numeric(out["turnover"]) * 10_000
+    return out[["code", "name", "price", "amount", "pct_chg"]]
+
+
+def _is_retryable_spot_error(error):
+    return _is_eastmoney_rate_limit(error) or isinstance(
+        error, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
+    )
 
 
 def universe():
     try:
         d=ak.stock_zh_a_spot_em()
     except Exception as exc:
-        if not _is_eastmoney_rate_limit(exc):
+        if not _is_retryable_spot_error(exc):
             raise
-        # One alternate provider attempt only. Do not hammer Eastmoney while
-        # its documented temporary IP cooldown is active.
-        d=_normalize_spot_snapshot(ak.stock_zh_a_spot())
+        # Eastmoney may rate-limit the runner. Try Tencent's independent,
+        # paginated A-share snapshot before Sina; never silently accept partial data.
+        failures = [f"Eastmoney: {type(exc).__name__}: {str(exc)[:160]}"]
+        d = None
+        tencent = getattr(ak, "stock_zh_a_spot_tx", None)
+        if callable(tencent):
+            try:
+                d = _normalize_tencent_spot_snapshot(tencent(), minimum_rows=1000)
+            except Exception as tencent_exc:
+                failures.append(f"Tencent: {type(tencent_exc).__name__}: {str(tencent_exc)[:160]}")
+        else:
+            failures.append("Tencent: stock_zh_a_spot_tx is unavailable in installed AKShare")
+        if d is None:
+            try:
+                d = _normalize_spot_snapshot(ak.stock_zh_a_spot())
+            except Exception as sina_exc:
+                failures.append(f"Sina: {type(sina_exc).__name__}: {str(sina_exc)[:160]}")
+                raise RuntimeError("All A-share spot providers failed; " + " | ".join(failures)) from sina_exc
     if d is None or d.empty:
         raise RuntimeError("A-share spot snapshot is empty")
     required=["代码","名称","最新价","成交额","涨跌幅"]
-    if d is None or d.empty or any(c not in d.columns for c in required):
-        raise RuntimeError("A-share snapshot empty or schema changed")
-    d=d[required].copy(); d.columns=["code","name","price","amount","pct_chg"]
+    if not all(column in d.columns for column in required):
+        if {"code", "name", "price", "amount", "pct_chg"}.issubset(d.columns):
+            d = d[["code", "name", "price", "amount", "pct_chg"]].copy()
+        else:
+            raise RuntimeError("A-share snapshot empty or schema changed")
+    else:
+        d=d[required].copy(); d.columns=["code","name","price","amount","pct_chg"]
     d["code"]=d.code.astype(str).str.zfill(6)
     for c in ["price","amount","pct_chg"]: d[c]=numeric(d[c])
     d=d[~d.code.str.startswith(("688","689","8","4"))]
