@@ -469,3 +469,10 @@ def test_price_structure_zero_activity_windows_do_not_create_infinite_ratios():
         assert out[column].isna().all()
     assert out["price_up_volume_confirmation"].isna().all()
     assert out["high_volume_stall"].isna().all()
+
+def test_rank_factor_keeps_infinite_and_malformed_values_missing():
+    values = pd.Series([1.0, 2.0, np.inf, -np.inf, "not-a-number"])
+    ranked = rank_factor(values)
+    assert ranked.iloc[0] == pytest.approx(50.0)
+    assert ranked.iloc[1] == pytest.approx(100.0)
+    assert ranked.iloc[2:].isna().all()
