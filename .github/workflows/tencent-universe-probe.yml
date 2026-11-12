@@ -1,0 +1,36 @@
+name: Tencent Multi-Symbol Data Qualification
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/probe_tencent_universe.py"
+      - ".github/workflows/tencent-universe-probe.yml"
+permissions:
+  contents: read
+concurrency:
+  group: tencent-universe-probe
+  cancel-in-progress: true
+jobs:
+  tencent-universe-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install provider dependencies
+        run: pip install "akshare==1.20.37" "pandas>=2.2,<3"
+      - name: Test multi-symbol history and universe coverage
+        run: python scripts/probe_tencent_universe.py
+      - name: Upload multi-symbol sample and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tencent-multi-symbol-qualification
+          path: |
+            output/tencent_60_symbol_probe.json
+            output/tencent_60_symbol_sample.csv
+          if-no-files-found: warn
+          retention-days: 30
