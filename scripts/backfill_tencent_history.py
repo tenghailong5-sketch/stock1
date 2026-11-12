@@ -100,6 +100,9 @@ def main():
           "permanent_failures":{},"completed_symbols":0}
     if state.get("start_date")!=a.start_date: raise RuntimeError("start-date differs from checkpoint")
     retry=dict(state.get("retry_queue",{}))
+    if int(state["next_index"])>=len(u) and not retry:
+        print(json.dumps({"coverage_complete":bool(state.get("coverage_complete")),"remaining_unseen":0,"retry_queue":0,"permanent_failures":len(state.get("permanent_failures",{}))},ensure_ascii=False),flush=True)
+        return
     retry_batch=list(retry)[:a.batch_size]
     new_start=int(state["next_index"])
     new_batch=u.iloc[new_start:new_start+a.batch_size-len(retry_batch)].symbol.tolist()
