@@ -193,7 +193,8 @@ def load_m3_market_context(decision_time=None, archive_root=Path("data/forward_a
         return {
             "status": "INVALID_DATA",
             "reason": f"m3_assembly_error:{type(exc).__name__}:{str(exc)[:180]}",
-            "market_state": None, "position_scale": None, "valid_sessions": 0,
+            "market_state": None, "market_environment_score": None,
+            "position_scale": None, "valid_sessions": 0,
             "latest_trade_date": None, "historical_backtest_eligible": False,
             "quality_warnings": [],
         }
@@ -203,14 +204,39 @@ def load_m3_market_context(decision_time=None, archive_root=Path("data/forward_a
         state = None
         if status == "READY":
             status = "INVALID_DATA"
+    environment_score = result.get("market_environment_score") if state else None
+    try:
+        environment_score = float(environment_score)
+        if not np.isfinite(environment_score) or not 0.0 <= environment_score <= 100.0:
+            environment_score = None
+    except (TypeError, ValueError, OverflowError):
+        environment_score = None
     return {
         "status": status, "reason": result.get("reason"), "market_state": state,
+        "market_environment_score": environment_score,
         "position_scale": result.get("position_scale") if state else None,
         "valid_sessions": int(result.get("valid_sessions", 0) or 0),
         "latest_trade_date": result.get("latest_trade_date"),
         "historical_backtest_eligible": False,
         "quality_warnings": result.get("quality_warnings", []),
     }
+
+def build_m5_diagnostic_input(watchlist, market_context):
+    """Pass only independently READY M3 market-environment scores into M5.
+
+    This supplies one defined A/C factor; it does not make either strategy
+    scoreable because all other weighted factors and hard gates remain required.
+    """
+    state = market_context.get("market_state")
+    environment = market_context.get("market_environment_score")
+    rows = []
+    for code in watchlist["代码"]:
+        row = {"symbol": str(code), "market_state": state}
+        if environment is not None:
+            row["market_environment"] = environment
+        rows.append(row)
+    return pd.DataFrame(rows, columns=None)
+
 
 def empty_scan_result(error):
     """Return explicit empty outputs when the live universe provider is unavailable."""
@@ -286,8 +312,9 @@ def main():
         latest_stock_available = None
     m3 = load_m3_market_context(decision_time=now)
     w=w.sort_values(["技术观察通过","流动性观察通过","当日成交额"],ascending=[False,False,False])
-    # M5 remains diagnostic-only: M3 state is supplied only when independently READY; factors and hard gates are still incomplete.
-    m5_input = pd.DataFrame([{"symbol": str(code), "market_state": m3["market_state"]} for code in w["代码"]])
+    # M5 remains diagnostic-only. A/C receive the defined M3 market factor
+    # only when M3 is independently READY; all other factors and gates remain fail-closed.
+    m5_input = build_m5_diagnostic_input(w, m3)
     m5 = evaluate_candidates(m5_input, stage="close") if not m5_input.empty else pd.DataFrame(
         columns=["symbol","strategy","stage","score","eligible","candidate_band","minimum_score","reasons"])
     m5.to_csv(OUT/"m5_diagnostics.csv",index=False,encoding="utf-8-sig")
