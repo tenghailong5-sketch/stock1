@@ -137,6 +137,62 @@ def main():
 
         end = asof
         start = (datetime.strptime(asof, "%Y-%m-%d") - timedelta(days=240)).strftime("%Y-%m-%d")
+        # Reconcile query_all_stock (which also contains non-equity instruments)
+        # against stock_basic.type/status before judging universe coverage.
+        try:
+            basic = rows_from_result(bs.query_stock_basic())
+            report["stock_basic"] = {
+                "rows": int(len(basic)), "fields": list(basic.columns),
+                "type_counts": {str(k): int(v) for k, v in basic.get("type", pd.Series(dtype=str)).astype(str).value_counts().to_dict().items()},
+                "status_counts": {str(k): int(v) for k, v in basic.get("status", pd.Series(dtype=str)).astype(str).value_counts().to_dict().items()},
+            }
+            active_equities = basic[(basic["type"].astype(str) == "1") & (basic["status"].astype(str) == "1")]
+            report["active_equity_universe"] = {
+                "rows": int(len(active_equities)),
+                "exchange_prefix_counts": {str(k): int(v) for k, v in active_equities["code"].astype(str).str.extract(r"^([a-z]+)\\.", expand=False).value_counts().to_dict().items()},
+                "sample_codes_present": sorted(set(active_equities["code"].astype(str)) & set(SAMPLES)),
+                "codes_missing_from_bulk": sorted(set(active_equities["code"].astype(str)) - set(bulk.get("code", pd.Series(dtype=str)).astype(str)))[:100],
+                "missing_from_bulk_count": int(len(set(active_equities["code"].astype(str)) - set(bulk.get("code", pd.Series(dtype=str)).astype(str)))),
+            }
+        except Exception as exc:
+            report["stock_basic"] = {"status": "ERROR", "reason": str(exc)[:240]}
+
+        # Test direct Beijing Exchange history separately: BaoStock's bulk
+        # A-share snapshot may not imply BSE support.
+        try:
+            bj_frame = query_history("bj.830799", start, end)
+            report["sample_histories"]["bj.830799"] = {
+                "market": "Beijing Stock Exchange",
+                "status": "OK" if len(bj_frame) >= 119 else "INSUFFICIENT_HISTORY",
+                "rows": int(len(bj_frame)),
+                "first_date": bj_frame["date"].min().date().isoformat(),
+                "last_date": bj_frame["date"].max().date().isoformat(),
+            }
+        except Exception as exc:
+            report["sample_histories"]["bj.830799"] = {
+                "market": "Beijing Stock Exchange", "status": "ERROR", "reason": str(exc)[:240]
+            }
+
+        # A deterministic 30-name sample tests that historical bars are not
+        # merely available for the four hand-picked large-cap examples.
+        try:
+            if "active_equities" in locals() and len(active_equities):
+                sample = active_equities.sort_values("code").iloc[::max(1, len(active_equities)//30)].head(30)
+                hist_checks = []
+                for code in sample["code"].astype(str):
+                    try:
+                        h = query_history(code, start, end)
+                        hist_checks.append({"code": code, "rows": int(len(h)), "status": "OK" if len(h) >= 119 else "INSUFFICIENT_HISTORY"})
+                    except Exception as exc:
+                        hist_checks.append({"code": code, "status": "ERROR", "reason": str(exc)[:160]})
+                report["historical_coverage_sample"] = {
+                    "sample_size": len(hist_checks), "passed_119": sum(x["status"] == "OK" for x in hist_checks),
+                    "failed": [x for x in hist_checks if x["status"] != "OK"],
+                    "items": hist_checks,
+                }
+        except Exception as exc:
+            report["historical_coverage_sample"] = {"status": "ERROR", "reason": str(exc)[:240]}
+
         present = set(stocks["code"].astype(str))
         for code, market in SAMPLES.items():
             if code not in present:
@@ -185,15 +241,26 @@ def main():
     core_stocks = ["sh.600000", "sz.000001", "sz.300750", "sh.688981"]
     core_ok = all(report["sample_histories"].get(code, {}).get("status") == "OK" for code in core_stocks)
     indexes_ok = all(report["index_histories"].get(code, {}).get("status") == "OK" for code in INDEXES)
-    universe_ok = report["stock_universe"].get("rows", 0) >= 3000
+    universe = report.get("active_equity_universe", {})
+    universe_ok = universe.get("rows", 0) >= 3000
     bulk = report.get("bulk_daily_snapshot", {})
-    bulk_ok = bulk.get("status") == "OK" and len(bulk.get("sample_codes_present", [])) >= 4
+    bulk_codes = set(bulk.get("sample_codes_present", []))
+    bulk_ok = bulk.get("status") == "OK" and len(bulk_codes) >= 4
+    missing_count = universe.get("missing_from_bulk_count", 999999)
+    active_count = universe.get("rows", 0)
+    bulk_coverage_ok = active_count > 0 and missing_count / active_count <= 0.02
+    hist_sample = report.get("historical_coverage_sample", {})
+    hist_sample_ok = hist_sample.get("sample_size", 0) >= 20 and hist_sample.get("passed_119", 0) >= 0.95 * hist_sample.get("sample_size", 1)
+    bj_ok = report.get("sample_histories", {}).get("bj.830799", {}).get("status") == "OK"
     report["qualification"] = {
-        "universe_min_3000": universe_ok,
+        "active_equity_universe_min_3000": universe_ok,
         "single_call_full_market_daily_snapshot": bulk_ok,
+        "bulk_covers_98pct_active_equities": bulk_coverage_ok,
+        "sampled_historical_coverage_119_bars": hist_sample_ok,
         "four_market_segments_119_bars": core_ok,
         "two_major_indexes_119_bars": indexes_ok,
-        "qualified": bool(universe_ok and bulk_ok and core_ok and indexes_ok),
+        "beijing_exchange_119_bars": bj_ok,
+        "qualified": bool(universe_ok and bulk_ok and bulk_coverage_ok and hist_sample_ok and core_ok and indexes_ok and bj_ok),
     }
     target = OUT / "baostock_data_probe.json"
     target.write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
