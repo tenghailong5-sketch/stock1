@@ -447,6 +447,43 @@ jobs:
           if adjusted["close"].isna().any() or not np.isfinite(adjusted["close"].to_numpy(dtype=float)).all():
               raise RuntimeError("Delisted strict hfq adjusted close contains missing/non-finite values")
           PY
+      - name: Report delisted survivorship coverage (non-gating audit)
+        if: success()
+        run: |
+          set +e
+          python cnequity-source/scripts/delisted_ops.py --config "$DELISTED_CONFIG" coverage --start 2016-01-01 --end "$BAR_END" --universe all_a_sh_sz > validation/cnequity-demo/delisted-coverage-report.json 2> validation/cnequity-demo/delisted-coverage-report.stderr
+          coverage_exit=$?
+          set -e
+          python - validation/cnequity-demo/delisted-coverage-report.json "$coverage_exit" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report_path = Path(sys.argv[1])
+          exit_code = int(sys.argv[2])
+          try:
+              report = json.loads(report_path.read_text(encoding="utf-8"))
+              status = {
+                  "command_exit_code": exit_code,
+                  "verified": bool(report.get("verified", False)),
+                  "window": report.get("window"),
+                  "universe": report.get("universe"),
+                  "counts": report.get("counts", {}),
+                  "limitations": report.get("limitations", []),
+                  "historical_pit_eligible": False,
+              }
+          except (OSError, json.JSONDecodeError) as exc:
+              status = {
+                  "command_exit_code": exit_code,
+                  "verified": False,
+                  "report_parse_error": str(exc),
+                  "historical_pit_eligible": False,
+              }
+          Path("validation/cnequity-demo/delisted-coverage-status.json").write_text(
+              json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(status, ensure_ascii=False, indent=2))
+          PY
       - name: Capture full CNEquity quality and coverage audit
         if: success()
         run: |
