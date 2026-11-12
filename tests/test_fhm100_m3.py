@@ -8,7 +8,8 @@ def test_m3_ready_state_is_exposed_for_m5(monkeypatch, tmp_path):
         fhm100, "assemble_m3_history",
         lambda *args, **kwargs: {
             "status": "READY", "reason": None, "market_state": "RISK_ON",
-            "position_scale": 1.0, "valid_sessions": 119,
+            "position_scale": 1.0, "market_environment_score": 92.5,
+            "valid_sessions": 119,
             "latest_trade_date": "2026-11-10",
             "historical_backtest_eligible": False,
         },
@@ -21,6 +22,7 @@ def test_m3_ready_state_is_exposed_for_m5(monkeypatch, tmp_path):
     assert result["status"] == "READY"
     assert result["market_state"] == "RISK_ON"
     assert result["position_scale"] == 1.0
+    assert result["market_environment_score"] == 92.5
     assert result["historical_backtest_eligible"] is False
 
 
@@ -93,3 +95,38 @@ def test_m5_blocker_summary_handles_empty_diagnostics():
     summary = fhm100.summarize_m5_blockers(pd.DataFrame())
     assert summary.empty
     assert list(summary.columns) == ["strategy", "blocker", "count"]
+
+
+def test_m3_environment_factor_is_only_passed_to_m5_when_ready():
+    watchlist = pd.DataFrame({"代码": ["000001", "000002"]})
+    ready = {
+        "market_state": "RISK_ON",
+        "market_environment_score": 92.5,
+    }
+    frame = fhm100.build_m5_diagnostic_input(watchlist, ready)
+    assert frame["market_environment"].tolist() == [92.5, 92.5]
+    assert frame["market_state"].tolist() == ["RISK_ON", "RISK_ON"]
+
+    pending = {
+        "market_state": None,
+        "market_environment_score": None,
+    }
+    frame = fhm100.build_m5_diagnostic_input(watchlist, pending)
+    assert "market_environment" not in frame.columns
+    assert frame["market_state"].isna().all()
+
+
+def test_m3_environment_factor_rejects_out_of_range_or_non_numeric_values(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        fhm100, "assemble_m3_history",
+        lambda *args, **kwargs: {
+            "status": "READY", "reason": None, "market_state": "RISK_ON",
+            "position_scale": 1.0, "market_environment_score": 101.0,
+            "valid_sessions": 119, "latest_trade_date": "2026-11-10",
+        },
+    )
+    result = fhm100.load_m3_market_context(
+        decision_time=pd.Timestamp("2026-11-11T09:00:00Z"), archive_root=tmp_path
+    )
+    assert result["market_state"] == "RISK_ON"
+    assert result["market_environment_score"] is None
