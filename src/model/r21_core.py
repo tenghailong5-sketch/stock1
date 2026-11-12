@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import math
 from enum import Enum
+from numbers import Real
 from typing import Iterable, Mapping
 
 
@@ -69,9 +71,14 @@ def point_in_time_rows(rows: Iterable[Mapping], decision_time: datetime) -> list
 
 
 def validate_weights(weights: Mapping[str, float]) -> None:
-    if not weights or any(v < 0 for v in weights.values()):
-        raise ValueError("weights must be non-empty and non-negative")
-    if abs(sum(weights.values()) - 100.0) > 1e-9:
+    if not isinstance(weights, Mapping) or not weights:
+        raise ValueError("weights must be a non-empty mapping")
+    for name, value in weights.items():
+        if (not isinstance(name, str) or not name
+                or isinstance(value, bool) or not isinstance(value, Real)
+                or not math.isfinite(float(value)) or float(value) < 0):
+            raise ValueError("weights must contain finite non-negative numeric values")
+    if abs(sum(float(v) for v in weights.values()) - 100.0) > 1e-9:
         raise ValueError("strategy weights must sum to 100")
 
 
