@@ -180,6 +180,7 @@ jobs:
           cne delisted status --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-after-backfill.log
           python - <<'PY'
           import json
+          import os
           import re
           from pathlib import Path
 
@@ -190,7 +191,7 @@ jobs:
           report = {
               "profile": "delisted",
               "start": "2016-01-01",
-              "end": "2026-11-10",
+              "end": os.environ["BAR_END"],
               "rows_written_reported": rows[-1].replace(",", "") if rows else None,
               "symbol_count_reported": symbols[-1].replace(",", "") if symbols else None,
               "log_tail": log[-6000:],
