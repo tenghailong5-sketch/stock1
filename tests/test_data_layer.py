@@ -50,6 +50,40 @@ def test_verified_cash_dividend_total_return_is_continuous():
     assert out.total_return_index.iloc[-1] == pytest.approx(100.0)
 
 
+def test_verified_total_return_exposes_adjusted_close_and_high_for_m4():
+    p = pd.DataFrame({
+        "symbol": ["000001", "000001"],
+        "trade_date": pd.to_datetime(["2026-01-01", "2026-01-02"]),
+        "close": [10.0, 9.0],
+        "high": [11.0, 10.0],
+    })
+    a = pd.DataFrame({
+        "symbol": ["000001"], "ex_date": ["2026-01-02"],
+        "action_type": ["cash_dividend"], "cash_per_share": [1.0],
+        "share_factor": [1.0], "verified_status": ["VERIFIED"],
+    })
+    out = build_total_return_index(p, a, complete_symbols={"000001"})
+    assert out.pit_total_return_close.iloc[-1] == pytest.approx(100.0)
+    assert out.pit_total_return_high.iloc[-1] == pytest.approx(100.0 * 10.0 / 9.0)
+    assert out.corporate_action_status.eq("VERIFIED").all()
+
+
+def test_unverified_total_return_does_not_expose_pit_price_fields():
+    p = pd.DataFrame({
+        "symbol": ["000001", "000001"],
+        "trade_date": pd.to_datetime(["2026-01-01", "2026-01-02"]),
+        "close": [10.0, 9.0], "high": [11.0, 10.0],
+    })
+    a = pd.DataFrame({
+        "symbol": ["000001"], "ex_date": ["2026-01-02"],
+        "action_type": ["cash_dividend"], "cash_per_share": [1.0],
+        "share_factor": [1.0], "verified_status": ["PENDING"],
+    })
+    out = build_total_return_index(p, a, complete_symbols={"000001"})
+    assert out.pit_total_return_close.isna().all()
+    assert out.pit_total_return_high.isna().all()
+
+
 def test_residual_uses_prior_window_only():
     idx = pd.date_range("2026-01-01", periods=50)
     m = pd.Series(np.linspace(-.01,.01,50), index=idx)
