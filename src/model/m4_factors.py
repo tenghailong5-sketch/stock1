@@ -74,7 +74,8 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
     # Cross-session momentum/breakout/pullback must use a verified PIT total-return
     # price series built from the point-in-time corporate-action ledger. Never
     # silently substitute today's raw close history across ex-dates.
-    pit_columns = {"pit_total_return_close", "pit_total_return_high", "corporate_action_status"}
+    pit_columns = {"pit_total_return_close", "pit_total_return_high",
+                   "pit_total_return_available_time", "corporate_action_status"}
     if not pit_columns.issubset(x.columns):
         x["cross_session_price_status"] = "MISSING_PIT_TOTAL_RETURN_FIELDS"
         x["return_5"] = np.nan
@@ -88,6 +89,10 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
     else:
         x["pit_total_return_close"] = pd.to_numeric(x["pit_total_return_close"], errors="coerce")
         x["pit_total_return_high"] = pd.to_numeric(x["pit_total_return_high"], errors="coerce")
+        pit_available = pd.to_datetime(x["pit_total_return_available_time"], errors="coerce")
+        pit_time_valid = pit_available.notna() and pit_available.dt.tz is not None
+        if pit_time_valid:
+            x["pit_total_return_available_time"] = pit_available.dt.tz_convert("UTC")
         grouped = x.groupby("symbol", group_keys=False)
         x["cross_session_price_status"] = "READY"
         for symbol, indexes in grouped.groups.items():
@@ -95,13 +100,19 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
             close_values = group["pit_total_return_close"].to_numpy(dtype=float)
             high_values = group["pit_total_return_high"].to_numpy(dtype=float)
             verified = group["corporate_action_status"].eq("VERIFIED").all()
+            pit_available_valid = (
+                pit_time_valid
+                and group["pit_total_return_available_time"].notna().all()
+                and (group["pit_total_return_available_time"] <= cutoff_utc).all()
+            )
             valid_prices = (
                 np.isfinite(close_values).all() and np.isfinite(high_values).all()
                 and (close_values > 0).all() and (high_values > 0).all()
             )
-            if not (verified and valid_prices):
+            if not (verified and valid_prices and pit_available_valid):
                 x.loc[indexes, "cross_session_price_status"] = (
                     "UNVERIFIED_CORPORATE_ACTIONS" if not verified
+                    else "PIT_TOTAL_RETURN_NOT_AVAILABLE_AT_DECISION" if not pit_available_valid
                     else "INVALID_PIT_TOTAL_RETURN_SERIES"
                 )
                 for column in ("return_5", "return_10", "return_20", "high20_prev",
