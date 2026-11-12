@@ -59,8 +59,8 @@ def fetch_exchange_universe():
     # These three interfaces are exchange-specific; deliberately avoid the
     # Eastmoney Push2 endpoints that were rate-limited in the previous run.
     tasks = [
-        ("SSE main-board A shares", lambda: ak.stock_info_sh_name_code(indicator="主板A股")),
-        ("SSE STAR Market", lambda: ak.stock_info_sh_name_code(indicator="科创板")),
+        ("SSE main-board A shares", lambda: ak.stock_info_sh_name_code(symbol="主板A股")),
+        ("SSE STAR Market", lambda: ak.stock_info_sh_name_code(symbol="科创板")),
         ("SZSE A shares", lambda: ak.stock_info_sz_name_code(symbol="A股列表")),
         ("BSE listed shares", lambda: ak.stock_info_bj_name_code()),
     ]
