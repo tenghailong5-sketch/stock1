@@ -223,7 +223,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             )
             industry_records = _records(industry)
             source_status["industry_membership"] = (
-                "ok: akshare.stock_sector_spot_sina "
+                "ok: akshare.stock_sector_detail_sina "
                 f"(Eastmoney fallback after {type(eastmoney_exc).__name__})"
             )
         except Exception as sina_exc:
