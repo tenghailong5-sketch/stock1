@@ -326,13 +326,17 @@ def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tm
 
         def stock_sector_spot(self, indicator):
             assert indicator == "新浪行业"
-            rows = []
-            for index in range(10):
-                rows.extend([
-                    {"label": f"industry_{index:02d}", "板块": f"行业{index}", "股票代码": "000001"},
-                    {"label": f"industry_{index:02d}", "板块": f"行业{index}", "股票代码": "600000"},
-                ])
-            return pd.DataFrame(rows)
+            return pd.DataFrame([
+                {"label": f"industry_{index:02d}", "板块": f"行业{index}"}
+                for index in range(10)
+            ])
+
+        def stock_sector_detail(self, sector):
+            index = int(sector.rsplit("_", 1)[1])
+            return pd.DataFrame([
+                {"code": "000001", "name": "平安银行"},
+                {"code": f"6000{index:02d}", "name": f"样本股票{index}"},
+            ])
 
     counts = collect(
         SinaFallbackProvider(),
@@ -350,7 +354,7 @@ def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tm
     path = tmp_path / "industry_membership" / "2026-11-12.jsonl"
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 20
-    assert {row["source_id"] for row in rows} == {"akshare.stock_sector_spot_sina"}
+    assert {row["source_id"] for row in rows} == {"akshare.stock_sector_detail_sina"}
     assert {row["expected_industry_count"] for row in rows} == {10}
     assert all(row["historical_pit_eligible"] is False for row in rows)
     assert all("valid_from" not in row and "valid_to" not in row for row in rows)
