@@ -65,3 +65,40 @@ def test_scan_passes_lineage_into_m4_instead_of_dropping_every_symbol(monkeypatc
     assert watchlist.iloc[0]["代码"] == "000001"
     assert watchlist.iloc[0]["M4跨日价格状态"] == "MISSING_PIT_TOTAL_RETURN_FIELDS"
     assert "本次抓取时间戳不具备历史PIT资格" in watchlist.iloc[0]["M4数据口径"]
+
+    
+def test_universe_uses_sina_only_after_eastmoney_rate_limit(monkeypatch):
+    class Push2RateLimitError(Exception):
+        pass
+
+    spot = pd.DataFrame({
+        "代码": ["000001"], "名称": ["平安银行"], "最新价": [10.0],
+        "成交额": [300_000_000], "涨跌幅": [1.2],
+    })
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_em",
+                        lambda: (_ for _ in ()).throw(Push2RateLimitError("cooldown")))
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot", lambda: spot.copy())
+
+    result = fhm100.universe()
+
+    assert result["code"].tolist() == ["000001"]
+    assert result.iloc[0]["amount"] == 300_000_000
+
+
+def test_tencent_history_fallback_is_normalized_and_keeps_source_lineage(monkeypatch):
+    class Push2RateLimitError(Exception):
+        pass
+
+    tencent = pd.DataFrame({
+        "date": pd.bdate_range("2026-09-01", periods=30).strftime("%Y-%m-%d"),
+        "open": [10.0] * 30, "high": [10.2] * 30, "low": [9.8] * 30,
+        "close": [10.1] * 30, "volume": [1_000_000] * 30,
+        "amount": [200_000_000] * 30,
+    })
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_hist",
+                        lambda **kwargs: (_ for _ in ()).throw(Push2RateLimitError("cooldown")))
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_hist_tx", lambda **kwargs: tencent.copy())
+    result = fhm100._download_history("000001", "20260901")
+
+    assert {"日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额", "换手率"}.issubset(result.columns)
+    assert result.attrs["source_id"] == "akshare.stock_zh_a_hist_tx"
