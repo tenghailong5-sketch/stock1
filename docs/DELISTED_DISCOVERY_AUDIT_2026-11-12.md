@@ -90,6 +90,35 @@ The same current Baostock snapshot (7,291 rows; 5,565 SH/SZ stocks; 341 formal d
 
 The 128 formal matches are still only a subset of Baostock's 341 formal SH/SZ delistings. Discovery remains incomplete. The 746 current-listing matches again show that a positive Sina history response cannot be treated as a delisting label.
 
+## Third incremental batch — run 43151517563
+
+- Main-branch commit: `2dbec75349653f8c37b2c179a9f8c3768e1adedb`
+- Artifact: `delisted-discovery-evidence` (artifact ID `13913749314`)
+- Cache restore: `Cache restored from key: delisted-catalog-main-43150217437`
+- Cache save: `Cache saved with key: delisted-catalog-main-43151517563`
+- The Baostock identity cross-check completed successfully within the bounded step timeout.
+
+| Measure | Third run | Cumulative checkpoint |
+|---|---:|---:|
+| Probe slots | 500 | 1,500 |
+| Completed probes | 500 | 1,499 |
+| Positive Sina history responses | 117 | 991 |
+| No-history responses | 383 | 508 |
+| Failed probes remaining | 0 | 0 |
+| Pending code probes | 34,251 | 34,251 |
+
+The cumulative total includes one successful retry of the single failed code from the first post-cache-schema run. It does not include the earlier pre-schema-change run, which used a different cache version and repeated the same bounded range.
+
+### Updated cumulative identity cross-check
+
+| Classification | Count | Share of 991 positive probes |
+|---|---:|---:|
+| Matched Baostock formal delistings | 134 | 13.5% |
+| Matched currently listed stocks | 856 | 86.4% |
+| Not present in this Baostock snapshot | 1 | 0.1% |
+
+The one unmatched code is not certified as delisted or listed by this snapshot. The 134 matches remain a subset of the 341 Baostock-reported formal SH/SZ delistings. The discovery universe and the historical PIT evidence are still incomplete.
+
 ## Eligibility and model impact
 
 - The Baostock identity snapshot is a current vendor observation, not historical publication-time evidence.
