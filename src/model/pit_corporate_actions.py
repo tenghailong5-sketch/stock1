@@ -97,18 +97,18 @@ def build_pit_total_return_prices(
             if (p[["source_id", "source_revision"]].isna().any().any()
                     or p["source_id"].astype(str).str.strip().eq("").any()
                     or p["source_revision"].astype(str).str.strip().eq("").any()):
-                outputs.append(_blocked(p, "INVALID_PRICE_LINEAGE", "price_source_lineage_required").prices)
+                outputs.append(_blocked(p, "INVALID_PRICE_LINEAGE", "price_source_lineage_required"))
                 continue
             p["available_time"] = _timestamps(p, "available_time", "prices")
             if (p["available_time"] > cutoff).any():
-                outputs.append(_blocked(p, "PRICE_NOT_AVAILABLE_AT_DECISION", "price_observation_after_cutoff").prices)
+                outputs.append(_blocked(p, "PRICE_NOT_AVAILABLE_AT_DECISION", "price_observation_after_cutoff"))
                 continue
             numeric = p[["open", "high", "low", "close"]].apply(pd.to_numeric, errors="coerce")
             values = numeric.to_numpy(dtype=float)
             if (not np.isfinite(values).all() or (numeric <= 0).any().any()
                     or (numeric.high < numeric[["open", "low", "close"]].max(axis=1)).any()
                     or (numeric.low > numeric[["open", "high", "close"]].min(axis=1)).any()):
-                outputs.append(_blocked(p, "INVALID_PRICE_VALUES", "invalid_ohlc").prices)
+                outputs.append(_blocked(p, "INVALID_PRICE_VALUES", "invalid_ohlc"))
                 continue
             p[["open", "high", "low", "close"]] = numeric
             p = p.sort_values("trade_date").reset_index(drop=True)
@@ -116,7 +116,7 @@ def build_pit_total_return_prices(
 
             c = coverage[coverage.symbol.astype(str) == symbol].copy()
             if len(c) != 1:
-                outputs.append(_blocked(p, "MISSING_OR_DUPLICATE_COVERAGE", "exactly_one_coverage_attestation_required").prices)
+                outputs.append(_blocked(p, "MISSING_OR_DUPLICATE_COVERAGE", "exactly_one_coverage_attestation_required"))
                 continue
             att = c.iloc[0]
             try:
@@ -124,20 +124,20 @@ def build_pit_total_return_prices(
                 cov_start = pd.Timestamp(att.coverage_start).normalize()
                 cov_end = pd.Timestamp(att.coverage_end).normalize()
             except Exception:
-                outputs.append(_blocked(p, "INVALID_COVERAGE_ATTESTATION", "invalid_coverage_metadata").prices)
+                outputs.append(_blocked(p, "INVALID_COVERAGE_ATTESTATION", "invalid_coverage_metadata"))
                 continue
             if (str(att.coverage_status) != "COMPLETE" or pd.isna(cov_start) or pd.isna(cov_end)
                     or cov_start > first_date or cov_end < last_date or att_time > cutoff
                     or pd.isna(att.source_id) or pd.isna(att.source_revision)
                     or not str(att.source_id).strip() or not str(att.source_revision).strip()):
-                outputs.append(_blocked(p, "COVERAGE_NOT_VERIFIED", "coverage_must_be_complete_cover_window_and_known_by_cutoff").prices)
+                outputs.append(_blocked(p, "COVERAGE_NOT_VERIFIED", "coverage_must_be_complete_cover_window_and_known_by_cutoff"))
                 continue
 
             a = actions[actions.symbol.astype(str) == symbol].copy()
             if not a.empty:
                 a["ex_date"] = pd.to_datetime(a.ex_date, errors="coerce").dt.normalize()
                 if a.ex_date.isna().any() or a.duplicated(["ex_date", "action_type"]).any():
-                    outputs.append(_blocked(p, "INVALID_ACTION_LEDGER", "invalid_or_duplicate_action_key").prices)
+                    outputs.append(_blocked(p, "INVALID_ACTION_LEDGER", "invalid_or_duplicate_action_key"))
                     continue
                 # Only events inside the covered price window affect this series.
                 a = a[(a.ex_date >= first_date) & (a.ex_date <= last_date)].copy()
@@ -146,25 +146,25 @@ def build_pit_total_return_prices(
                     if (a[["source_id", "source_revision"]].isna().any().any()
                             or a["source_id"].astype(str).str.strip().eq("").any()
                             or a["source_revision"].astype(str).str.strip().eq("").any()):
-                        outputs.append(_blocked(p, "INVALID_ACTION_LINEAGE", "action_source_lineage_required").prices)
+                        outputs.append(_blocked(p, "INVALID_ACTION_LINEAGE", "action_source_lineage_required"))
                         continue
                     if (a.available_time > cutoff).any():
-                        outputs.append(_blocked(p, "ACTION_NOT_AVAILABLE_AT_DECISION", "relevant_action_retrieved_after_cutoff").prices)
+                        outputs.append(_blocked(p, "ACTION_NOT_AVAILABLE_AT_DECISION", "relevant_action_retrieved_after_cutoff"))
                         continue
                     if (a.verified_status.astype(str) != "VERIFIED").any():
-                        outputs.append(_blocked(p, "UNVERIFIED_CORPORATE_ACTIONS", "action_status_not_verified").prices)
+                        outputs.append(_blocked(p, "UNVERIFIED_CORPORATE_ACTIONS", "action_status_not_verified"))
                         continue
                     if not a.action_type.astype(str).isin(SUPPORTED_ACTIONS).all():
-                        outputs.append(_blocked(p, "UNSUPPORTED_ACTION", "rights_or_complex_action_not_supported").prices)
+                        outputs.append(_blocked(p, "UNSUPPORTED_ACTION", "rights_or_complex_action_not_supported"))
                         continue
                     nums = a[["cash_per_share", "share_factor"]].apply(pd.to_numeric, errors="coerce")
                     if (not np.isfinite(nums.to_numpy(dtype=float)).all()
                             or (nums.cash_per_share < 0).any() or (nums.share_factor <= 0).any()):
-                        outputs.append(_blocked(p, "INVALID_ACTION_LEDGER", "invalid_cash_or_share_factor").prices)
+                        outputs.append(_blocked(p, "INVALID_ACTION_LEDGER", "invalid_cash_or_share_factor"))
                         continue
                     a[["cash_per_share", "share_factor"]] = nums
                     if first_date in set(a.ex_date):
-                        outputs.append(_blocked(p, "ACTION_BEFORE_PRICE_COVERAGE", "first_price_date_action_has_no_prior_close").prices)
+                        outputs.append(_blocked(p, "ACTION_BEFORE_PRICE_COVERAGE", "first_price_date_action_has_no_prior_close"))
                         continue
             else:
                 a["ex_date"] = pd.Series(dtype="datetime64[ns]")
@@ -206,6 +206,6 @@ def build_pit_total_return_prices(
             p["pit_total_return_reason"] = "complete_time_stamped_coverage_and_verified_actions"
             outputs.append(p)
         except (TypeError, ValueError, KeyError) as exc:
-            outputs.append(_blocked(p, "PIT_BUILD_REJECTED", str(exc)).prices)
+            outputs.append(_blocked(p, "PIT_BUILD_REJECTED", str(exc)))
 
     return pd.concat(outputs, ignore_index=True) if outputs else pd.DataFrame()
