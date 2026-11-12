@@ -139,7 +139,10 @@ jobs:
           if stocks.is_empty():
               raise RuntimeError("Baostock returned no SH/SZ stock rows; refusing to publish identity evidence.")
 
-          identity_path = write_delisted_identity_evidence(config, stocks)
+          # Persist the complete vendor snapshot, not only the SH/SZ
+          # comparison subset: downstream PIT identity admission also needs
+          # Baostock-supported BJ symbols.
+          identity_path = write_delisted_identity_evidence(config, basics)
           shutil.copyfile(identity_path, "baostock-identity-evidence.json")
           identity = json.loads(identity_path.read_text(encoding="utf-8"))
           formal = set(
