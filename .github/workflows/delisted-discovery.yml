@@ -74,10 +74,10 @@ jobs:
       - name: Advance resumable discovery checkpoint
         run: |
           set -euo pipefail
-          # 500 probes is a bounded daily chunk. The upstream command checkpoints
-          # its catalogue and leaves failed probes pending for a later retry.
+          # 750 probes is a bounded daily chunk (~13 minutes at the observed rate),
+          # within the 30-minute job limit. Failures remain pending for retry.
           python cnequity-source/scripts/delisted_ops.py \
-            --config "$DELISTED_CONFIG" discover --limit 500 \
+            --config "$DELISTED_CONFIG" discover --limit 750 \
             > discovery-result.json 2> discovery.log
           cat discovery-result.json
           python - "$DELISTED_CONFIG" discovery-result.json <<'PY'
