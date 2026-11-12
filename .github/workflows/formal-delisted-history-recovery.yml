@@ -14,8 +14,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  push-noop:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep branch-push validation lightweight
+        run: echo "Formal recovery runs only by schedule or manual dispatch on main."
+
   recover:
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
