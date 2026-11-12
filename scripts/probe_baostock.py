@@ -102,6 +102,39 @@ def main():
                 .value_counts().to_dict().items()
             },
         }
+        # New BaoStock 0.9.3+ endpoint: one request returns the entire A-share
+        # daily snapshot for a date. This is the critical test for avoiding
+        # thousands of per-symbol requests in the production scan.
+        try:
+            bulk_method = getattr(bs, "query_daily_history_k_AStock")
+            bulk = rows_from_result(bulk_method(date=asof))
+            required_bulk = {"date", "code", "open", "high", "low", "close", "volume", "amount"}
+            missing_bulk = sorted(required_bulk - set(bulk.columns))
+            if not missing_bulk:
+                for col in ("open", "high", "low", "close", "volume", "amount"):
+                    bulk[col] = pd.to_numeric(bulk[col], errors="coerce")
+                valid_bulk = bulk.dropna(subset=["date", "code", "open", "high", "low", "close", "volume", "amount"])
+                valid_bulk = valid_bulk[(valid_bulk[["open", "high", "low", "close"]] > 0).all(axis=1)]
+                report["bulk_daily_snapshot"] = {
+                    "status": "OK" if len(valid_bulk) >= 3000 else "INSUFFICIENT_COVERAGE",
+                    "rows": int(len(bulk)),
+                    "valid_rows": int(len(valid_bulk)),
+                    "fields": list(bulk.columns),
+                    "missing_required_fields": [],
+                    "sample_codes_present": sorted(set(valid_bulk["code"].astype(str)) & set(SAMPLES)),
+                    "has_volume": bool(valid_bulk["volume"].notna().all()),
+                    "has_amount": bool(valid_bulk["amount"].notna().all()),
+                    "volume_unit": "shares",
+                    "price_adjustment": "unadjusted",
+                }
+            else:
+                report["bulk_daily_snapshot"] = {
+                    "status": "SCHEMA_MISMATCH", "rows": int(len(bulk)),
+                    "fields": list(bulk.columns), "missing_required_fields": missing_bulk,
+                }
+        except Exception as exc:
+            report["bulk_daily_snapshot"] = {"status": "ERROR", "reason": str(exc)[:240]}
+
         end = asof
         start = (datetime.strptime(asof, "%Y-%m-%d") - timedelta(days=240)).strftime("%Y-%m-%d")
         present = set(stocks["code"].astype(str))
@@ -153,11 +186,14 @@ def main():
     core_ok = all(report["sample_histories"].get(code, {}).get("status") == "OK" for code in core_stocks)
     indexes_ok = all(report["index_histories"].get(code, {}).get("status") == "OK" for code in INDEXES)
     universe_ok = report["stock_universe"].get("rows", 0) >= 3000
+    bulk = report.get("bulk_daily_snapshot", {})
+    bulk_ok = bulk.get("status") == "OK" and len(bulk.get("sample_codes_present", [])) >= 4
     report["qualification"] = {
         "universe_min_3000": universe_ok,
+        "single_call_full_market_daily_snapshot": bulk_ok,
         "four_market_segments_119_bars": core_ok,
         "two_major_indexes_119_bars": indexes_ok,
-        "qualified": bool(universe_ok and core_ok and indexes_ok),
+        "qualified": bool(universe_ok and bulk_ok and core_ok and indexes_ok),
     }
     target = OUT / "baostock_data_probe.json"
     target.write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
