@@ -1,6 +1,6 @@
 """FHM-100 research runner. No fabricated official scores or M6 probabilities."""
 from __future__ import annotations
-import json, os, traceback, time
+import json, os, traceback, time, uuid, hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 import akshare as ak
@@ -11,11 +11,55 @@ from src.model.m4_factors import price_structure
 from src.model.m4_observation import rank_price_observations
 from src.model.pipeline import evaluate_candidates
 from src.model.m3_assembler import assemble_m3_history
+from src.collectors.forward_archive import append_jsonl_atomic
+from src.providers.akshare_pit import normalize_daily_history_snapshot
 
 OUT=Path("output"); OUT.mkdir(exist_ok=True)
 MIN_AMOUNT=100_000_000
 
 def numeric(s): return pd.to_numeric(s,errors="coerce")
+
+
+def archive_stock_history_snapshot(frame, symbol, *, captured_at, archive_root=Path("data/forward_archive")):
+    """Append raw daily bars with their real retrieval time; never backdate availability."""
+    normalized = normalize_daily_history_snapshot(
+        frame, symbol=str(symbol).zfill(6), fetched_at=captured_at
+    )
+    snapshot_id = str(uuid.uuid4())
+    normalized["snapshot_id"] = snapshot_id
+    normalized["snapshot_scope"] = "current_symbol_history_retrieval"
+    normalized["expected_bar_count"] = int(len(normalized))
+    day = pd.Timestamp(captured_at).tz_convert("Asia/Shanghai").strftime("%Y-%m-%d")
+    records = json.loads(normalized.to_json(
+        orient="records", date_format="iso", force_ascii=False
+    ))
+    rows_added = append_jsonl_atomic(
+        archive_root / "stock_daily" / f"{str(symbol).zfill(6)}.jsonl",
+        records,
+        ("symbol", "trade_date", "source_revision"),
+    )
+    revisions = sorted(normalized["source_revision"].astype(str).tolist())
+    batch_revision = hashlib.sha256("|".join(revisions).encode("utf-8")).hexdigest()
+    manifest = [{
+        "symbol": str(symbol).zfill(6),
+        "snapshot_id": snapshot_id,
+        "captured_at": pd.Timestamp(captured_at).tz_convert("UTC").isoformat(),
+        "source_id": "akshare.stock_zh_a_hist",
+        "source_revision": batch_revision,
+        "row_count": int(len(normalized)),
+        "first_trade_date": normalized["trade_date"].min().strftime("%Y-%m-%d"),
+        "last_trade_date": normalized["trade_date"].max().strftime("%Y-%m-%d"),
+        "availability_basis": "retrieval_time_only",
+        "historical_pit_eligible": False,
+        "snapshot_scope": "current_symbol_history_retrieval",
+    }]
+    manifests_added = append_jsonl_atomic(
+        archive_root / "stock_daily_manifest" / f"{str(symbol).zfill(6)}.jsonl",
+        manifest,
+        ("symbol", "snapshot_id"),
+    )
+    return {"rows_appended": rows_added, "manifests_appended": manifests_added}
+
 
 def universe():
     d=ak.stock_zh_a_spot_em()
@@ -45,15 +89,24 @@ def _download_history(code, start, max_attempts=3):
             time.sleep(2 ** attempt)
 
 
-def history(code,start):
-    h=_download_history(code,start)
-    if h is None or len(h)<25: return None
+def history(code,start,archive_root=Path("data/forward_archive")):
+    raw=_download_history(code,start)
+    captured_at=datetime.now(timezone.utc)  # stamp immediately after provider response
+    if raw is None or len(raw)<25: return None
     cols={"日期":"date","开盘":"open","收盘":"close","最高":"high","最低":"low","成交量":"volume","成交额":"amount"}
-    if any(c not in h.columns for c in cols): return None
-    h=h.rename(columns=cols)
+    if any(c not in raw.columns for c in cols): return None
+    h=raw.rename(columns=cols).copy()
     for c in ["open","close","high","low","volume","amount"]: h[c]=numeric(h[c])
     h=h.dropna(subset=["open","close","high","low"]).sort_values("date")
-    return h if len(h)>=25 else None
+    if len(h)<25: return None
+    # Preserve the provider's original Chinese schema for the auditable archive.
+    archive_frame=raw.loc[h.index].copy()
+    if "换手率" not in archive_frame.columns:
+        archive_frame["换手率"]=np.nan  # unavailable stays missing; never impute zero
+    archive_stock_history_snapshot(
+        archive_frame, code, captured_at=captured_at, archive_root=archive_root
+    )
+    return h
 
 def features(h):
     x=h.copy(); span=(x.high-x.low).replace(0,np.nan)
@@ -68,11 +121,11 @@ def features(h):
     x["volume_ma20"]=x.volume.rolling(20).mean()
     return x
 
-def scan(u):
+def scan(u,archive_root=Path("data/forward_archive")):
     rows=[]; errors=[]; start=(datetime.now()-pd.Timedelta(days=160)).strftime("%Y%m%d")
     for _,s in u.iterrows():
         try:
-            h=history(s.code,start)
+            h=history(s.code,start,archive_root=archive_root)
             if h is None: raise ValueError("insufficient history or schema mismatch")
             # M4 price primitives use the raw bars captured in this run.
             # Retrieval timestamps do not certify historical PIT availability.
