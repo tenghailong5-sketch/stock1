@@ -14,6 +14,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # GitHub has continued to enqueue push events for this workflow even though
+  # push is not a configured trigger. Give those unexpected events a harmless
+  # successful job instead of leaving a red zero-job workflow run.
+  push-noop:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain that recovery is schedule/manual only
+        run: echo "Formal delisted recovery runs only on schedule or manual dispatch."
+
   recover:
     if: github.ref == 'refs/heads/main' && github.event_name != 'push'
     runs-on: ubuntu-latest
