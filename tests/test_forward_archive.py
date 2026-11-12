@@ -277,3 +277,42 @@ def test_collector_uses_tencent_index_fallback_after_push2_rate_limit(tmp_path):
     )
     assert archived["volume"] == 100000
     assert archived["amount"] == 250000000
+
+
+
+def test_partial_archive_uses_tencent_breadth_when_eastmoney_is_rate_limited(tmp_path):
+    class PartiallyRateLimitedProvider(FakeArchiveAkshare):
+        def stock_board_industry_name_em(self):
+            raise type("Push2RateLimitError", (Exception,), {})("Eastmoney cooldown")
+
+        def stock_zh_a_spot_em(self):
+            raise type("Push2RateLimitError", (Exception,), {})("Eastmoney cooldown")
+
+        def stock_zh_a_spot_tx(self):
+            return pd.DataFrame([
+                {"code": "sz000001", "zxj": 10, "zdf": 2.0, "turnover": 100.0},
+                {"code": "sh600000", "zxj": 8, "zdf": -1.0, "turnover": 200.0},
+            ])
+
+    counts = collect(
+        PartiallyRateLimitedProvider(),
+        tmp_path,
+        captured_at="2026-11-12T08:30:00Z",
+        allow_partial=True,
+    )
+    assert counts["index_000001"] == 1
+    assert counts["market_breadth"] == 1
+    assert counts["industry_membership"] == 0
+    breadth = json.loads(
+        (tmp_path / "market_breadth" / "2026-11-12.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    )
+    assert breadth["provider_row_count"] == 2
+    assert breadth["advances"] == 1
+    assert breadth["declines"] == 1
+    assert breadth["total_amount"] == 3000000.0
+    report = json.loads(
+        (tmp_path / "collection_report" / "2026-11-12.json").read_text(encoding="utf-8")
+    )
+    assert report["partial"] is True
+    assert report["source_status"]["industry_membership"].startswith("unavailable:")
+    assert report["source_status"]["market_breadth"] == "ok: tencent.stock_zh_a_spot_tx"
