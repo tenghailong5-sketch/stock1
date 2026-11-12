@@ -50,7 +50,14 @@ def audited_percentile_rank(
         raise ValueError("missing columns: " + ",".join(sorted(missing)))
     if frame[symbol_col].isna().any() or frame[date_col].isna().any():
         raise ValueError("symbol/date cannot be missing")
-    if frame.duplicated([date_col, symbol_col]).any():
+    normalized_symbols = frame[symbol_col].astype(str).str.strip()
+    if normalized_symbols.eq("").any():
+        raise ValueError("symbol cannot be blank")
+    identity = pd.DataFrame({
+        date_col: frame[date_col],
+        symbol_col: normalized_symbols,
+    }, index=frame.index)
+    if identity.duplicated([date_col, symbol_col]).any():
         raise ValueError("duplicate symbol within decision date")
 
     numeric = pd.to_numeric(frame[value_col], errors="coerce")
@@ -59,7 +66,7 @@ def audited_percentile_rank(
     audits = []
 
     for date_value, indexes in frame.groupby(date_col, sort=False).groups.items():
-        symbols = sorted(str(value) for value in frame.loc[indexes, symbol_col].tolist())
+        symbols = sorted(normalized_symbols.loc[indexes].tolist())
         membership_fingerprint = hashlib.sha256("\n".join(symbols).encode("utf-8")).hexdigest()
         observed = len(symbols)
         valid = numeric.loc[indexes].notna()
