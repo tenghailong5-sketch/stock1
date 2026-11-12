@@ -194,7 +194,7 @@ def fetch_sina_current_industry_membership_snapshot(
     source = raw[["label", "板块", "股票代码"]].copy()
     source["industry_code"] = source["label"].astype(str).str.strip()
     source["industry_name"] = source["板块"].astype(str).str.strip()
-    source["symbol"] = source["股票代码"].astype(str).str.extract(r"(\\d{6})", expand=False)
+    source["symbol"] = source["股票代码"].astype(str).str.extract(r"(\d{6})", expand=False)
     if (source["industry_code"].eq("").any() or source["industry_name"].eq("").any()
             or source["symbol"].isna().any()):
         raise ValueError("Sina industry snapshot contains blank labels or invalid stock codes")
