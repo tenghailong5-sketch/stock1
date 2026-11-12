@@ -142,11 +142,10 @@ jobs:
           if stocks.is_empty():
               raise RuntimeError("Baostock returned no SH/SZ stock rows; refusing to publish identity evidence.")
 
-          # Persist the complete successful vendor response, not only the
-          # SH/SZ stock comparison subset. Baostock's documented coverage is
-          # SH/SZ (not BJ); this preserves all instrument types it actually
-          # returns without implying any Beijing-market coverage.
-          identity_path = write_delisted_identity_evidence(config, basics)
+          # The formal delisting identity contract is for A-share stocks.
+          # Persist SH/SZ stock rows only; do not let ETF/CDR delistings enter
+          # the stock recovery universe. Baostock does not provide BJ coverage.
+          identity_path = write_delisted_identity_evidence(config, stocks)
           shutil.copyfile(identity_path, "baostock-identity-evidence.json")
           identity = json.loads(identity_path.read_text(encoding="utf-8"))
           formal = set(
@@ -163,6 +162,8 @@ jobs:
               "source_scope": "Baostock-reported SH/SZ stock identity; excludes Beijing listings and does not claim complete all-market coverage.",
               "source_rows_total": basics.height,
               "source_observed_at": identity["observed_at"],
+              "identity_evidence_listing_rows": len(identity["listing_dates"]),
+              "identity_evidence_formal_delisted_rows": len(identity["delisted_symbols"]),
               "sh_sz_stock_rows": stocks.height,
               "formal_delisted_sh_sz_total": len(formal),
               "currently_listed_sh_sz_total": len(listed),
