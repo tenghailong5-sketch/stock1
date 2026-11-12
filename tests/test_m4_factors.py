@@ -25,8 +25,68 @@ def test_price_structure_computes_core_factors_and_flat_range_missing():
     x.loc[24, ["open", "high", "low", "close"]] = [34, 34, 34, 34]
     out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
     assert pd.isna(out.CLV.iloc[-1])
-    assert pd.notna(out.return_5.iloc[-1])
+    assert pd.isna(out.return_5.iloc[-1])
+    assert out.cross_session_price_status.iloc[-1] == "MISSING_PIT_TOTAL_RETURN_FIELDS"
     assert out.amount_ma20.iloc[-1] == pytest.approx(2e8)
+
+
+
+def test_price_structure_uses_only_verified_pit_total_return_series_for_cross_session_features():
+    x = bars()
+    x["pit_total_return_close"] = 100.0 + np.arange(len(x)) * 0.5
+    x["pit_total_return_high"] = x["pit_total_return_close"] + 0.8
+    x["pit_total_return_available_time"] = pd.Timestamp("2026-11-10T08:00:00Z")
+    x["corporate_action_status"] = "VERIFIED"
+    out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
+    expected = (out.pit_total_return_close.iloc[-1]
+                / out.pit_total_return_close.iloc[-6]) - 1
+    assert out.cross_session_price_status.eq("READY").all()
+    assert out.return_5.iloc[-1] == pytest.approx(expected)
+    assert pd.notna(out.breakout20.iloc[-1])
+    assert pd.notna(out.Pullback.iloc[-1])
+
+
+def test_price_structure_disables_cross_session_features_when_action_ledger_unverified():
+    x = bars()
+    x["pit_total_return_close"] = 100.0 + np.arange(len(x)) * 0.5
+    x["pit_total_return_high"] = x["pit_total_return_close"] + 0.8
+    x["pit_total_return_available_time"] = pd.Timestamp("2026-11-10T08:00:00Z")
+    x["corporate_action_status"] = "PENDING"
+    out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
+    assert out.cross_session_price_status.eq("UNVERIFIED_CORPORATE_ACTIONS").all()
+    assert out.return_5.isna().all()
+    assert out.breakout20.isna().all()
+    assert out.Pullback.isna().all()
+
+
+
+def test_price_structure_rejects_pit_total_return_series_available_after_cutoff():
+    x = bars()
+    x["pit_total_return_close"] = 100.0 + np.arange(len(x)) * 0.5
+    x["pit_total_return_high"] = x["pit_total_return_close"] + 0.8
+    x["pit_total_return_available_time"] = pd.Timestamp("2026-11-10T09:30:00Z")
+    x["corporate_action_status"] = "VERIFIED"
+    out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
+    assert out.cross_session_price_status.eq(
+        "PIT_TOTAL_RETURN_NOT_AVAILABLE_AT_DECISION"
+    ).all()
+    assert out.return_5.isna().all()
+
+
+
+
+def test_price_structure_disables_cross_session_features_for_naive_pit_availability():
+    x = bars()
+    x["pit_total_return_close"] = 100.0 + np.arange(len(x)) * 0.5
+    x["pit_total_return_high"] = x["pit_total_return_close"] + 0.8
+    x["pit_total_return_available_time"] = "2026-11-10 08:00:00"
+    x["corporate_action_status"] = "VERIFIED"
+    out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
+    assert out.cross_session_price_status.eq(
+        "PIT_TOTAL_RETURN_NOT_AVAILABLE_AT_DECISION"
+    ).all()
+    assert out.return_5.isna().all()
+
 
 
 def test_industry_excess_returns():
@@ -57,6 +117,10 @@ def test_pullback_duration_counts_sessions_since_latest_peak():
     x.loc[22, ["open", "high", "low", "close"]] = [33.0, 33.5, 32.0, 32.0]
     x.loc[23, ["open", "high", "low", "close"]] = [32.0, 32.5, 30.5, 31.0]
     x.loc[24, ["open", "high", "low", "close"]] = [31.0, 31.5, 29.5, 30.0]
+    x["pit_total_return_close"] = x["close"]
+    x["pit_total_return_high"] = x["high"]
+    x["pit_total_return_available_time"] = pd.Timestamp("2026-11-10T08:00:00Z")
+    x["corporate_action_status"] = "VERIFIED"
     out = price_structure(x, decision_time="2026-11-10T09:00:00Z")
     assert out.pullback_duration.iloc[22] == 0
     assert out.pullback_duration.iloc[23] == 1

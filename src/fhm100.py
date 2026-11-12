@@ -108,19 +108,6 @@ def history(code,start,archive_root=Path("data/forward_archive")):
     )
     return h
 
-def features(h):
-    x=h.copy(); span=(x.high-x.low).replace(0,np.nan)
-    x["ret5"]=x.close.pct_change(5); x["ret20"]=x.close.pct_change(20)
-    x["amount_ma20"]=x.amount.rolling(20).mean()
-    x["clv"]=(x.close-x.low)/span
-    x["upper_shadow"]=(x.high-np.maximum(x.open,x.close))/span
-    x["high20_prev"]=x.high.shift(1).rolling(20).max()
-    x["breakout20"]=x.close/x.high20_prev-1
-    x["pullback"]=x.close/x.high.rolling(20).max()-1
-    x["volume_ma5"]=x.volume.rolling(5).mean()
-    x["volume_ma20"]=x.volume.rolling(20).mean()
-    return x
-
 def scan(u,archive_root=Path("data/forward_archive")):
     rows=[]; errors=[]; start=(datetime.now()-pd.Timedelta(days=160)).strftime("%Y%m%d")
     for _,s in u.iterrows():
@@ -134,13 +121,15 @@ def scan(u,archive_root=Path("data/forward_archive")):
             m4_bars["symbol"] = s.code
             m4_bars["available_time"] = available_at
             m4 = price_structure(m4_bars, decision_time=available_at.isoformat()).iloc[-1]
-            z=features(h).iloc[-1]
             liq=pd.notna(m4.amount_ma20) and m4.amount_ma20>=MIN_AMOUNT
-            trend=pd.notna(z.ret5) and pd.notna(z.ret20) and z.ret5>0 and z.ret20>0
-            structure=pd.notna(z.clv) and z.clv>=.60
-            pullback=pd.notna(z.pullback) and z.pullback>-.12
+            trend=(pd.notna(m4.return_5) and pd.notna(m4.return_20)
+                   and m4.return_5>0 and m4.return_20>0)
+            structure=pd.notna(m4.CLV) and m4.CLV>=.60
+            pullback=pd.notna(m4.Pullback) and m4.Pullback>-.12
             flags=[]
             if not liq: flags.append("20日平均成交额不足1亿元/缺失")
+            if m4.cross_session_price_status != "READY":
+                flags.append("缺少经公司行为账本验证的点时总收益价格序列；跨日趋势/突破/回撤禁用")
             if not trend: flags.append("5日及20日趋势未同时确认")
             if not structure: flags.append("CLV收盘结构未确认")
             if not pullback: flags.append("回撤过深/缺失")
@@ -159,10 +148,11 @@ def scan(u,archive_root=Path("data/forward_archive")):
               "M4距20日高点交易日":m4.pullback_duration,
               "M4高量滞涨":bool(m4.high_volume_stall) if pd.notna(m4.high_volume_stall) else None,
               "M4缩量回撤":bool(m4.low_volume_pullback) if pd.notna(m4.low_volume_pullback) else None,
-              "M4数据口径":"原始日线+本次抓取时间戳；仅当前观察，不具备历史PIT资格",
+              "M4数据口径":"原始OHLC仅用于当日K线结构；跨日特征仅接受经公司行为账本验证的点时总收益序列；本次抓取时间戳不具备历史PIT资格",
+              "M4跨日价格状态":m4.cross_session_price_status,
               "流动性观察通过":bool(liq),"技术观察通过":bool(trend and structure and pullback),
               "未通过项":"；".join(flags) if flags else "基础观察条件通过",
-              "公司行为口径":"未接入点时公司行为账本；原始价格观察值，不可作为正式收益因子"})
+              "公司行为口径":"无VERIFIED点时总收益序列时，跨日收益/突破/回撤留空；原始价格不替代总收益"})
         except Exception as e: errors.append({"代码":s.code,"原因":str(e)[:220]})
     return pd.DataFrame(rows),pd.DataFrame(errors)
 
@@ -228,7 +218,7 @@ def empty_scan_result(error):
         "代码", "名称", "最新价", "涨跌幅%", "当日成交额", "20日平均成交额",
         "5日收益%", "20日收益%", "CLV", "20日高点回撤%",
         "M4突破20日高点%", "M4量比5日/20日", "M4距20日高点交易日",
-        "M4高量滞涨", "M4缩量回撤", "M4数据口径", "流动性观察通过",
+        "M4高量滞涨", "M4缩量回撤", "M4数据口径", "M4跨日价格状态", "流动性观察通过",
         "技术观察通过", "未通过项", "公司行为口径",
     ]
     return pd.DataFrame(columns=columns), pd.DataFrame([{

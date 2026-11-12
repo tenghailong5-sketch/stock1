@@ -68,30 +68,88 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
     span = (x["high"] - x["low"]).where(lambda v: v > 0)
     x["CLV"] = (x["close"] - x["low"]) / span
     x["BodyStrength"] = (x["close"] - x["open"]) / span
-    grouped = x.groupby("symbol", group_keys=False)
-    for n in (5, 10, 20):
-        x[f"return_{n}"] = grouped["close"].pct_change(n)
-    x["high20_prev"] = grouped["high"].transform(lambda s: s.shift(1).rolling(20, min_periods=20).max())
-    x["breakout20"] = x["close"] / x["high20_prev"] - 1
     x["upper_shadow_ratio"] = (x["high"] - x[["open", "close"]].max(axis=1)) / span
-    x["recent_high20"] = grouped["high"].transform(lambda s: s.rolling(20, min_periods=20).max())
-    x["Pullback"] = x["close"] / x["recent_high20"] - 1
-    # Sessions elapsed since the most recent rolling-20-session high-water
-    # close. Zero means the current close is at a new rolling peak.
-    def _duration_since_peak(s: pd.Series) -> pd.Series:
-        values = s.to_numpy(dtype=float)
-        out = np.full(len(values), np.nan)
-        for i in range(len(values)):
-            start = max(0, i - 19)
-            window = values[start:i + 1]
-            if not np.isfinite(window).all():
+
+    # R2.1-02: raw OHLC is for execution and same-session candle geometry only.
+    # Cross-session momentum/breakout/pullback must use a verified PIT total-return
+    # price series built from the point-in-time corporate-action ledger. Never
+    # silently substitute today's raw close history across ex-dates.
+    pit_columns = {"pit_total_return_close", "pit_total_return_high",
+                   "pit_total_return_available_time", "corporate_action_status"}
+    if not pit_columns.issubset(x.columns):
+        x["cross_session_price_status"] = "MISSING_PIT_TOTAL_RETURN_FIELDS"
+        x["return_5"] = np.nan
+        x["return_10"] = np.nan
+        x["return_20"] = np.nan
+        x["high20_prev"] = np.nan
+        x["breakout20"] = np.nan
+        x["recent_high20"] = np.nan
+        x["Pullback"] = np.nan
+        x["pullback_duration"] = np.nan
+    else:
+        x["pit_total_return_close"] = pd.to_numeric(x["pit_total_return_close"], errors="coerce")
+        x["pit_total_return_high"] = pd.to_numeric(x["pit_total_return_high"], errors="coerce")
+        try:
+            pit_available = pd.to_datetime(x["pit_total_return_available_time"], errors="coerce")
+            pit_time_valid = bool(
+                pit_available.notna().all() and pit_available.dt.tz is not None
+            )
+            if pit_time_valid:
+                x["pit_total_return_available_time"] = pit_available.dt.tz_convert("UTC")
+        except (AttributeError, TypeError, ValueError):
+            pit_time_valid = False
+        grouped = x.groupby("symbol", group_keys=False)
+        x["cross_session_price_status"] = "READY"
+        for symbol, indexes in grouped.groups.items():
+            group = x.loc[indexes]
+            close_values = group["pit_total_return_close"].to_numpy(dtype=float)
+            high_values = group["pit_total_return_high"].to_numpy(dtype=float)
+            verified = group["corporate_action_status"].eq("VERIFIED").all()
+            pit_available_valid = (
+                pit_time_valid
+                and group["pit_total_return_available_time"].notna().all()
+                and (group["pit_total_return_available_time"] <= cutoff_utc).all()
+            )
+            valid_prices = (
+                np.isfinite(close_values).all() and np.isfinite(high_values).all()
+                and (close_values > 0).all() and (high_values > 0).all()
+            )
+            if not (verified and valid_prices and pit_available_valid):
+                x.loc[indexes, "cross_session_price_status"] = (
+                    "UNVERIFIED_CORPORATE_ACTIONS" if not verified
+                    else "PIT_TOTAL_RETURN_NOT_AVAILABLE_AT_DECISION" if not pit_available_valid
+                    else "INVALID_PIT_TOTAL_RETURN_SERIES"
+                )
+                for column in ("return_5", "return_10", "return_20", "high20_prev",
+                               "breakout20", "recent_high20", "Pullback", "pullback_duration"):
+                    x.loc[indexes, column] = np.nan
                 continue
-            peak_value = np.max(window)
-            peak_positions = np.flatnonzero(window == peak_value)
-            last_peak = start + int(peak_positions[-1])
-            out[i] = i - last_peak
-        return pd.Series(out, index=s.index)
-    x["pullback_duration"] = grouped["close"].transform(_duration_since_peak)
+            symbol_rows = x.loc[indexes].sort_values("trade_date")
+            close = symbol_rows["pit_total_return_close"]
+            high = symbol_rows["pit_total_return_high"]
+            for n in (5, 10, 20):
+                x.loc[symbol_rows.index, f"return_{n}"] = close.pct_change(n)
+            high20_prev = high.shift(1).rolling(20, min_periods=20).max()
+            recent_high20 = high.rolling(20, min_periods=20).max()
+            x.loc[symbol_rows.index, "high20_prev"] = high20_prev
+            x.loc[symbol_rows.index, "breakout20"] = close / high20_prev - 1
+            x.loc[symbol_rows.index, "recent_high20"] = recent_high20
+            x.loc[symbol_rows.index, "Pullback"] = close / recent_high20 - 1
+
+            # Sessions elapsed since the most recent 20-session total-return
+            # closing high. Zero means the current close is at a new peak.
+            values = close.to_numpy(dtype=float)
+            duration = np.full(len(values), np.nan)
+            for i in range(len(values)):
+                start = max(0, i - 19)
+                window = values[start:i + 1]
+                if not np.isfinite(window).all():
+                    continue
+                peak_positions = np.flatnonzero(window == np.max(window))
+                duration[i] = i - (start + int(peak_positions[-1]))
+            x.loc[symbol_rows.index, "pullback_duration"] = duration
+
+    grouped = x.groupby("symbol", group_keys=False)
     x["amount_ma20"] = grouped["amount"].transform(lambda s: s.rolling(20, min_periods=20).mean())
     x["amount_ma5"] = grouped["amount"].transform(lambda s: s.rolling(5, min_periods=5).mean())
     x["LQ"] = x["amount"] / x["amount_ma20"]
