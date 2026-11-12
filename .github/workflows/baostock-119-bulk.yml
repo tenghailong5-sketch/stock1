@@ -7,7 +7,7 @@ on:
       - "scripts/probe_baostock_119_bulk.py"
       - ".github/workflows/baostock-119-bulk.yml"
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: baostock-119-bulk
   cancel-in-progress: false
@@ -24,6 +24,30 @@ jobs:
         run: pip install "baostock==0.9.4" "pandas==2.2.3" "pyarrow>=18,<30"
       - name: Download and validate 119 full-market sessions
         run: python scripts/probe_baostock_119_bulk.py
+      - name: Persist validated market history in repository
+        if: success()
+        run: |
+          mkdir -p data/market_history
+          cp output/baostock_119_sessions.parquet data/market_history/baostock_119_sessions.parquet
+          cp output/baostock_119_bulk_report.json data/market_history/baostock_119_bulk_report.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/market_history/
+          if git diff --cached --quiet; then
+            echo "No market-history changes to persist."
+            exit 0
+          fi
+          git commit -m "data: persist validated 119-session BaoStock history"
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git rebase origin/main
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep $((attempt * 2))
+          done
+          echo "Failed to persist validated market history after 5 attempts." >&2
+          exit 1
       - name: Upload 119-session data and report
         if: always()
         uses: actions/upload-artifact@v4
