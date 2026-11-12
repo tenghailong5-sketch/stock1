@@ -157,11 +157,17 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
     grouped = x.groupby("symbol", group_keys=False)
     x["amount_ma20"] = grouped["amount"].transform(lambda s: s.rolling(20, min_periods=20).mean())
     x["amount_ma5"] = grouped["amount"].transform(lambda s: s.rolling(5, min_periods=5).mean())
-    x["LQ"] = x["amount"] / x["amount_ma20"]
-    x["amount_ma5_to_ma20"] = x["amount_ma5"] / x["amount_ma20"]
+    # Zero rolling denominators occur in all-suspended/zero-activity windows.
+    # They are undefined ratios, not infinity and not evidence of extreme liquidity.
+    x["LQ"] = (x["amount"] / x["amount_ma20"]).where(x["amount_ma20"] > 0)
+    x["amount_ma5_to_ma20"] = (
+        x["amount_ma5"] / x["amount_ma20"]
+    ).where(x["amount_ma20"] > 0)
     x["volume_ma5"] = grouped["volume"].transform(lambda s: s.rolling(5, min_periods=5).mean())
     x["volume_ma20"] = grouped["volume"].transform(lambda s: s.rolling(20, min_periods=20).mean())
-    x["volume_ma5_to_ma20"] = x["volume_ma5"] / x["volume_ma20"]
+    x["volume_ma5_to_ma20"] = (
+        x["volume_ma5"] / x["volume_ma20"]
+    ).where(x["volume_ma20"] > 0)
 
     # These price/volume confirmations compare different trading sessions.
     # Raw OHLC can jump mechanically across ex-dates, so use only the verified
@@ -172,24 +178,30 @@ def price_structure(bars: pd.DataFrame, decision_time=None) -> pd.DataFrame:
         errors="coerce",
     ).where(x["cross_session_price_status"].eq("READY"))
     previous_comparison_close = comparison_close.groupby(x["symbol"]).shift(1)
-    comparable = comparison_close.notna() & previous_comparison_close.notna()
+    price_comparable = comparison_close.notna() & previous_comparison_close.notna()
+    amount_baseline_valid = x["amount_ma20"].notna() & (x["amount_ma20"] > 0)
+    volume_baseline_valid = x["volume_ma5"].notna()
 
-    def _nullable_flag(condition: pd.Series) -> pd.Series:
+    def _nullable_flag(condition: pd.Series, valid: pd.Series) -> pd.Series:
         result = pd.Series(pd.NA, index=x.index, dtype="boolean")
-        result.loc[comparable] = condition.loc[comparable].astype(bool)
+        valid = valid.fillna(False)
+        result.loc[valid] = condition.loc[valid].astype(bool)
         return result
 
     x["price_up_volume_confirmation"] = _nullable_flag(
         (comparison_close > previous_comparison_close)
-        & (x["amount"] > x["amount_ma20"])
+        & (x["amount"] > x["amount_ma20"]),
+        price_comparable & amount_baseline_valid,
     )
     x["high_volume_stall"] = _nullable_flag(
         (x["amount"] > 1.5 * x["amount_ma20"])
-        & (comparison_close <= previous_comparison_close)
+        & (comparison_close <= previous_comparison_close),
+        price_comparable & amount_baseline_valid,
     )
     x["low_volume_pullback"] = _nullable_flag(
         (comparison_close < previous_comparison_close)
-        & (x["volume"] < x["volume_ma5"])
+        & (x["volume"] < x["volume_ma5"]),
+        price_comparable & volume_baseline_valid,
     )
     return x
 
