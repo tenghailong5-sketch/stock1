@@ -1,0 +1,106 @@
+name: Resumable Delisted Security Discovery
+
+on:
+  schedule:
+    # Daily at 02:00 China time. Each run advances a bounded checkpoint.
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: delisted-discovery-main
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: rootSunc/CNEquity
+          ref: 90ed0a5ad0df455af8d1e2610a79b642956a2f69
+          path: cnequity-source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install free data pipeline dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install cnequity
+      - name: Prepare persistent discovery checkpoint
+        run: mkdir -p "$RUNNER_TEMP/cnequity-delisted-lake/meta/state"
+      - name: Restore latest main-branch discovery checkpoint
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cnequity-delisted-lake/meta/state/delisted_catalog.json
+          # A unique key per run is essential: Actions caches are immutable.
+          # Restore the newest prior checkpoint, then save the advanced one.
+          key: delisted-catalog-main-${{ github.run_id }}
+          restore-keys: |
+            delisted-catalog-main-
+      - name: Initialize minimal isolated lake
+        run: |
+          set -euo pipefail
+          cne init --profile demo --symbols "600519.SH" --days 1 \
+            --data-root "$RUNNER_TEMP/cnequity-delisted-lake" \
+            --config-out "$RUNNER_TEMP/cnequity-delisted.toml" \
+            2>&1 | tee discovery-init.log
+          echo "DELISTED_CONFIG=$RUNNER_TEMP/cnequity-delisted.toml" >> "$GITHUB_ENV"
+      - name: Advance resumable discovery checkpoint
+        run: |
+          set -euo pipefail
+          # 500 probes is a bounded daily chunk. The upstream command checkpoints
+          # its catalogue and leaves failed probes pending for a later retry.
+          python cnequity-source/scripts/delisted_ops.py \
+            --config "$DELISTED_CONFIG" discover --limit 500 \
+            > discovery-result.json 2> discovery.log
+          cat discovery-result.json
+          python - "$DELISTED_CONFIG" discovery-result.json <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          from cnequity.config import load_config
+          from cnequity.quality.delisted_coverage import catalog_path
+          from cnequity.steps.delisted import pending_codes
+
+          config = load_config(sys.argv[1])
+          result = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          path = catalog_path(config)
+          catalog = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+          delisted = catalog.get("delisted", {})
+          never_issued = catalog.get("never_issued", [])
+          summary = {
+              "probed_this_run": result["probed"],
+              "delisted_this_run": result["delisted"],
+              "never_issued_this_run": result["never_issued"],
+              "failed_this_run": result["failed"],
+              "remaining_reported": result["remaining"],
+              "complete": result["complete"],
+              "catalogued_delistings_total": len(delisted),
+              "never_issued_total": len(never_issued),
+              "pending_recomputed": len(pending_codes(config)),
+              "historical_pit_eligible": False,
+              "note": "Discovery evidence only; does not certify price-history completeness or point-in-time eligibility.",
+          }
+          Path("discovery-summary.json").write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(summary, ensure_ascii=False, indent=2))
+          PY
+      - name: Upload discovery checkpoint evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: delisted-discovery-evidence
+          path: |
+            discovery-init.log
+            discovery-result.json
+            discovery.log
+            discovery-summary.json
+          if-no-files-found: warn
+          retention-days: 30
