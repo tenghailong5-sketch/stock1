@@ -11,6 +11,13 @@ from src.model.m4_relative_strength import (
 DECISION = "2026-11-11T10:00:00Z"
 
 
+def with_lineage(frame):
+    out = frame.copy()
+    out["source_id"] = "fixture"
+    out["source_revision"] = "fixture-v1"
+    return out
+
+
 def test_industry_excess_is_ranked_separately_for_five_and_twenty_sessions():
     date = pd.Timestamp("2026-11-10")
     available = pd.Timestamp(DECISION)
@@ -28,7 +35,7 @@ def test_industry_excess_is_ranked_separately_for_five_and_twenty_sessions():
         "available_time": [available],
     })
     ranked, audit = rank_industry_excess(
-        industries, market, decision_time=DECISION, expected_industry_count=3
+        with_lineage(industries), with_lineage(market), decision_time=DECISION, expected_industry_count=3
     )
     ranked = ranked.set_index("symbol")
     assert ranked.loc["I1", "industry_excess_5_pct"] == 100.0
@@ -54,7 +61,7 @@ def test_industry_ranks_fail_closed_when_declared_peer_universe_is_incomplete():
         "available_time": [available],
     })
     ranked, audit = rank_industry_excess(
-        industries, market, decision_time=DECISION, expected_industry_count=3
+        with_lineage(industries), with_lineage(market), decision_time=DECISION, expected_industry_count=3
     )
     assert ranked.filter(regex="_pct$").isna().all().all()
     assert set(audit["status"]) == {"universe_size_mismatch"}
@@ -91,7 +98,7 @@ def test_residual_strength_uses_prior_daily_returns_and_audits_stock_pool():
             })
     stocks = pd.DataFrame(stock_rows)
     ranked, audit = rank_stock_residual_strength(
-        stocks, market, industries, decision_time=DECISION,
+        with_lineage(stocks), with_lineage(market), with_lineage(industries), decision_time=DECISION,
         expected_stock_count=4, window=60, min_periods=40,
     )
     latest = ranked[ranked["trade_date"] == dates[-1]]
@@ -119,7 +126,7 @@ def test_future_available_industry_rows_are_excluded_from_decision():
         "available_time": [pd.Timestamp("2026-11-12T00:00:00Z")],
     })
     ranked, audit = rank_industry_excess(
-        industries, market, decision_time=DECISION, expected_industry_count=1
+        with_lineage(industries), with_lineage(market), decision_time=DECISION, expected_industry_count=1
     )
     assert ranked["industry_excess_5_pct"].isna().all()
     assert set(audit["status"]) == {"no_eligible_rows"}
