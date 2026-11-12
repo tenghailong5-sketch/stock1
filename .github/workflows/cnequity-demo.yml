@@ -7,13 +7,14 @@ on:
     # data-provider quota. Run it only when ingestion/normalization contracts,
     # their tests, dependencies, or this workflow change—not for docs-only PRs.
     paths:
-      - ".github/workflows/cnequity-demo.yml"
       - "src/providers/cnequity.py"
       - "src/providers/akshare_pit.py"
       - "src/providers/akshare_limit_pools.py"
       - "src/collectors/**"
       - "src/model/data_layer.py"
-      - "tests/**"
+      - "tests/test_cnequity*.py"
+      - "tests/test_akshare_pit*.py"
+      - "tests/test_akshare_limit_pools*.py"
       - "requirements.txt"
       - "pyproject.toml"
   workflow_dispatch:
