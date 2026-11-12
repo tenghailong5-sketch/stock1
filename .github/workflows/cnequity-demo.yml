@@ -274,6 +274,7 @@ jobs:
           cne delisted status --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-after-backfill.log
           python - <<'PY'
           import json
+          import os
           import re
           from pathlib import Path
 
