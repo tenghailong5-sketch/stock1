@@ -287,6 +287,13 @@ def main():
     # M3 and every captured stock bar are therefore evaluated against the same
     # cutoff; no provider response fetched after the cutoff can leak into the run.
     now=datetime.now(timezone.utc)
+    if not w.empty and "available_time" in w.columns:
+        stock_available = pd.to_datetime(w["available_time"], errors="coerce", utc=True)
+        if stock_available.isna().any() or (stock_available > pd.Timestamp(now)).any():
+            raise RuntimeError("stock snapshot availability exceeds the unified decision cutoff")
+        latest_stock_available = stock_available.max().isoformat()
+    else:
+        latest_stock_available = None
     m3 = load_m3_market_context(decision_time=now)
     w=w.sort_values(["技术观察通过","流动性观察通过","当日成交额"],ascending=[False,False,False])
     # M5 remains diagnostic-only: M3 state is supplied only when independently READY; factors and hard gates are still incomplete.
@@ -307,6 +314,7 @@ def main():
       f"- 基础技术观察名单：{len(c)}",
       f"- M4价格/流动性观察因子已计算：{len(w)}",
       f"- M4观察分位审计记录：{len(observation_audit)}条",
+      f"- 个股行情最新可用时间：{latest_stock_available or '无'}；统一决策时点：{now.isoformat()}",
       f"- M3市场状态：{m3['status']}；状态={m3['market_state'] or '未确认'}；有效会话={m3['valid_sessions']}；最新日期={m3['latest_trade_date'] or '无'}",
       f"- M3仓位系数：{m3['position_scale'] if m3['position_scale'] is not None else '不可用'}；原因={m3['reason'] or '无'}",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
