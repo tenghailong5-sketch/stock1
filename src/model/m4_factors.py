@@ -271,14 +271,29 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
         g = group.copy()
         residual = []
         for i, row in enumerate(g.itertuples(index=False)):
-            hist = g.iloc[max(0, i-window):i][["market_return", "industry_return", "daily_return"]].dropna()
-            current = [row.return_5, row.market_return_5, row.industry_return_5]
+            hist = g.iloc[max(0, i-window):i][["market_return", "industry_return", "daily_return"]].copy()
+            hist = hist.apply(pd.to_numeric, errors="coerce")
+            hist_values = hist.to_numpy(dtype=float)
+            hist = hist.loc[np.isfinite(hist_values).all(axis=1)]
+            current = pd.to_numeric(
+                pd.Series([row.return_5, row.market_return_5, row.industry_return_5]),
+                errors="coerce",
+            ).to_numpy(dtype=float)
             if len(hist) < min_periods or not np.isfinite(current).all():
                 residual.append(np.nan)
                 continue
             design = np.column_stack([np.ones(len(hist)), hist.market_return, hist.industry_return])
-            beta = np.linalg.lstsq(design, hist.daily_return.to_numpy(), rcond=None)[0]
-            residual.append(float(row.return_5 - beta[1]*row.market_return_5 - beta[2]*row.industry_return_5))
+            # Market and industry returns must independently identify both
+            # exposures. A rank-deficient OLS fit has non-unique betas; using
+            # its arbitrary least-squares solution would fabricate residual alpha.
+            if np.linalg.matrix_rank(design) < design.shape[1]:
+                residual.append(np.nan)
+                continue
+            beta = np.linalg.lstsq(design, hist.daily_return.to_numpy(dtype=float), rcond=None)[0]
+            if not np.isfinite(beta).all():
+                residual.append(np.nan)
+                continue
+            residual.append(float(current[0] - beta[1]*current[1] - beta[2]*current[2]))
         g["residual_return_5"] = residual
         output.append(g)
     return pd.concat(output, ignore_index=True) if output else x.assign(residual_return_5=np.nan)
