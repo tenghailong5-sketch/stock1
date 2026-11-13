@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-13T13:38:08.214963+00:00",
+  "captured_at": "2026-11-13T14:07:56.130086+00:00",
   "source_status": {
     "index_000001": "ok: tencent.stock_zh_index_daily_tx; rows=123",
     "index_399001": "ok: tencent.stock_zh_index_daily_tx; rows=123",
@@ -11,6 +11,23 @@
     "limit_pools": "ok",
     "historical_market_context": "ok: kaipanhong.market_emotion_kph; backfilled=0"
   },
+  "industry_audit": {
+    "quote_universe_symbol_count": 5579,
+    "selected_snapshot_symbol_count": 2986,
+    "selected_snapshot_covered_symbol_count": 2619,
+    "selected_snapshot_coverage": 0.46943896755690984,
+    "eastmoney_board_symbol_count": 0,
+    "eastmoney_board_coverage": 0.0,
+    "eastmoney_board_error": "Push2RateLimitError: 东方财富 push2 行情服务器断开了连接，通常是短时间内请求过多，当前 IP 被临时限流。首次限流一般约 5 分钟后恢复，反复触发后可能需要 40 分钟以上；等待期间不要重复调用东方财富的行情接口，否则会延长限流。",
+    "eastmoney_individual_coverage": null,
+    "eastmoney_individual_error": "RuntimeError: skipped_due_to_eastmoney_rate_limit",
+    "eastmoney_individual_failed_symbol_count": 0,
+    "sina_coverage": 0.46943896755690984,
+    "sina_error": null,
+    "baostock_coverage": null,
+    "baostock_error": "RuntimeError: Baostock login failed: 网络接收错误。",
+    "selected_source": "akshare.stock_sector_detail_sina"
+  },
   "rows_appended": {
     "index_000001": 0,
     "index_399001": 0,
@@ -19,11 +36,11 @@
     "index_000300": 0,
     "industry_membership": 2991,
     "market_breadth": 1,
-    "limit_pools": 0,
+    "limit_pools": 1,
     "market_sentiment": 1,
     "market_breadth_history_backfill": 0,
     "market_sentiment_history_backfill": 0
   },
   "partial": true,
-  "note": "Unavailable sources are explicitly recorded; missing data is not imputed."
+  "note": "Coverage denominator is the distinct symbol count from this run's captured quote universe. Provider failures include exception details; missing data is not imputed."
 }
