@@ -20,8 +20,10 @@ on:
     paths:
       - "src/providers/sw_industry.py"
       - "src/providers/sw_api_industry.py"
+      - "src/providers/baostock_industry.py"
       - "tests/test_sw_industry.py"
       - "tests/test_sw_api_industry.py"
+      - "tests/test_baostock_industry.py"
       - ".github/workflows/sw-industry-ci.yml"
   workflow_dispatch:
 
