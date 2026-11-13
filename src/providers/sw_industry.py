@@ -66,10 +66,9 @@ def _trusted_intermediate_bundle(*, timeout: int = 15) -> str:
 
 
 def _download_xls(client, url: str, timeout: int) -> bytes:
-    """Download an XLS with verified TLS; retry with the OS trust store on CA errors.
+    """Download an XLS with verified TLS, adding a pinned intermediate CA if needed.
 
-    Never disable certificate verification. Some hosted runners/proxies install
-    additional roots in the OS bundle but not in certifi's bundle.
+    Never disable certificate verification or trust an unpinned certificate.
     """
     try:
         response = client.get(url, headers=HEADERS, timeout=timeout)
