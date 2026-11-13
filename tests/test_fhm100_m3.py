@@ -1,3 +1,5 @@
+import json
+
 import pandas as pd
 
 from src import fhm100
@@ -130,3 +132,68 @@ def test_m3_environment_factor_rejects_out_of_range_or_non_numeric_values(monkey
     )
     assert result["market_state"] == "RISK_ON"
     assert result["market_environment_score"] is None
+
+
+def _write_forward_industry_batch(tmp_path, source_ids):
+    root = tmp_path / "industry_membership"
+    root.mkdir(parents=True, exist_ok=True)
+    symbols = ["000001", "600000", "000002"]
+    rows = []
+    for index, symbol in enumerate(symbols):
+        rows.append({
+            "symbol": symbol,
+            "industry_code": "EM::银行" if index < 2 else "EM::房地产",
+            "industry_name": "银行" if index < 2 else "房地产",
+            "snapshot_id": "single-complete-batch",
+            "expected_industry_count": 2,
+            "observed_at": "2026-11-13T12:00:00+00:00",
+            "available_time": "2026-11-13T12:00:00+00:00",
+            "availability_basis": "retrieval_time_only",
+            "historical_pit_eligible": False,
+            "source_id": source_ids[index],
+            "snapshot_scope": "current_membership_observation_only",
+            "source_revision": f"revision-{index}",
+        })
+    (root / "2026-11-13.jsonl").write_text(
+        "\\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\\n",
+        encoding="utf-8",
+    )
+
+
+def test_forward_industry_audit_accepts_baostock_taxonomy(tmp_path):
+    _write_forward_industry_batch(
+        tmp_path,
+        ["baostock.query_stock_industry"] * 3,
+    )
+    selected, audit = fhm100.audit_forward_industry_membership(
+        tmp_path,
+        ["000001", "600000", "000002"],
+        decision_time=pd.Timestamp("2026-11-13T13:00:00Z"),
+    )
+    assert audit["status"] == "ready_forward_only"
+    assert audit["selected_symbol_count"] == 3
+    assert set(selected["source_id"]) == {"baostock.query_stock_industry"}
+    assert audit["historical_pit_eligible"] is False
+
+
+def test_forward_industry_audit_accepts_one_combined_eastmoney_batch(tmp_path):
+    _write_forward_industry_batch(
+        tmp_path,
+        [
+            "akshare.stock_board_industry_cons_em",
+            "akshare.stock_individual_info_em",
+            "akshare.stock_board_industry_cons_em",
+        ],
+    )
+    selected, audit = fhm100.audit_forward_industry_membership(
+        tmp_path,
+        ["000001", "600000", "000002"],
+        decision_time=pd.Timestamp("2026-11-13T13:00:00Z"),
+    )
+    assert audit["status"] == "ready_forward_only"
+    assert audit["selected_symbol_count"] == 3
+    assert set(selected["source_id"]) == {
+        "akshare.stock_board_industry_cons_em",
+        "akshare.stock_individual_info_em",
+    }
+    assert audit["historical_pit_eligible"] is False
