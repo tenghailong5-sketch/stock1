@@ -10,6 +10,7 @@ from src.providers.baostock_industry import fetch_baostock_industry_membership_s
 from src.providers.akshare_pit import (
     fetch_current_industry_membership_snapshot,
     fetch_sina_current_industry_membership_snapshot,
+    fetch_eastmoney_individual_industry_membership_snapshot,
 )
 
 
@@ -682,3 +683,71 @@ def test_collector_uses_baostock_when_eastmoney_and_sina_industry_coverage_are_p
     assert {row["source_id"] for row in rows} == {"baostock.query_stock_industry"}
     assert {row["industryClassification"] for row in rows} == {"申万一级行业"}
     assert all(row["historical_pit_eligible"] is False for row in rows)
+
+
+def test_eastmoney_individual_industry_adapter_stamps_each_response_and_keeps_failures():
+    class IndividualProvider:
+        def stock_individual_info_em(self, symbol):
+            if symbol == "000003":
+                raise RuntimeError("temporary unavailable")
+            industry = {"000001": "银行", "000002": "电子"}[symbol]
+            return pd.DataFrame([
+                {"item": "股票代码", "value": symbol},
+                {"item": "行业", "value": industry},
+            ])
+
+    start = pd.Timestamp("2026-11-13T12:00:00Z")
+    times = iter(start + pd.Timedelta(seconds=i) for i in range(2))
+    result = fetch_eastmoney_individual_industry_membership_snapshot(
+        IndividualProvider(), ["000001", "000002", "000003"],
+        clock=lambda: next(times), pause_seconds=0, sleep_fn=lambda _: None,
+        max_attempts=1,
+    )
+    assert set(result["symbol"]) == {"000001", "000002"}
+    assert result["available_time"].nunique() == 2
+    assert result["historical_pit_eligible"].eq(False).all()
+    assert result.attrs["requested_symbol_count"] == 3
+    assert result.attrs["success_symbol_count"] == 2
+    assert set(result.attrs["failed_symbols"]) == {"000003"}
+
+
+def test_collector_fills_eastmoney_industry_gaps_from_individual_profiles(tmp_path):
+    class GapProvider(FakeArchiveAkshare):
+        def stock_board_industry_cons_em(self, symbol):
+            if symbol == "BK0001":
+                return pd.DataFrame({"代码": ["000001"]})
+            return pd.DataFrame({"代码": []})
+
+        def stock_individual_info_em(self, symbol):
+            categories = {"600000": "银行", "000002": "计算机"}
+            return pd.DataFrame([
+                {"item": "股票代码", "value": symbol},
+                {"item": "行业", "value": categories[symbol]},
+            ])
+
+        def stock_sector_spot(self, indicator):
+            raise AssertionError("Sina taxonomy must not be mixed into completed Eastmoney coverage")
+
+    counts = collect(
+        GapProvider(), tmp_path,
+        captured_at="2026-11-13T16:30:00+08:00",
+        allow_partial=True,
+        retry_sleep=lambda _: None,
+    )
+    assert counts["industry_membership"] == 3
+    report = json.loads(
+        (tmp_path / "collection_report" / "2026-11-13.json").read_text(encoding="utf-8")
+    )
+    assert report["source_status"]["industry_membership"].startswith(
+        "ok: eastmoney_board_plus_individual_info; symbol_coverage=100.0%"
+    )
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "industry_membership" / "2026-11-13.jsonl").read_text().splitlines()
+    ]
+    assert {row["symbol"] for row in rows} == {"000001", "600000", "000002"}
+    assert rows[1]["source_id"] in {
+        "akshare.stock_board_industry_cons_em", "akshare.stock_individual_info_em"
+    }
+    assert all(row["historical_pit_eligible"] is False for row in rows)
+
