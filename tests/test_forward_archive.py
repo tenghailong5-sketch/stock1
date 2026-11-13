@@ -522,3 +522,52 @@ def test_collector_prefers_sina_when_eastmoney_industry_coverage_is_incomplete(t
     ]
     assert {row["source_id"] for row in rows} == {"akshare.stock_sector_detail_sina"}
     assert {row["symbol"] for row in rows} == {"000001", "600000", "000002"}
+
+
+def test_collector_backfills_missing_historical_market_context(tmp_path):
+    def historical_fetcher(trade_date, *, expected_market_count):
+        assert trade_date == "2026-11-10"
+        assert expected_market_count == 3
+        breadth = {
+            "trade_date": trade_date,
+            "snapshot_time": "2026-11-10T07:40:00+00:00",
+            "available_time": "2026-11-12T08:30:00+00:00",
+            "breadth": 0.6,
+            "breadth_coverage": 1.0,
+            "total_amount": 1000000000,
+            "total_amount_status": "complete_provider_market_aggregate",
+            "source_id": "kaipanhong.market_emotion_kph",
+            "source_revision": "breadth-revision",
+            "historical_pit_eligible": False,
+        }
+        sentiment = {
+            "trade_date": trade_date,
+            "capture_time": "2026-11-10T07:40:00+00:00",
+            "available_time": "2026-11-12T08:30:00+00:00",
+            "limit_up_count": 20,
+            "limit_down_count": 3,
+            "source_id": "kaipanhong.market_emotion_kph",
+            "source_revision": "sentiment-revision",
+            "historical_pit_eligible": False,
+        }
+        return breadth, sentiment
+
+    counts = collect(
+        FakeArchiveAkshare(),
+        tmp_path,
+        captured_at="2026-11-12T08:30:00Z",
+        allow_partial=True,
+        historical_market_fetcher=historical_fetcher,
+    )
+    assert counts["market_breadth_history_backfill"] == 1
+    assert counts["market_sentiment_history_backfill"] == 1
+    breadth = json.loads(
+        (tmp_path / "market_breadth" / "2026-11-10.jsonl").read_text().splitlines()[0]
+    )
+    sentiment = json.loads(
+        (tmp_path / "market_sentiment" / "2026-11-10.jsonl").read_text().splitlines()[0]
+    )
+    assert breadth["source_id"] == "kaipanhong.market_emotion_kph"
+    assert breadth["available_time"] == "2026-11-12T08:30:00+00:00"
+    assert sentiment["limit_up_count"] == 20
+    assert sentiment["historical_pit_eligible"] is False
