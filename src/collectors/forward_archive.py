@@ -219,34 +219,10 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             f"ok: {index_source}; rows={len(rows)}"
         )
 
-    # Industry availability must be stamped when each provider response finishes,
-    # not with the collector's batch-start timestamp. Tests may inject a clock.
-    industry_records: list[dict] = []
-    try:
-        industry = fetch_current_industry_membership_snapshot(
-            ak_module, clock=industry_clock, pause_seconds=0.15
-        )
-        industry_records = _records(industry)
-        source_status["industry_membership"] = "ok: akshare.stock_board_industry_cons_em"
-    except Exception as eastmoney_exc:
-        try:
-            industry = fetch_sina_current_industry_membership_snapshot(
-                ak_module, clock=industry_clock
-            )
-            industry_records = _records(industry)
-            source_status["industry_membership"] = (
-                "ok: akshare.stock_sector_detail_sina "
-                f"(Eastmoney fallback after {type(eastmoney_exc).__name__})"
-            )
-        except Exception as sina_exc:
-            source_status["industry_membership"] = (
-                "unavailable: Eastmoney "
-                f"{type(eastmoney_exc).__name__}: {str(eastmoney_exc)[:120]} | "
-                f"Sina {type(sina_exc).__name__}: {str(sina_exc)[:120]}"
-            )
-            if not allow_partial:
-                raise RuntimeError(source_status["industry_membership"]) from sina_exc
-
+    # Collect the current quote universe before industry membership so we can
+    # measure actual symbol coverage. A successful provider response is not
+    # sufficient evidence that its constituent list covers the market.
+    breadth_raw = None
     breadth_records: list[dict] = []
     try:
         try:
@@ -270,6 +246,88 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         if not allow_partial:
             raise
 
+
+    industry_records: list[dict] = []
+    expected_symbols: set[str] = set()
+    if breadth_raw is not None and not breadth_raw.empty:
+        if "代码" in breadth_raw.columns:
+            raw_symbols = breadth_raw["代码"]
+        elif "code" in breadth_raw.columns:
+            raw_symbols = breadth_raw["code"].astype(str).str.lower().str[-6:]
+        else:
+            raw_symbols = pd.Series(dtype=str)
+        expected_symbols = set(
+            raw_symbols.astype(str).str.extract(r"(\d{6})", expand=False).dropna().str.zfill(6)
+        )
+
+    eastmoney_industry = None
+    eastmoney_error = None
+    try:
+        eastmoney_industry = fetch_current_industry_membership_snapshot(
+            ak_module, clock=industry_clock, pause_seconds=0.15
+        )
+    except Exception as exc:
+        eastmoney_error = exc
+
+    def _coverage(snapshot):
+        if snapshot is None or snapshot.empty or not expected_symbols:
+            return 0.0
+        members = set(snapshot["symbol"].astype(str).str.zfill(6))
+        return len(members & expected_symbols) / len(expected_symbols)
+
+    industry = eastmoney_industry
+    eastmoney_coverage = _coverage(eastmoney_industry)
+    # Trigger the independent Sina taxonomy whenever Eastmoney is unavailable
+    # or covers less than 95% of the current quote universe. Keep the better
+    # snapshot; never combine incompatible taxonomies into a fake unified map.
+    if eastmoney_industry is None or eastmoney_coverage < 0.95:
+        try:
+            sina_industry = fetch_sina_current_industry_membership_snapshot(
+                ak_module, clock=industry_clock
+            )
+            sina_coverage = _coverage(sina_industry)
+            if industry is None or sina_coverage > eastmoney_coverage:
+                industry = sina_industry
+                chosen_source = "akshare.stock_sector_detail_sina"
+                chosen_coverage = sina_coverage
+            else:
+                chosen_source = "akshare.stock_board_industry_cons_em"
+                chosen_coverage = eastmoney_coverage
+            if chosen_coverage >= 0.95:
+                source_status["industry_membership"] = (
+                    f"ok: {chosen_source}; symbol_coverage={chosen_coverage:.1%}"
+                )
+            else:
+                source_status["industry_membership"] = (
+                    f"partial: {chosen_source}; symbol_coverage={chosen_coverage:.1%}; "
+                    f"Eastmoney={eastmoney_coverage:.1%}; Sina={sina_coverage:.1%}"
+                )
+                if not allow_partial:
+                    raise RuntimeError(source_status["industry_membership"])
+        except Exception as sina_exc:
+            if industry is None:
+                source_status["industry_membership"] = (
+                    "unavailable: Eastmoney "
+                    f"{type(eastmoney_error).__name__ if eastmoney_error else 'unknown'}: "
+                    f"{str(eastmoney_error)[:100] if eastmoney_error else 'no snapshot'} | "
+                    f"Sina {type(sina_exc).__name__}: {str(sina_exc)[:120]}"
+                )
+                if not allow_partial:
+                    raise RuntimeError(source_status["industry_membership"]) from sina_exc
+            else:
+                source_status["industry_membership"] = (
+                    f"partial: Eastmoney symbol_coverage={eastmoney_coverage:.1%}; "
+                    f"Sina fallback failed: {type(sina_exc).__name__}: {str(sina_exc)[:120]}"
+                )
+                if not allow_partial:
+                    raise RuntimeError(source_status["industry_membership"]) from sina_exc
+    else:
+        source_status["industry_membership"] = (
+            f"ok: akshare.stock_board_industry_cons_em; symbol_coverage={eastmoney_coverage:.1%}"
+        )
+
+    if industry is not None and not industry.empty:
+        industry_records = _records(industry)
     limit_pool_records: list[dict] = []
     sentiment = None
     try:

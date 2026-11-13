@@ -47,7 +47,7 @@ class FakeArchiveAkshare:
         ])
 
     def stock_board_industry_cons_em(self, symbol):
-        return pd.DataFrame({"代码": ["000001", "600000"]})
+        return pd.DataFrame({"代码": ["000001", "600000", "000002"]})
 
 
 def test_append_jsonl_is_idempotent_and_preserves_existing_rows(tmp_path):
@@ -82,7 +82,7 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
         "index_000688", "index_000300", "industry_membership", "market_breadth", "limit_pools", "market_sentiment",
     }
     assert all(counts[f"index_{code}"] == 1 for code in ("000001", "399001", "399006", "000688", "000300"))
-    assert counts["industry_membership"] == 4  # two symbols across two industries
+    assert counts["industry_membership"] == 6  # three symbols across two industries
     assert counts["market_breadth"] == 1
     assert counts["market_sentiment"] == 1
     index_file = tmp_path / "index_daily" / "000001.jsonl"
@@ -93,7 +93,7 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
 
     industry_file = tmp_path / "industry_membership" / "2026-11-11.jsonl"
     industry_rows = [json.loads(line) for line in industry_file.read_text(encoding="utf-8").splitlines()]
-    assert len(industry_rows) == 4
+    assert len(industry_rows) == 6
     assert {row["snapshot_scope"] for row in industry_rows} == {
         "current_membership_observation_only"
     }
@@ -215,11 +215,11 @@ def test_same_day_repeated_industry_captures_are_archived_as_separate_batches(tm
     captured = "2026-11-11T16:30:00+08:00"
     first = collect(FakeArchiveAkshare(), tmp_path, captured_at=captured)
     second = collect(FakeArchiveAkshare(), tmp_path, captured_at=captured)
-    assert first["industry_membership"] == 4
-    assert second["industry_membership"] == 4
+    assert first["industry_membership"] == 6
+    assert second["industry_membership"] == 6
     path = tmp_path / "industry_membership" / "2026-11-11.jsonl"
     archived = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-    assert len(archived) == 8
+    assert len(archived) == 12
     assert len({row["snapshot_id"] for row in archived}) == 2
 
 def test_industry_rows_record_each_response_completion_time(tmp_path):
@@ -363,6 +363,7 @@ def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tm
             return pd.DataFrame([
                 {"code": "000001", "name": "平安银行"},
                 {"code": f"6000{index:02d}", "name": f"样本股票{index}"},
+                {"code": "000002", "name": "样例三"},
             ])
 
     counts = collect(
@@ -371,7 +372,7 @@ def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tm
         captured_at="2026-11-12T08:30:00Z",
         allow_partial=True,
     )
-    assert counts["industry_membership"] == 20
+    assert counts["industry_membership"] == 30
     report = json.loads(
         (tmp_path / "collection_report" / "2026-11-12.json").read_text(encoding="utf-8")
     )
@@ -380,7 +381,7 @@ def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tm
     )
     path = tmp_path / "industry_membership" / "2026-11-12.jsonl"
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-    assert len(rows) == 20
+    assert len(rows) == 30
     assert {row["source_id"] for row in rows} == {"akshare.stock_sector_detail_sina"}
     assert {row["expected_industry_count"] for row in rows} == {10}
     assert all(row["historical_pit_eligible"] is False for row in rows)
@@ -480,3 +481,42 @@ def test_sina_industry_snapshot_rejects_conflicting_duplicate_names():
         fetch_sina_current_industry_membership_snapshot(
             FakeSina(), clock=lambda: pd.Timestamp("2026-11-13T08:00:00Z")
         )
+
+
+def test_collector_prefers_sina_when_eastmoney_industry_coverage_is_incomplete(tmp_path):
+    class IncompleteEastmoneyProvider(FakeArchiveAkshare):
+        def stock_board_industry_cons_em(self, symbol):
+            return pd.DataFrame({"代码": ["000001"]})
+
+        def stock_sector_spot(self, indicator):
+            return pd.DataFrame([
+                {"label": f"industry_{index:02d}", "板块": f"行业{index}"}
+                for index in range(10)
+            ])
+
+        def stock_sector_detail(self, sector):
+            return pd.DataFrame([
+                {"code": "000001", "name": "样例一"},
+                {"code": "600000", "name": "样例二"},
+                {"code": "000002", "name": "样例三"},
+            ])
+
+    provider = IncompleteEastmoneyProvider()
+    counts = collect(
+        provider, tmp_path,
+        captured_at="2026-11-13T16:30:00+08:00",
+        allow_partial=True,
+    )
+    assert counts["industry_membership"] == 30
+    report = json.loads(
+        (tmp_path / "collection_report" / "2026-11-13.json").read_text(encoding="utf-8")
+    )
+    assert report["source_status"]["industry_membership"] == (
+        "ok: akshare.stock_sector_detail_sina; symbol_coverage=100.0%"
+    )
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "industry_membership" / "2026-11-13.jsonl").read_text().splitlines()
+    ]
+    assert {row["source_id"] for row in rows} == {"akshare.stock_sector_detail_sina"}
+    assert {row["symbol"] for row in rows} == {"000001", "600000", "000002"}
