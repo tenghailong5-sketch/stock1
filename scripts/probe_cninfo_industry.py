@@ -34,12 +34,28 @@ def main() -> None:
     except Exception as exc:
         batch_report["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
 
+    all_report = {"requested": "empty scode (all securities)", "returned_symbols": [], "error": None}
+    try:
+        all_frame = ak.stock_industry_change_cninfo(
+            symbol="", start_date="19900101",
+            end_date=__import__("datetime").datetime.now().strftime("%Y%m%d"),
+        )
+        all_report["columns"] = list(all_frame.columns) if all_frame is not None else []
+        all_report["returned_rows"] = int(len(all_frame)) if all_frame is not None else 0
+        if all_frame is not None and not all_frame.empty and "证券代码" in all_frame.columns:
+            all_report["returned_symbols"] = sorted(
+                all_frame["证券代码"].astype(str).str.extract(r"(\\d{6})", expand=False).dropna().unique().tolist()
+            )
+    except Exception as exc:
+        all_report["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+
     frame = fetch_cninfo_current_industry_membership_snapshot(
         ak, SAMPLES, pause_seconds=0.5
     )
     report = {
         "source_id": "cninfo.p_stock2110.csrc",
         "batch_probe": batch_report,
+        "all_securities_probe": all_report,
         "requested": SAMPLES,
         "returned_symbols": sorted(frame["symbol"].astype(str).tolist()) if not frame.empty else [],
         "returned_count": int(frame["symbol"].nunique()) if not frame.empty else 0,
