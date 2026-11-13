@@ -417,3 +417,21 @@ def test_sina_industry_rows_record_each_sector_response_completion_time():
     assert snapshot.groupby("industry_code")["available_time"].nunique().eq(1).all()
     assert snapshot["snapshot_id"].nunique() == 1
     assert snapshot["historical_pit_eligible"].eq(False).all()
+
+
+
+def test_collection_report_records_each_index_provider_and_row_count(tmp_path):
+    collect(
+        FakeArchiveAkshare(),
+        tmp_path,
+        captured_at="2026-11-12T16:30:00+08:00",
+        allow_partial=True,
+    )
+    report = json.loads(
+        (tmp_path / "collection_report" / "2026-11-12.json").read_text(encoding="utf-8")
+    )
+    for code in ("000001", "399001", "399006", "000688", "000300"):
+        assert report["source_status"][f"index_{code}"] == (
+            "ok: akshare.index_zh_a_hist; rows=1"
+        )
+    assert report["partial"] is False

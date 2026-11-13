@@ -161,8 +161,10 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
 
     # Fetch and validate every source before writing anything. A provider error
     # therefore cannot leave a partially refreshed set of archives.
+    source_status = {}
     index_records: list[dict] = []
     for code in INDEXES:
+        index_source = "akshare.index_zh_a_hist"
         try:
             raw = ak_module.index_zh_a_hist(
                 symbol=code, period="daily", start_date=start_date, end_date=end_date
@@ -202,6 +204,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             if "amount" in fallback.columns:
                 raw_data["成交额"] = fallback["amount"]
             raw = pd.DataFrame(raw_data)
+            index_source = "tencent.stock_zh_index_daily_tx"
         # Availability is stamped after this specific provider response returns,
         # not at batch start; otherwise a slow multi-index collection backdates PIT.
         index_observed_at = pd.Timestamp(observed_now())
@@ -210,11 +213,14 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         normalized = normalize_index_history_snapshot(
             raw, symbol=code, fetched_at=index_observed_at
         )
-        index_records.extend(_records(normalized))
+        rows = _records(normalized)
+        index_records.extend(rows)
+        source_status[f"index_{code}"] = (
+            f"ok: {index_source}; rows={len(rows)}"
+        )
 
     # Industry availability must be stamped when each provider response finishes,
     # not with the collector's batch-start timestamp. Tests may inject a clock.
-    source_status = {}
     industry_records: list[dict] = []
     try:
         industry = fetch_current_industry_membership_snapshot(
