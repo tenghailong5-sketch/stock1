@@ -78,7 +78,7 @@ def test_sw_provider_rejects_naive_observation_clock(monkeypatch):
         )
 
 
-def test_download_retries_with_system_ca_after_ssl_error(monkeypatch):
+def test_download_retries_with_pinned_intermediate_bundle_after_ssl_error(monkeypatch):
     class SSLFailOnceSession:
         def __init__(self):
             self.calls = []
@@ -89,13 +89,13 @@ def test_download_retries_with_system_ca_after_ssl_error(monkeypatch):
                 raise sw_industry.requests.exceptions.SSLError("untrusted local issuer")
             return Response(bytes.fromhex("D0CF11E0A1B11AE1") + b"xls")
 
-    monkeypatch.setattr(sw_industry.os.path, "isfile", lambda path: True)
+    monkeypatch.setattr(sw_industry, "_trusted_intermediate_bundle", lambda timeout=15: "/tmp/pinned-sw-ca.pem")
     session = SSLFailOnceSession()
     content = sw_industry._download_xls(session, sw_industry.STOCK_URL, 30)
 
     assert content.endswith(b"xls")
     assert len(session.calls) == 2
-    assert session.calls[1]["verify"] == sw_industry.SYSTEM_CA_BUNDLE
+    assert session.calls[1]["verify"] == "/tmp/pinned-sw-ca.pem"
 
 
 def test_download_rejects_html_error_page():
