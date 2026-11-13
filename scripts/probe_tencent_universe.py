@@ -6,6 +6,7 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import akshare as ak
 import pandas as pd
@@ -128,6 +129,7 @@ def fetch_corporate_action_audit(ak_module, symbol: str, *, sleep_fn=time.sleep)
                 frame = api(**kwargs)
                 if frame is None or not isinstance(frame, pd.DataFrame) or len(frame.columns) == 0:
                     raise ValueError("provider returned no tabular schema")
+                error = None
                 break
             except Exception as exc:
                 error = f"{type(exc).__name__}: {str(exc)[:180]}"
@@ -315,7 +317,7 @@ def main():
         "100-symbol stratified provider qualification only; corporate-action response coverage is not a verified adjustment ledger; "
         "full-market history and historical PIT remain unqualified"
     )
-    (OUT / "tencent_60_symbol_probe.json").write_text(
+    (OUT / "tencent_100_symbol_probe.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
