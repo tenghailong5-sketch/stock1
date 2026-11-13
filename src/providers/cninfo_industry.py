@@ -24,7 +24,7 @@ def fetch_cninfo_current_industry_membership_snapshot(
     now = clock or (lambda: datetime.now(timezone.utc))
     end_date = end_date or datetime.now(timezone.utc).strftime("%Y%m%d")
     requested = sorted({
-        str(value).strip().extract if False else str(value).strip()
+        str(value).strip()
         for value in symbols
     })
     requested = sorted({
