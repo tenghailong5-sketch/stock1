@@ -314,7 +314,12 @@ def test_collector_uses_tencent_index_fallback_after_push2_rate_limit(tmp_path):
 
 
 def test_partial_archive_uses_tencent_breadth_when_eastmoney_is_rate_limited(tmp_path):
+    individual_calls = []
+
     class PartiallyRateLimitedProvider(FakeArchiveAkshare):
+        def stock_individual_info_em(self, symbol):
+            individual_calls.append(symbol)
+            raise AssertionError("per-stock Eastmoney calls must be skipped during cooldown")
         def stock_board_industry_name_em(self):
             raise type("Push2RateLimitError", (Exception,), {})("Eastmoney cooldown")
 
@@ -350,6 +355,8 @@ def test_partial_archive_uses_tencent_breadth_when_eastmoney_is_rate_limited(tmp
     assert report["partial"] is True
     assert report["source_status"]["industry_membership"].startswith("unavailable:")
     assert "Push2RateLimitError: Eastmoney cooldown" in report["source_status"]["industry_membership"]
+    assert "skipped_due_to_eastmoney_rate_limit" in report["source_status"]["industry_membership"]
+    assert individual_calls == []
     assert report["source_status"]["market_breadth"] == "ok: tencent.stock_zh_a_spot_tx"
 
 
