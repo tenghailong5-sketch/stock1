@@ -2,8 +2,18 @@ name: FHM-100 CI
 on:
   push:
     branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "requirements.txt"
+      - ".github/workflows/**"
   pull_request:
     branches: [main, fix/numeric-factor-validation]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "requirements.txt"
+      - ".github/workflows/**"
 permissions:
   contents: read
 concurrency:
