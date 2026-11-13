@@ -28,6 +28,8 @@ jobs:
   archive:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
         with:
