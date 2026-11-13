@@ -148,7 +148,7 @@ jobs:
 
           symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
           actions = load("corporate_actions", symbols=symbols, start=os.environ["BAR_START"],
-                         end=os.environ["ACTION_END"], config=os.environ["CNE_CONFIG"])
+                         end=os.environ["ACTION_END"])
           if hasattr(actions, "to_pandas"):
               actions = actions.to_pandas()
           required = {"symbol", "ex_date", "action_type", "source"}
