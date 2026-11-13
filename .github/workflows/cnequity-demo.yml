@@ -464,6 +464,12 @@ jobs:
           except Exception as exc:
               eastmoney_error = f"{type(exc).__name__}: {exc}"
 
+          # EastMoney's date-IN query intentionally returns every issuer with
+          # an event on those dates. Restrict the peer comparison to the exact
+          # bounded symbol universe; otherwise unrelated issuers look like
+          # thousands of false EastMoney-only discrepancies.
+          if eastmoney is not None and eastmoney.height:
+              eastmoney = eastmoney.filter(eastmoney["symbol"].is_in(symbols))
           eastmoney_map, eastmoney_unsupported = (
               event_map(eastmoney) if eastmoney is not None and eastmoney.height else ({}, 0)
           )
@@ -474,6 +480,27 @@ jobs:
               {"symbol": k[0], "ex_date": k[1], "action_type": k[2],
                "tdx": left[k], "eastmoney": eastmoney_map[k]}
               for k in sorted(em_matched) if abs(left[k] - eastmoney_map[k]) > 1e-5
+          ]
+          # Baostock may expose only one of multiple approved plans sharing an
+          # ex-date. Classify a lower Baostock amount as an under-report only
+          # when EastMoney independently confirms the complete TDX aggregate.
+          baostock_underreported = [
+              item for item in baostock_mismatches
+              if item["baostock"] < item["tdx"]
+              and (item["symbol"], item["ex_date"], item["action_type"]) in eastmoney_map
+              and abs(
+                  eastmoney_map[(item["symbol"], item["ex_date"], item["action_type"])]
+                  - item["tdx"]
+              ) <= 1e-5
+          ]
+          baostock_underreported_keys = {
+              (item["symbol"], item["ex_date"], item["action_type"])
+              for item in baostock_underreported
+          }
+          baostock_unresolved_mismatches = [
+              item for item in baostock_mismatches
+              if (item["symbol"], item["ex_date"], item["action_type"])
+              not in baostock_underreported_keys
           ]
 
           report = {
@@ -490,6 +517,10 @@ jobs:
               "baostock_only_event_keys": len(baostock_only),
               "baostock_term_mismatch_count": len(baostock_mismatches),
               "baostock_term_mismatch_examples": baostock_mismatches[:50],
+              "baostock_underreported_confirmed_by_eastmoney_count": len(baostock_underreported),
+              "baostock_underreported_confirmed_by_eastmoney_examples": baostock_underreported[:50],
+              "baostock_unresolved_term_mismatch_count": len(baostock_unresolved_mismatches),
+              "baostock_unresolved_term_mismatch_examples": baostock_unresolved_mismatches[:50],
               "tdx_only_examples": [list(k) for k in sorted(tdx_only)[:50]],
               "baostock_only_examples": [list(k) for k in sorted(baostock_only)[:50]],
               "eastmoney_query_completed": eastmoney_error is None,
@@ -812,7 +843,7 @@ jobs:
               raise SystemExit(f"EastMoney independent query incomplete: {report.get('eastmoney_error')}")
           discrepancies = {
               "baostock_only_event_keys": int(report.get("baostock_only_event_keys", 0)),
-              "baostock_term_mismatch_count": int(report.get("baostock_term_mismatch_count", 0)),
+              "baostock_unresolved_term_mismatch_count": int(report.get("baostock_unresolved_term_mismatch_count", 0)),
               "tdx_eastmoney_missing_event_keys": int(report.get("tdx_eastmoney_missing_event_keys", 0)),
               "eastmoney_only_event_keys": int(report.get("eastmoney_only_event_keys", 0)),
               "eastmoney_term_mismatch_count": int(report.get("eastmoney_term_mismatch_count", 0)),
