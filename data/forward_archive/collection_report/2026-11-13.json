@@ -1,7 +1,12 @@
 {
-  "captured_at": "2026-11-13T00:19:00.654300+00:00",
+  "captured_at": "2026-11-13T05:35:11.071685+00:00",
   "source_status": {
-    "industry_membership": "ok: akshare.stock_sector_detail_sina (Eastmoney fallback after Push2RateLimitError)",
+    "index_000001": "ok: tencent.stock_zh_index_daily_tx; rows=122",
+    "index_399001": "ok: tencent.stock_zh_index_daily_tx; rows=122",
+    "index_399006": "ok: tencent.stock_zh_index_daily_tx; rows=122",
+    "index_000688": "ok: tencent.stock_zh_index_daily_tx; rows=122",
+    "index_000300": "ok: tencent.stock_zh_index_daily_tx; rows=122",
+    "industry_membership": "unavailable: Eastmoney Push2RateLimitError: 东方财富 push2 行情服务器断开了连接，通常是短时间内请求过多，当前 IP 被临时限流。首次限流一般约 5 分钟后恢复，反复触发后可能需要 40 分钟以上；等待期间不要重复调用东方财富的行情接口，否则会延长限流。 | Sina ValueError: Sina constituent snapshot is empty or has duplicate memberships",
     "market_breadth": "ok: tencent.stock_zh_a_spot_tx",
     "limit_pools": "ok"
   },
@@ -11,11 +16,11 @@
     "index_399006": 0,
     "index_000688": 0,
     "index_000300": 0,
-    "industry_membership": 2991,
+    "industry_membership": 0,
     "market_breadth": 1,
-    "limit_pools": 0,
+    "limit_pools": 5,
     "market_sentiment": 1
   },
-  "partial": false,
+  "partial": true,
   "note": "Unavailable sources are explicitly recorded; missing data is not imputed."
 }
