@@ -72,6 +72,7 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
         FakeArchiveAkshare(),
         tmp_path,
         captured_at="2026-11-11T16:30:00+08:00",
+        observation_clock=lambda: pd.Timestamp("2026-11-11T16:30:00+08:00"),
     )
     assert set(counts) == {
         "index_000001", "index_399001", "index_399006",
@@ -116,6 +117,29 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
     assert breadth_row["total_amount_status"] == "complete_provider_snapshot_sum"
     assert breadth_row["snapshot_scope"] == "current_provider_snapshot_only"
     assert breadth_row["historical_pit_eligible"] is False
+
+
+
+def test_market_observation_times_are_stamped_after_each_provider_response(tmp_path):
+    start = pd.Timestamp("2026-11-12T08:30:00Z")
+    observed = iter([start + pd.Timedelta(seconds=i) for i in range(11)])
+    counts = collect(
+        FakeArchiveAkshare(), tmp_path,
+        captured_at="2026-11-12T08:30:00Z",
+        observation_clock=lambda: next(observed),
+        industry_clock=lambda: start + pd.Timedelta(seconds=99),
+    )
+    assert counts["index_000001"] == 1
+    index_row = json.loads((tmp_path / "index_daily" / "000001.jsonl").read_text().splitlines()[0])
+    breadth_row = json.loads((tmp_path / "market_breadth" / "2026-11-12.jsonl").read_text().splitlines()[0])
+    pool_rows = [json.loads(line) for line in (tmp_path / "limit_pools" / "2026-11-12.jsonl").read_text().splitlines()]
+    assert index_row["available_time"] == start.isoformat()
+    assert breadth_row["available_time"] == (start + pd.Timedelta(seconds=5)).isoformat()
+    assert sorted(row["capture_time"] for row in pool_rows) == sorted(
+        (start + pd.Timedelta(seconds=i)).isoformat() for i in range(6, 11)
+    )
+    sentiment = json.loads((tmp_path / "market_sentiment" / "2026-11-12.jsonl").read_text().splitlines()[0])
+    assert sentiment["capture_time"] == (start + pd.Timedelta(seconds=10)).isoformat()
 
 
 def test_collector_dry_run_validates_without_writing(tmp_path):
