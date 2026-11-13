@@ -74,7 +74,7 @@ def normalize_limit_pool_snapshot(
     return pd.DataFrame([payload])
 
 
-def fetch_limit_pool_snapshots(ak_module, *, trade_date: str, captured_at=None) -> pd.DataFrame:
+def fetch_limit_pool_snapshots(ak_module, *, trade_date: str, captured_at=None, clock=None) -> pd.DataFrame:
     """Fetch all configured date-scoped pools; any API/schema error aborts the batch."""
     frames = []
     for event_type, api_name in POOL_APIS.items():
@@ -82,7 +82,9 @@ def fetch_limit_pool_snapshots(ak_module, *, trade_date: str, captured_at=None) 
         if not callable(api):
             raise ValueError(f"AKShare API unavailable: {api_name}")
         raw = api(date=trade_date)
+        # Record each pool's availability only after its own API response returns.
+        observed_at = clock() if clock is not None else captured_at
         frames.append(normalize_limit_pool_snapshot(
-            raw, event_type=event_type, trade_date=trade_date, captured_at=captured_at
+            raw, event_type=event_type, trade_date=trade_date, captured_at=observed_at
         ))
     return pd.concat(frames, ignore_index=True)
