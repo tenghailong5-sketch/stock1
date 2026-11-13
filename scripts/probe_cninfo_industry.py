@@ -13,7 +13,7 @@ import akshare as ak
 
 from src.providers.cninfo_industry import fetch_cninfo_current_industry_membership_snapshot
 
-SAMPLES = ["000001", "600519", "300750"]
+SAMPLES = ["000017", "002103", "300328", "920001"]
 
 
 def main() -> None:
