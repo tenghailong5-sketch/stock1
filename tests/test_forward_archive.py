@@ -47,6 +47,7 @@ class FakeArchiveAkshare:
         ])
 
     def stock_board_industry_cons_em(self, symbol):
+        assert symbol in {"BK0001", "BK0002"}
         return pd.DataFrame({"代码": ["000001", "600000", "000002"]})
 
 
