@@ -355,9 +355,9 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     historical_market_failures: list[str] = []
     if historical_market_fetcher is not None and expected_symbols:
         index_dates = sorted({
-            str(row.get("trade_date"))
+            pd.Timestamp(row.get("trade_date")).strftime("%Y-%m-%d")
             for row in index_records
-            if row.get("trade_date")
+            if row.get("trade_date") is not None
         })[-119:]
         current_day = captured.tz_convert("Asia/Shanghai").strftime("%Y-%m-%d")
         for history_day in index_dates:
