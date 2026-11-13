@@ -657,6 +657,22 @@ jobs:
                   f"for requested {target_sessions} sessions: {short_symbols}"
               )
           PY
+      - name: Enforce cross-source reconciliation evidence gate
+        if: always()
+        run: |
+          set -euo pipefail
+          STATUS_FILE="validation/cnequity-demo/corporate-action-reconciliation-status.txt"
+          AUDIT_FILE="validation/cnequity-demo/adj-factor-source-audit.log"
+          if [[ ! -s "$STATUS_FILE" || ! -s "$AUDIT_FILE" ]]; then
+            echo "Cross-source reconciliation evidence is missing; validation cannot pass."
+            exit 1
+          fi
+          if ! grep -qx "applied_or_checked_with_arbitration_evidence" "$STATUS_FILE"; then
+            echo "Cross-source arbitration did not run on any eligible symbols; keeping validation failed closed."
+            cat "$STATUS_FILE"
+            exit 1
+          fi
+          echo "Cross-source reconciliation reached the evidence-backed repair/audit path."
       - name: Upload validation evidence
         if: always()
         uses: actions/upload-artifact@v4
