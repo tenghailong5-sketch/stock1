@@ -295,41 +295,50 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     # considering a different taxonomy. Never combine Sina/申万 labels with
     # Eastmoney board labels into one artificial industry ranking.
     if expected_symbols and eastmoney_coverage < 1.0:
-        try:
-            board_members = (
-                set(eastmoney_industry["symbol"].astype(str).str.zfill(6))
-                if eastmoney_industry is not None and not eastmoney_industry.empty else set()
+        rate_limit_text = (
+            f"{type(eastmoney_error).__name__ if eastmoney_error else ''} "
+            f"{str(eastmoney_error) if eastmoney_error else ''}"
+        ).lower()
+        eastmoney_rate_limited = any(
+            marker in rate_limit_text
+            for marker in (
+                "ratelimit", "rate limit", "cooldown", "too many requests",
+                "请求过于频繁", "访问过于频繁", "40分钟", "40 minutes",
+                "5分钟", "5 minutes",
             )
-            missing_symbols = expected_symbols - board_members
-            industry_code_by_name = {}
-            if eastmoney_industry is not None and not eastmoney_industry.empty:
+        )
+        if eastmoney_rate_limited:
+            individual_error = RuntimeError("skipped_due_to_eastmoney_rate_limit")
+        elif eastmoney_industry is None or eastmoney_industry.empty:
+            individual_error = RuntimeError("skipped_due_to_missing_eastmoney_board_snapshot")
+        else:
+            try:
+                board_members = set(
+                    eastmoney_industry["symbol"].astype(str).str.zfill(6)
+                )
+                missing_symbols = expected_symbols - board_members
                 industry_code_by_name = (
                     eastmoney_industry.drop_duplicates("industry_name")
                     .set_index("industry_name")["industry_code"].astype(str).to_dict()
                 )
-            individual_industry = fetch_eastmoney_individual_industry_membership_snapshot(
-                ak_module, missing_symbols, clock=industry_clock,
-                pause_seconds=0.15, industry_code_by_name=industry_code_by_name,
-            )
-            individual_coverage = (
-                len(set(individual_industry["symbol"].astype(str)) & expected_symbols)
-                / len(expected_symbols)
-            ) if not individual_industry.empty else 0.0
-            individual_failures = len(individual_industry.attrs.get("failed_symbols", {}))
-            if not individual_industry.empty:
-                if eastmoney_industry is not None and not eastmoney_industry.empty:
-                    # One assembled daily Eastmoney snapshot ID, while retaining
-                    # each row's actual provider-response availability timestamp.
+                individual_industry = fetch_eastmoney_individual_industry_membership_snapshot(
+                    ak_module, missing_symbols, clock=industry_clock,
+                    pause_seconds=0.15, industry_code_by_name=industry_code_by_name,
+                )
+                individual_coverage = (
+                    len(set(individual_industry["symbol"].astype(str)) & expected_symbols)
+                    / len(expected_symbols)
+                ) if not individual_industry.empty else 0.0
+                individual_failures = len(individual_industry.attrs.get("failed_symbols", {}))
+                if not individual_industry.empty:
                     individual_industry["snapshot_id"] = eastmoney_industry["snapshot_id"].iloc[0]
                     industry = pd.concat([eastmoney_industry, individual_industry], ignore_index=True)
-                else:
-                    industry = individual_industry
-                industry_count = int(industry["industry_code"].nunique())
-                industry["expected_industry_count"] = industry_count
-                chosen_source = "eastmoney_board_plus_individual_info"
-                chosen_coverage = _coverage(industry)
-        except Exception as exc:
-            individual_error = exc
+                    industry_count = int(industry["industry_code"].nunique())
+                    industry["expected_industry_count"] = industry_count
+                    chosen_source = "eastmoney_board_plus_individual_info"
+                    chosen_coverage = _coverage(industry)
+            except Exception as exc:
+                individual_error = exc
 
     # Independent Sina taxonomy is considered only as a complete alternative,
     # not merged into Eastmoney's industry labels.
