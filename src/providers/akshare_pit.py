@@ -139,7 +139,7 @@ def fetch_current_industry_membership_snapshot(
     rows = []
     for industry in industries[["板块名称", "板块代码"]].drop_duplicates().itertuples(index=False):
         name, code = str(industry[0]), str(industry[1])
-        members = ak_module.stock_board_industry_cons_em(symbol=name)
+        members = ak_module.stock_board_industry_cons_em(symbol=code)
         # Capture availability immediately when the provider call returns; the
         # politeness delay must not shift the recorded observation timestamp.
         captured = _utc(now())
