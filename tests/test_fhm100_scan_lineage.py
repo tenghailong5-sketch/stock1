@@ -240,3 +240,29 @@ def test_forward_industry_audit_reports_full_universe_coverage_without_claiming_
     assert audit["historical_pit_eligible"] is False
     assert set(selected["symbol"]) == {"000001", "000002"}
 
+
+
+def test_partial_tencent_spot_snapshot_is_rejected_and_sina_fallback_is_used(monkeypatch):
+    class Push2RateLimitError(Exception):
+        pass
+
+    partial = pd.DataFrame([{
+        "code": f"sz{i:06d}", "name": f"普通股票{i}", "zxj": 10.0,
+        "zdf": 0.1, "volume": 1_000_000, "turnover": 1_000,
+    } for i in range(1, 1001)])
+    broad_sina = pd.DataFrame({
+        "代码": [f"{i:06d}" for i in range(1, 4501)],
+        "名称": [f"普通股票{i}" for i in range(1, 4501)],
+        "最新价": [10.0] * 4500,
+        "成交额": [100_000_000] * 4500,
+        "涨跌幅": [0.1] * 4500,
+    })
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_em",
+                        lambda: (_ for _ in ()).throw(Push2RateLimitError("cooldown")))
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot_tx", lambda: partial.copy())
+    monkeypatch.setattr(fhm100.ak, "stock_zh_a_spot", lambda: broad_sina.copy())
+
+    result = fhm100.universe()
+
+    assert len(result) == 4500
+    assert result["code"].is_unique
