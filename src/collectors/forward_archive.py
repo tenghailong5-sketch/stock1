@@ -23,6 +23,7 @@ from src.providers.akshare_limit_pools import fetch_limit_pool_snapshots
 from src.providers.akshare_pit import (
     fetch_current_industry_membership_snapshot,
     fetch_sina_current_industry_membership_snapshot,
+    fetch_eastmoney_individual_industry_membership_snapshot,
     normalize_index_history_snapshot,
     normalize_market_breadth_snapshot,
 )
@@ -282,27 +283,67 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     chosen_source = "akshare.stock_board_industry_cons_em"
     chosen_coverage = eastmoney_coverage
     sina_coverage = None
+    individual_coverage = None
+    individual_failures = 0
     baostock_coverage = None
     sina_error = None
+    individual_error = None
     baostock_error = None
 
-    # Keep the best single taxonomy; never merge incompatible classification systems.
-    if eastmoney_industry is None or eastmoney_coverage < 0.95:
+    # Fill missing symbols through the same Eastmoney provider family before
+    # considering a different taxonomy. Never combine Sina/申万 labels with
+    # Eastmoney board labels into one artificial industry ranking.
+    if expected_symbols and eastmoney_coverage < 0.999:
+        try:
+            board_members = (
+                set(eastmoney_industry["symbol"].astype(str).str.zfill(6))
+                if eastmoney_industry is not None and not eastmoney_industry.empty else set()
+            )
+            missing_symbols = expected_symbols - board_members
+            industry_code_by_name = {}
+            if eastmoney_industry is not None and not eastmoney_industry.empty:
+                industry_code_by_name = (
+                    eastmoney_industry.drop_duplicates("industry_name")
+                    .set_index("industry_name")["industry_code"].astype(str).to_dict()
+                )
+            individual_industry = fetch_eastmoney_individual_industry_membership_snapshot(
+                ak_module, missing_symbols, clock=industry_clock,
+                pause_seconds=0.15, industry_code_by_name=industry_code_by_name,
+            )
+            individual_coverage = (
+                len(set(individual_industry["symbol"].astype(str)) & expected_symbols)
+                / len(expected_symbols)
+            ) if not individual_industry.empty else 0.0
+            individual_failures = len(individual_industry.attrs.get("failed_symbols", {}))
+            if not individual_industry.empty:
+                industry = (
+                    pd.concat([eastmoney_industry, individual_industry], ignore_index=True)
+                    if eastmoney_industry is not None and not eastmoney_industry.empty
+                    else individual_industry
+                )
+                chosen_source = "eastmoney_board_plus_individual_info"
+                chosen_coverage = _coverage(industry)
+        except Exception as exc:
+            individual_error = exc
+
+    # Independent Sina taxonomy is considered only as a complete alternative,
+    # not merged into Eastmoney's industry labels.
+    if chosen_coverage < 0.95:
         try:
             sina_industry = fetch_sina_current_industry_membership_snapshot(
                 ak_module, clock=industry_clock
             )
             sina_coverage = _coverage(sina_industry)
-            if industry is None or sina_coverage > chosen_coverage:
+            if sina_coverage > chosen_coverage:
                 industry = sina_industry
                 chosen_source = "akshare.stock_sector_detail_sina"
                 chosen_coverage = sina_coverage
         except Exception as exc:
             sina_error = exc
 
-    # Baostock is an independent free provider. Its updateDate is preserved,
-    # but retrieval time remains the only asserted availability timestamp.
-    if industry is None or chosen_coverage < 0.95:
+    # Baostock is an independent free source; use it only when it improves
+    # coverage. Its updateDate is metadata, not a historical publication time.
+    if chosen_coverage < 0.95:
         try:
             provider = baostock_module
             if provider is None:
@@ -311,28 +352,36 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 provider, clock=industry_clock
             )
             baostock_coverage = _coverage(baostock_industry)
-            if industry is None or baostock_coverage > chosen_coverage:
+            if baostock_coverage > chosen_coverage:
                 industry = baostock_industry
                 chosen_source = "baostock.query_stock_industry"
                 chosen_coverage = baostock_coverage
         except Exception as exc:
             baostock_error = exc
 
-    if industry is None:
+    if industry is None or industry.empty:
         source_status["industry_membership"] = (
             "unavailable: "
-            f"Eastmoney={type(eastmoney_error).__name__ if eastmoney_error else 'no_snapshot'}:"
-            f"{str(eastmoney_error)[:140] if eastmoney_error else 'no data'}; "
-            f"Sina={type(sina_error).__name__ if sina_error else 'not_attempted'}:"
-            f"{str(sina_error)[:120] if sina_error else 'no data'}; "
-            f"Baostock={type(baostock_error).__name__ if baostock_error else 'not_attempted'}:"
-            f"{str(baostock_error)[:120] if baostock_error else 'no data'}"
+            f"Eastmoney={type(eastmoney_error).__name__ if eastmoney_error else 'no_snapshot'}: "
+            f"{str(eastmoney_error)[:120] if eastmoney_error else 'no data'}; "
+            f"individual={type(individual_error).__name__ if individual_error else 'not_available'}: "
+            f"{str(individual_error)[:120] if individual_error else 'no data'}; "
+            f"Sina={type(sina_error).__name__ if sina_error else 'not_attempted'}: "
+            f"{str(sina_error)[:100] if sina_error else 'no data'}; "
+            f"Baostock={type(baostock_error).__name__ if baostock_error else 'not_attempted'}: "
+            f"{str(baostock_error)[:100] if baostock_error else 'no data'}"
+        )
+    elif chosen_coverage >= 0.95 and chosen_source == "akshare.stock_sector_detail_sina":
+        source_status["industry_membership"] = (
+            f"ok: {chosen_source}; symbol_coverage={chosen_coverage:.1%}"
         )
     else:
         prefix = "ok" if chosen_coverage >= 0.95 else "partial"
         source_status["industry_membership"] = (
             f"{prefix}: {chosen_source}; symbol_coverage={chosen_coverage:.1%}; "
-            f"Eastmoney={eastmoney_coverage:.1%}; "
+            f"Eastmoney_board={eastmoney_coverage:.1%}; "
+            f"Eastmoney_individual={f'{individual_coverage:.1%}' if individual_coverage is not None else 'not_available'}; "
+            f"individual_failures={individual_failures}; "
             f"Sina={f'{sina_coverage:.1%}' if sina_coverage is not None else 'not_available'}; "
             f"Baostock={f'{baostock_coverage:.1%}' if baostock_coverage is not None else 'not_available'}"
         )
