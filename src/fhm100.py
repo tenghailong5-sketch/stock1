@@ -671,7 +671,8 @@ def main():
         status = "PushPlus推送失败：" + str(exc)[:300]
         push_error = exc
     (OUT/"run_status.json").write_text(json.dumps({"time":now.isoformat(),"universe":len(u),
-      "history_scan_universe":len(history_universe),"history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
+      "history_scan_universe":len(history_universe),"history_pool_audit":history_pool_audit,
+      "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
       "formal_status":formal_status,"formal_blockers":formal_blockers},ensure_ascii=False,indent=2),encoding="utf-8")
     print(report); print(status)
     if push_error is not None:
