@@ -44,7 +44,7 @@ def main() -> None:
         all_report["returned_rows"] = int(len(all_frame)) if all_frame is not None else 0
         if all_frame is not None and not all_frame.empty and "证券代码" in all_frame.columns:
             all_report["returned_symbols"] = sorted(
-                all_frame["证券代码"].astype(str).str.extract(r"(\\d{6})", expand=False).dropna().unique().tolist()
+                all_frame["证券代码"].astype(str).str.extract(r"(\d{6})", expand=False).dropna().unique().tolist()
             )
     except Exception as exc:
         all_report["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
