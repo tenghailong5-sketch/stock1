@@ -401,7 +401,8 @@ jobs:
           end = date.fromisoformat(os.environ.get("ACTION_END") or os.environ["BAR_END"])
           config = load_config(os.environ["CNE_CONFIG"])
           independent, failed = fetch_corporate_actions_baostock(
-              symbols, start, end, config=config
+              symbols, start, end, config=config,
+              run_id=os.environ["GITHUB_RUN_ID"],
           )
           tdx = load("corporate_actions", symbols=symbols, start=start.isoformat(), end=end.isoformat())
           keys = ["symbol", "ex_date", "action_type"]
