@@ -451,7 +451,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                     else:
                         individual_coverage = eastmoney_coverage
                 else:
-                    individual_coverage = eastmoney_coverage
+                    individual_coverage = None
             except Exception as exc:
                 individual_error = exc
 
