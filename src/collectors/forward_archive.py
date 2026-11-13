@@ -410,9 +410,18 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     # Baidu Gushitong provides an independent per-security industry lookup.
     # Query the full verified universe in bounded batches; preserve Baidu's own
     # taxonomy and select it only when its measured symbol coverage is better.
-    if expected_symbols and baidu_industry_fetcher is not None:
+    baidu_requested_symbols = sorted(
+        expected_symbols - (
+            set().union(*[
+                set(frame["symbol"].astype(str).str.zfill(6))
+                for frame in industry_source_snapshots
+                if frame is not None and not frame.empty
+            ]) if industry_source_snapshots else set()
+        )
+    )
+    if baidu_requested_symbols and baidu_industry_fetcher is not None:
         try:
-            baidu_industry = baidu_industry_fetcher(sorted(expected_symbols))
+            baidu_industry = baidu_industry_fetcher(baidu_requested_symbols)
             baidu_coverage = _coverage(baidu_industry)
             if baidu_industry is not None and not baidu_industry.empty:
                 industry_source_snapshots.append(baidu_industry.copy())
@@ -422,7 +431,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 chosen_coverage = baidu_coverage
         except Exception as exc:
             baidu_error = exc
-    elif expected_symbols:
+    elif baidu_requested_symbols:
         baidu_error = RuntimeError("Baidu provider was not injected into this collector run")
 
     source_coverage = {
@@ -677,10 +686,11 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 "multi_source_coverage": multi_source_coverage,
                 "uncovered_symbols": uncovered_symbols,
                 "source_record_count": len(industry_source_records),
-                "source_taxonomy_count": len({
+                "source_industry_code_pair_count": len({
                     (str(row.get("source_id")), str(row.get("industry_code")))
                     for row in industry_source_records
                 }),
+                "baidu_requested_symbol_count": len(baidu_requested_symbols),
                 "selected_source": chosen_source,
             },
             "rows_appended": counts,
