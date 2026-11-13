@@ -489,8 +489,7 @@ jobs:
               raise RuntimeError("Delisted strict hfq adjusted close contains missing/non-finite values")
           PY
       - name: Report delisted survivorship coverage (non-gating audit)
-        if: ${{ inputs.include_delisted_history == true }}
-        if: success()
+        if: ${{ inputs.include_delisted_history == true && success() }}
         run: |
           set +e
           python cnequity-source/scripts/delisted_ops.py --config "$DELISTED_CONFIG" coverage --start 2016-01-01 --end "$BAR_END" --universe all_a_sh_sz > validation/cnequity-demo/delisted-coverage-report.json 2> validation/cnequity-demo/delisted-coverage-report.stderr
