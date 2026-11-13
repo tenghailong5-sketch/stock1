@@ -517,8 +517,14 @@ def audit_forward_industry_membership(archive_root, expected_symbols, *, decisio
             "membership_coverage": 0.0,
             "historical_pit_eligible": False,
         }
+    supported_sources = {
+        "akshare.stock_sector_detail_sina",
+        "akshare.stock_board_industry_cons_em",
+        "akshare.stock_individual_info_em",
+        "baostock.query_stock_industry",
+    }
     membership = membership.loc[
-        membership["source_id"].astype(str).eq("akshare.stock_sector_detail_sina")
+        membership["source_id"].astype(str).isin(supported_sources)
     ].copy()
     if membership.empty:
         return pd.DataFrame(), {
