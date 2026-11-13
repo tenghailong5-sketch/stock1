@@ -819,7 +819,9 @@ jobs:
           }
           if any(discrepancies.values()):
               raise SystemExit(f"Unresolved independent-source event discrepancies: {discrepancies}")
-          print("TDX and EastMoney agree on every comparable event; Baostock has no unmatched or conflicting returned events.")
+          if int(report.get("tdx_eastmoney_matched_event_keys", 0)) != int(report.get("tdx_rows_comparable", -1)):
+              raise SystemExit("EastMoney did not independently verify every TDX event key")
+          print("TDX and EastMoney agree on every comparable event; Baostock returned events have no unmatched or conflicting records.")
           print("Baostock omissions are separately disclosed; event completeness and historical point-in-time eligibility remain uncertified.")
           PY
           echo "Factor arbitration and independent corporate-action source audit completed; completeness remains uncertified."
