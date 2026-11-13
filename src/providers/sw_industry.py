@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+import ssl
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from io import BytesIO
@@ -24,7 +26,43 @@ BASE_URL = "https://www.swsresearch.com/swindex/pdf/SwClass2021"
 STOCK_URL = f"{BASE_URL}/StockClassifyUse_stock.xls"
 CODE_URL = f"{BASE_URL}/SwClassCode_2021.xls"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; FHM100/1.0)"}
-SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+INTERMEDIATE_URL = (
+    "https://cacerts.digicert.com/"
+    "DigiCertBasicOVG2TLSCNRSA4096SHA2562022CA1.crt"
+)
+INTERMEDIATE_SHA1 = "60707270F2100EE2B771FEC9EFFAD8C9BFFE3358"
+
+
+def _trusted_intermediate_bundle(*, timeout: int = 15) -> str:
+    """Append the pinned SW-host intermediate CA to certifi's normal trust roots."""
+    response = requests.get(INTERMEDIATE_URL, timeout=timeout)
+    response.raise_for_status()
+    payload = response.content
+    if payload.startswith(b"-----BEGIN CERTIFICATE-----"):
+        pem = payload
+        der = ssl.PEM_cert_to_DER_cert(payload.decode("ascii"))
+    else:
+        der = payload
+        pem = ssl.DER_cert_to_PEM_cert(payload).encode("ascii")
+    fingerprint = hashlib.sha1(der).hexdigest().upper()
+    if fingerprint != INTERMEDIATE_SHA1:
+        raise RuntimeError(
+            "DigiCert intermediate certificate fingerprint mismatch: " + fingerprint
+        )
+    base_bundle = requests.certs.where()
+    with open(base_bundle, "rb") as handle:
+        base_pem = handle.read()
+    handle = tempfile.NamedTemporaryFile(
+        prefix="fhm-sw-xls-ca-", suffix=".pem", delete=False
+    )
+    try:
+        handle.write(base_pem)
+        handle.write(b"\\n")
+        handle.write(pem)
+        handle.flush()
+        return handle.name
+    finally:
+        handle.close()
 
 
 def _download_xls(client, url: str, timeout: int) -> bytes:
@@ -36,10 +74,11 @@ def _download_xls(client, url: str, timeout: int) -> bytes:
     try:
         response = client.get(url, headers=HEADERS, timeout=timeout)
     except requests.exceptions.SSLError:
-        if not os.path.isfile(SYSTEM_CA_BUNDLE):
-            raise
+        # The official SW host currently omits its intermediate CA in the
+        # default chain. Reuse a pinned DigiCert intermediate; never disable TLS.
+        bundle = _trusted_intermediate_bundle(timeout=min(timeout, 15))
         response = client.get(
-            url, headers=HEADERS, timeout=timeout, verify=SYSTEM_CA_BUNDLE
+            url, headers=HEADERS, timeout=timeout, verify=bundle
         )
     response.raise_for_status()
     content = response.content
