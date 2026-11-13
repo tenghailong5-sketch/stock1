@@ -56,13 +56,18 @@ def test_tencent_probe_selects_fixed_exchange_proportional_100_symbol_sample():
 
 
 def test_corporate_action_audit_accepts_empty_schema_and_marks_non_pit():
+    calls = []
     fake = SimpleNamespace(
-        stock_dividend_cninfo=lambda symbol: pd.DataFrame(columns=[
-            "实施方案公告日期", "送股比例", "转增比例", "派息比例", "除权日"
-        ]),
-        stock_allotment_cninfo=lambda symbol, start_date, end_date: pd.DataFrame(columns=[
-            "公告日期", "配股比例", "除权日"
-        ]),
+        stock_dividend_cninfo=lambda symbol: (
+            calls.append(("dividend", symbol)) or pd.DataFrame(columns=[
+                "实施方案公告日期", "送股比例", "转增比例", "派息比例", "除权日"
+            ])
+        ),
+        stock_allotment_cninfo=lambda symbol, start_date, end_date: (
+            calls.append(("allotment", symbol)) or pd.DataFrame(columns=[
+                "公告日期", "配股比例", "除权日"
+            ])
+        ),
     )
 
     statuses, frames = fetch_corporate_action_audit(fake, "sh600519", sleep_fn=lambda _: None)
@@ -71,3 +76,4 @@ def test_corporate_action_audit_accepts_empty_schema_and_marks_non_pit():
     assert [item["row_count"] for item in statuses] == [0, 0]
     assert all(item["historical_pit_eligible"] is False for item in statuses)
     assert frames == []
+    assert calls == [("dividend", "600519"), ("allotment", "600519")]
