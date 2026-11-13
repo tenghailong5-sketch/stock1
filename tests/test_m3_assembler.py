@@ -102,3 +102,59 @@ def test_m3_assembler_requires_119_aligned_days_for_60_scored_observations(tmp_p
     assert result["status"] == "INSUFFICIENT_DATA"
     assert result["reason"] == "fewer_than_119_complete_consecutive_sessions"
     assert result["required_sessions"] == 119
+
+
+def test_m3_prefers_retrieved_historical_aggregate_and_checks_availability(tmp_path):
+    dates = make_archive(tmp_path)
+    day = dates[-5].strftime("%Y-%m-%d")
+    breadth_path = tmp_path / "market_breadth" / f"{day}.jsonl"
+    existing = [json.loads(line) for line in breadth_path.read_text(encoding="utf-8").splitlines()]
+    existing[0]["breadth_coverage"] = 0.2
+    write_jsonl(breadth_path, existing + [{
+        "trade_date": day,
+        "snapshot_time": f"{day}T07:40:00Z",
+        "available_time": "2026-11-01T08:00:00Z",
+        "breadth": 0.65,
+        "breadth_coverage": 0.99,
+        "total_amount": 1_000_000_000_000,
+        "total_amount_status": "complete_provider_market_aggregate",
+        "source_id": "kaipanhong.market_emotion_kph",
+        "historical_pit_eligible": False,
+    }])
+    sentiment_path = tmp_path / "market_sentiment" / f"{day}.jsonl"
+    existing_sentiment = [
+        json.loads(line)
+        for line in sentiment_path.read_text(encoding="utf-8").splitlines()
+    ]
+    write_jsonl(sentiment_path, existing_sentiment + [{
+        "trade_date": day,
+        "capture_time": f"{day}T07:40:00Z",
+        "available_time": "2026-11-01T08:00:00Z",
+        "limit_up_count": 30,
+        "limit_down_count": 5,
+        "source_id": "kaipanhong.market_emotion_kph",
+        "historical_pit_eligible": False,
+    }])
+
+    # A future retrieval is not visible at this decision cutoff.
+    future_day = dates[-4].strftime("%Y-%m-%d")
+    future_path = tmp_path / "market_breadth" / f"{future_day}.jsonl"
+    future_rows = [json.loads(line) for line in future_path.read_text(encoding="utf-8").splitlines()]
+    future_rows.append({
+        "trade_date": future_day,
+        "snapshot_time": f"{future_day}T07:40:00Z",
+        "available_time": "2026-11-02T08:00:00Z",
+        "breadth": 0.65,
+        "breadth_coverage": 0.99,
+        "total_amount": 1_000_000_000_000,
+        "total_amount_status": "complete_provider_market_aggregate",
+        "source_id": "kaipanhong.market_emotion_kph",
+        "historical_pit_eligible": False,
+    })
+    write_jsonl(future_path, future_rows)
+
+    result = assemble_m3_history(
+        tmp_path, index_symbol="000001", decision_time="2026-11-01T12:00:00Z"
+    )
+    assert result["status"] == "READY"
+    assert result["historical_backtest_eligible"] is False
