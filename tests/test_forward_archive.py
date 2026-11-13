@@ -919,5 +919,5 @@ def test_cninfo_adapter_keeps_latest_csrc_classification_and_audits_failures():
     assert result["symbol"].tolist() == ["000001"]
     assert result.iloc[0]["industry_code"] == "C39"
     assert result.iloc[0]["source_id"] == "cninfo.p_stock2110.csrc"
-    assert result.iloc[0]["historical_pit_eligible"] is False
+    assert bool(result.iloc[0]["historical_pit_eligible"]) is False
     assert result.attrs["failed_symbols"] == {"000002": "empty_response"}
