@@ -21,7 +21,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: fhm100-daily
+  group: fhm100-forward-archive
   cancel-in-progress: false
 
 jobs:
