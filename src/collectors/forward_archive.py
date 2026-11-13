@@ -546,12 +546,42 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             ("trade_date", "source_id", "source_revision"),
         )
     if allow_partial:
+        def _error_detail(error):
+            if error is None:
+                return None
+            return f"{type(error).__name__}: {str(error)[:500]}"
+
+        eastmoney_symbols = (
+            set(eastmoney_industry["symbol"].astype(str).str.zfill(6))
+            if eastmoney_industry is not None and not eastmoney_industry.empty else set()
+        )
+        selected_symbols = (
+            set(industry["symbol"].astype(str).str.zfill(6))
+            if industry is not None and not industry.empty else set()
+        )
         report = {
             "captured_at": captured.isoformat(),
             "source_status": source_status,
+            "industry_audit": {
+                "quote_universe_symbol_count": len(expected_symbols),
+                "selected_snapshot_symbol_count": len(selected_symbols),
+                "selected_snapshot_covered_symbol_count": len(selected_symbols & expected_symbols),
+                "selected_snapshot_coverage": chosen_coverage,
+                "eastmoney_board_symbol_count": len(eastmoney_symbols),
+                "eastmoney_board_coverage": eastmoney_coverage,
+                "eastmoney_board_error": _error_detail(eastmoney_error),
+                "eastmoney_individual_coverage": individual_coverage,
+                "eastmoney_individual_error": _error_detail(individual_error),
+                "eastmoney_individual_failed_symbol_count": individual_failures,
+                "sina_coverage": sina_coverage,
+                "sina_error": _error_detail(sina_error),
+                "baostock_coverage": baostock_coverage,
+                "baostock_error": _error_detail(baostock_error),
+                "selected_source": chosen_source,
+            },
             "rows_appended": counts,
             "partial": any(not status.startswith("ok") for status in source_status.values()),
-            "note": "Unavailable sources are explicitly recorded; missing data is not imputed.",
+            "note": "Coverage denominator is the distinct symbol count from this run's captured quote universe. Provider failures include exception details; missing data is not imputed.",
         }
         report_path = archive_root / "collection_report" / f"{day}.json"
         report_path.parent.mkdir(parents=True, exist_ok=True)
