@@ -456,7 +456,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             ]) if industry_source_snapshots else set()
             cninfo_missing = sorted(expected_symbols - covered_so_far)
             cninfo_industry = cninfo_industry_fetcher(
-                ak_module, cninfo_missing, clock=industry_clock
+                ak_module, cninfo_missing, clock=industry_clock,
+                pause_seconds=0.5,
             )
             cninfo_coverage = _coverage(cninfo_industry)
             cninfo_failed_symbols = len(getattr(cninfo_industry, "attrs", {}).get("failed_symbols", {}))
