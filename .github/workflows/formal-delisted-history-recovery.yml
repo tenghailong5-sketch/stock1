@@ -12,13 +12,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  ignore-non-dispatch-events:
-    if: github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Explain manual-only recovery workflow
-        run: echo "Formal delisted-history recovery is manual-only; no recovery work is run for this event."
-
   recover:
     if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
