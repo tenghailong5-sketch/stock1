@@ -6,6 +6,7 @@ point-in-time availability for previously published market data.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import tempfile
@@ -124,6 +125,78 @@ def append_jsonl_atomic(path: Path, records: list[dict], key_fields: tuple[str, 
             pass
         raise
     return len(additions)
+
+
+
+def _load_manual_industry_evidence(
+    path: Path, expected_symbols: set[str], *, captured_at
+) -> pd.DataFrame:
+    """Load source-linked, current-only manual observations into the audit union.
+
+    This loader never creates selected-taxonomy model rows or historical PIT data.
+    Only reconciled Sina/10jqka F10 records with a real HTTPS source URL qualify.
+    """
+    columns = [
+        "symbol", "industry_code", "industry_name", "snapshot_id",
+        "expected_industry_count", "observed_at", "available_time",
+        "availability_basis", "historical_pit_eligible", "source_id",
+        "snapshot_scope", "source_revision", "classification_system",
+        "source_url", "evidence_status",
+    ]
+    if not path.exists():
+        return pd.DataFrame(columns=columns)
+    captured = pd.Timestamp(captured_at)
+    if captured.tzinfo is None:
+        raise ValueError("manual evidence capture time must be timezone-aware")
+    captured = captured.tz_convert("UTC")
+    rows = []
+    allowed_hosts = {"money.finance.sina.com.cn", "basic.10jqka.com.cn"}
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid manual industry evidence at line {line_number}") from exc
+        if item.get("record_status") != "source_url_reconciled_current_observation_candidate":
+            continue
+        symbol = str(item.get("symbol", "")).zfill(6)
+        source_url = str(item.get("source_url", "")).strip()
+        source_id = str(item.get("source_id", "")).strip()
+        taxonomy = str(item.get("classification_system", "")).strip()
+        industry_name = str(item.get("industry_name", "")).strip()
+        if symbol not in expected_symbols:
+            continue
+        if not (source_url.startswith("https://") and any(
+            source_url.startswith("https://" + host + "/") for host in allowed_hosts
+        )):
+            continue
+        if source_id not in {"sina.finance_f10_sw", "10jqka.f10_sw"}:
+            continue
+        if not taxonomy.startswith("申万行业"):
+            continue
+        if not industry_name:
+            continue
+        revision_payload = "|".join((symbol, industry_name, taxonomy, source_url))
+        revision = hashlib.sha256(revision_payload.encode("utf-8")).hexdigest()
+        rows.append({
+            "symbol": symbol,
+            "industry_code": industry_name,
+            "industry_name": industry_name,
+            "snapshot_id": f"manual-web-{captured.strftime('%Y%m%dT%H%M%S')}",
+            "expected_industry_count": 0,
+            "observed_at": captured,
+            "available_time": captured,
+            "availability_basis": "retrieval_time_only",
+            "historical_pit_eligible": False,
+            "source_id": source_id,
+            "snapshot_scope": "current_membership_observation_only",
+            "source_revision": revision,
+            "classification_system": taxonomy,
+            "source_url": source_url,
+            "evidence_status": "source_url_reconciled_current_observation",
+        })
+    return pd.DataFrame(rows, columns=columns)
 
 
 def _records(frame: pd.DataFrame) -> list[dict]:
@@ -507,6 +580,24 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             baidu_error = exc
     elif baidu_requested_symbols:
         baidu_error = RuntimeError("quarantined: Baidu PAE getrelatedblock disabled pending live endpoint validation")
+
+    # Reconciled manual F10 evidence fills individual current-observation gaps.
+    # It is archived only in the multi-source audit layer, never in the selected
+    # single-taxonomy snapshot consumed by the model.
+    manual_evidence_path = (
+        archive_root / "industry_manual_verified"
+        / f"{captured.tz_convert('Asia/Shanghai').strftime('%Y-%m-%d')}.jsonl"
+    )
+    manual_evidence = _load_manual_industry_evidence(
+        manual_evidence_path, expected_symbols, captured_at=observed_now()
+    )
+    if not manual_evidence.empty:
+        industry_source_snapshots.append(manual_evidence)
+        source_status["manual_industry_evidence"] = (
+            f"ok: source_url_reconciled={len(manual_evidence)}; current-only; PIT-ineligible"
+        )
+    else:
+        source_status["manual_industry_evidence"] = "ok: no eligible source-linked manual evidence"
 
     source_coverage = {
         "eastmoney_board": eastmoney_coverage,
