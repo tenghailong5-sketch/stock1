@@ -148,10 +148,7 @@ def universe():
     return d.sort_values(["amount","code"],ascending=[False,True]).drop_duplicates("code").reset_index(drop=True)
 
 
-def select_history_universe(snapshot, *, max_symbols=600):
-    """Select a bounded, liquidity-ranked deep-history pool from the full spot universe."""
-    if max_symbols < 1:
-        raise ValueError("max_symbols must be positive")
+def _validated_spot_frame(snapshot):
     required = {"code", "name", "price", "amount", "pct_chg"}
     missing = required - set(snapshot.columns)
     if missing:
@@ -160,11 +157,52 @@ def select_history_universe(snapshot, *, max_symbols=600):
     frame["code"] = frame["code"].astype(str).str.strip().str[-6:].str.zfill(6)
     for column in ("price", "amount", "pct_chg"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    frame = frame[
+    return frame[
         frame["code"].str.fullmatch(r"\d{6}", na=False)
         & (frame["price"] > 0) & (frame["amount"] > 0)
     ].drop_duplicates("code")
+
+
+def select_history_universe(snapshot, *, max_symbols=600):
+    """Select the bounded, liquidity-ranked primary deep-history pool."""
+    if max_symbols < 1:
+        raise ValueError("max_symbols must be positive")
+    frame = _validated_spot_frame(snapshot)
     return frame.sort_values(["amount", "code"], ascending=[False, True]).head(max_symbols).reset_index(drop=True)
+
+
+def select_history_universe_with_supplement(
+    snapshot, *, max_symbols=600, max_supplement_symbols=200,
+    min_candidate_amount=MIN_AMOUNT,
+):
+    """Add a capped quote-prefilter pool beyond the primary liquidity-ranked history pool.
+
+    Supplement eligibility is only a retrieval prefilter (turnover >= threshold
+    and positive daily change); it is not an FHM pass or a buy signal.
+    """
+    if max_supplement_symbols < 0:
+        raise ValueError("max_supplement_symbols cannot be negative")
+    frame = _validated_spot_frame(snapshot)
+    primary = select_history_universe(frame, max_symbols=max_symbols)
+    primary_codes = set(primary["code"])
+    eligible = frame[
+        (~frame["code"].isin(primary_codes))
+        & (frame["amount"] >= min_candidate_amount)
+        & (frame["pct_chg"] > 0)
+    ].sort_values(["amount", "code"], ascending=[False, True])
+    supplement = eligible.head(max_supplement_symbols).copy()
+    combined = pd.concat([primary, supplement], ignore_index=True)
+    audit = {
+        "primary_history_symbols": int(len(primary)),
+        "supplement_rule": f"daily_amount>={int(min_candidate_amount)} and pct_chg>0",
+        "supplement_eligible_symbols": int(len(eligible)),
+        "supplement_selected_symbols": int(len(supplement)),
+        "supplement_deferred_symbols": int(max(0, len(eligible) - len(supplement))),
+        "supplement_limit": int(max_supplement_symbols),
+        "history_scan_symbols": int(len(combined)),
+        "supplement_is_formal_candidate": False,
+    }
+    return combined, audit
 
 
 # [live-scan] Verify Tencent universe fallback with live market data
@@ -494,18 +532,23 @@ def summarize_m5_blockers(frame):
 def main():
     try:
         # Fetch and retain the complete live A-share quote universe. Only the
-        # deeper per-symbol history requests are bounded to the most liquid 600.
+        # deeper per-symbol history requests use a 600-symbol liquidity pool plus a bounded quote prefilter.
         u=universe()
         OUT.mkdir(exist_ok=True)
         u.to_csv(OUT/"market_snapshot.csv", index=False, encoding="utf-8-sig")
-        history_universe=select_history_universe(u, max_symbols=600)
+        history_universe, history_pool_audit = select_history_universe_with_supplement(
+            u, max_symbols=600, max_supplement_symbols=200,
+        )
+        (OUT/"history_pool_audit.json").write_text(
+            json.dumps(history_pool_audit, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         w,e=scan(history_universe)
         # [live-scan] verify all-failed history reporting and archive persistence
         w=ensure_watchlist_schema(w)
         if not w.empty:
             w, observation_audit = rank_price_observations(
                 w, expected_universe_size=len(history_universe),
-                scope_id="top_600_liquidity_history_pool"
+                scope_id="top_600_plus_quote_prefilter_supplement"
             )
         else:
             observation_audit = pd.DataFrame()
@@ -513,6 +556,17 @@ def main():
         # Provider outages/rate limits must produce an auditable report, not a false clean scan.
         u=pd.DataFrame()
         history_universe=pd.DataFrame()
+        history_pool_audit = {
+            "status": "UNAVAILABLE",
+            "reason": str(exc)[:300],
+            "primary_history_symbols": 0,
+            "supplement_selected_symbols": 0,
+            "supplement_deferred_symbols": 0,
+            "history_scan_symbols": 0,
+        }
+        (OUT/"history_pool_audit.json").write_text(
+            json.dumps(history_pool_audit, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         w,e=empty_scan_result(exc)
         observation_audit = pd.DataFrame()
     # Freeze one decision cutoff only after all live stock-history requests finish.
@@ -571,6 +625,7 @@ def main():
         "blockers": formal_blockers,
         "live_universe_count": int(len(u)),
         "history_scan_universe_count": int(len(history_universe)),
+        "history_pool_audit": history_pool_audit,
         "valid_history_count": int(len(w)),
         "m3_status": str(m3.get("status")),
         "m5_is_diagnostic_only": True,
@@ -582,7 +637,8 @@ def main():
     c=w[w["技术观察通过"]&w["流动性观察通过"]]
     lines=["# FHM-100 自动研究扫描报告",f"- 运行时间：{now.isoformat()}",
       f"- 全市场实时行情快照：{len(u)}只（含沪深北及科创板；见market_snapshot.csv）",
-      f"- 深度历史扫描池：{len(history_universe)}只（按当日成交额排序，最多600只）",
+      f"- 深度历史扫描池：{len(history_universe)}只（主池{history_pool_audit.get('primary_history_symbols', 0)}只 + 行情预筛补充{history_pool_audit.get('supplement_selected_symbols', 0)}只；补充池上限200只）",
+      f"- 补充池预筛规则：当日成交额≥1亿元且涨幅为正；符合预筛但本次未补取历史：{history_pool_audit.get('supplement_deferred_symbols', 0)}只；预筛不等于模型通过",
       f"- 历史数据成功：{len(w)}",f"- 数据异常：{len(e)}",
       f"- 行情采集状态：{'正常' if len(u) else '失败/不可用；本次不产生候选'}",
       f"- 基础技术观察名单：{len(c)}",
@@ -615,7 +671,8 @@ def main():
         status = "PushPlus推送失败：" + str(exc)[:300]
         push_error = exc
     (OUT/"run_status.json").write_text(json.dumps({"time":now.isoformat(),"universe":len(u),
-      "history_scan_universe":len(history_universe),"history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
+      "history_scan_universe":len(history_universe),"history_pool_audit":history_pool_audit,
+      "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
       "formal_status":formal_status,"formal_blockers":formal_blockers},ensure_ascii=False,indent=2),encoding="utf-8")
     print(report); print(status)
     if push_error is not None:
