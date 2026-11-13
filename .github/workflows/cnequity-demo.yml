@@ -7,7 +7,6 @@ on:
     # data-provider quota. Run it only when ingestion/normalization contracts,
     # their tests, dependencies, or this workflow change—not for docs-only PRs.
     paths:
-      - ".github/workflows/cnequity-demo.yml"
       - "src/providers/cnequity.py"
       - "src/model/data_layer.py"
       - "tests/test_cnequity*.py"
@@ -132,11 +131,29 @@ jobs:
           ACTION_END="$(TZ=Asia/Shanghai date -d 'yesterday' +%F)"
           export ACTION_END
           cne backfill corporate_actions --start 2023-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-main-plan.log
-          cne backfill corporate_actions --start 2023-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/corporate-actions-main-backfill.log
+          main_attempt=0
+          until cne backfill corporate_actions --start 2023-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" 2>&1 | tee -a validation/cnequity-demo/corporate-actions-main-backfill.log; do
+            main_attempt=$((main_attempt + 1))
+            if (( main_attempt >= 3 )); then
+              echo "Main corporate-action backfill failed after 3 attempts; refusing to continue with incomplete data."
+              exit 1
+            fi
+            echo "Main corporate-action backfill failed; retrying resumable missing chunks (attempt $((main_attempt + 1))/3)."
+            sleep $((main_attempt * 10))
+          done
           # The delisted-history lake is also bootstrapped with a one-session
           # demo sample; keep its action ledger aligned with those sample bars.
           cne backfill corporate_actions --start 1990-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-delisted-sample-plan.log
-          cne backfill corporate_actions --start 1990-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/corporate-actions-delisted-sample-backfill.log
+          delisted_attempt=0
+          until cne backfill corporate_actions --start 1990-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$DELISTED_CONFIG" 2>&1 | tee -a validation/cnequity-demo/corporate-actions-delisted-sample-backfill.log; do
+            delisted_attempt=$((delisted_attempt + 1))
+            if (( delisted_attempt >= 3 )); then
+              echo "Delisted sample corporate-action backfill failed after 3 attempts; refusing to continue with incomplete data."
+              exit 1
+            fi
+            echo "Delisted sample corporate-action backfill failed; retrying resumable missing chunks (attempt $((delisted_attempt + 1))/3)."
+            sleep $((delisted_attempt * 10))
+          done
           python - <<'PY'
           import json
           import os
