@@ -7,6 +7,7 @@ on:
     # data-provider quota. Run it only when ingestion/normalization contracts,
     # their tests, dependencies, or this workflow change—not for docs-only PRs.
     paths:
+      - ".github/workflows/cnequity-demo.yml"
       - "src/providers/cnequity.py"
       - "src/model/data_layer.py"
       - "tests/test_cnequity*.py"
@@ -369,6 +370,55 @@ jobs:
           Path("validation/cnequity-demo/strict-adjustment-check.json").write_text(
               json.dumps({"raw_rows": int(len(bars)), "strict_hfq_rows": int(len(adjusted)),
                           "strict_hfq_close_finite": True}, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
+      - name: Reconcile corporate-action gaps with independent sources
+        env:
+          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SH,688012.SH' }}
+        run: |
+          set -euo pipefail
+          # First compare Sina and Baostock factor steps. Then fill only those
+          # missing event rows that Baostock/CNINFO evidence can explain.
+          cne derive adj_factor_source --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/adj-factor-source-audit.log
+          cne repair corporate-action-gaps --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/corporate-action-gaps-plan.log
+          cne repair corporate-action-gaps --config "$CNE_CONFIG" --apply 2>&1 | tee validation/cnequity-demo/corporate-action-gaps-apply.log
+          # Recompute after any accepted event changes; do not infer coverage
+          # completeness or historical public availability from this repair.
+          cne derive adj_factors --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/adj-factors-after-action-repair.log
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from cnequity.query import load
+
+          symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
+          end = os.environ["ACTION_END"]
+          actions = load("corporate_actions", symbols=symbols, start="2023-01-01", end=end)
+          factors = load("adj_factors", symbols=symbols)
+          if hasattr(actions, "to_pandas"):
+              actions = actions.to_pandas()
+          if hasattr(factors, "to_pandas"):
+              factors = factors.to_pandas()
+          required = {"symbol", "ex_date", "action_type", "source"}
+          missing = sorted(required - set(actions.columns))
+          if missing:
+              raise RuntimeError(f"Post-repair corporate-action schema missing: {missing}")
+          if actions.duplicated(["symbol", "ex_date", "action_type"]).any():
+              raise RuntimeError("Post-repair corporate-action primary keys are not unique")
+          report = {
+              "requested_symbols": sorted(symbols),
+              "window": {"start": "2023-01-01", "end": end},
+              "corporate_action_rows": int(len(actions)),
+              "symbols_with_events": int(actions["symbol"].nunique()),
+              "event_types": sorted(actions["action_type"].astype(str).unique().tolist()),
+              "source_row_counts": {str(k): int(v) for k, v in actions["source"].astype(str).value_counts().to_dict().items()},
+              "adjustment_factor_rows_after_repair": int(len(factors)),
+              "historical_pit_eligible": False,
+              "coverage_status": "not_certified_by_bounded_cross_source_repair",
+              "note": "Only evidence-explained gaps are repaired; absence of a gap or successful repair does not prove complete issuer-event coverage or historical public availability."
+          }
+          Path("validation/cnequity-demo/corporate-action-cross-source-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
           PY
       - name: Derive and validate adjustment factors for recovered delisted history
         run: |
