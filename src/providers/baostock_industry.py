@@ -36,14 +36,23 @@ def _result_frame(result) -> pd.DataFrame:
 
 def fetch_baostock_industry_membership_snapshot(
     baostock_module, *, clock=None, login_attempts: int = 3,
-    sleep_fn=time.sleep,
+    sleep_fn=time.sleep, as_of_date: str | None = None,
 ) -> pd.DataFrame:
-    """Fetch one complete Baostock industry response and stamp retrieval time.
+    """Fetch one Baostock industry response and stamp retrieval time.
+
+    ``as_of_date`` is passed to Baostock for historical-date sampling. Its
+    returned updateDate is preserved, but this adapter deliberately keeps the
+    result PIT-ineligible until the provider semantics and publication timing
+    have been independently verified.
 
     Transient login/network errors are retried with bounded exponential backoff.
     """
     if login_attempts < 1:
         raise ValueError("login_attempts must be at least 1")
+    if as_of_date is not None:
+        parsed_date = pd.Timestamp(as_of_date)
+        if parsed_date.tzinfo is not None or parsed_date.strftime("%Y-%m-%d") != as_of_date:
+            raise ValueError("as_of_date must use YYYY-MM-DD")
     now = clock or (lambda: datetime.now(timezone.utc))
     login_error = None
     logged_in = False
@@ -71,7 +80,11 @@ def fetch_baostock_industry_membership_snapshot(
             f"{login_attempts} attempts: {type(login_error).__name__}: {str(login_error)[:240]}"
         ) from login_error
     try:
-        result = baostock_module.query_stock_industry()
+        result = (
+            baostock_module.query_stock_industry(date=as_of_date)
+            if as_of_date is not None
+            else baostock_module.query_stock_industry()
+        )
         captured = pd.Timestamp(now())
         if captured.tzinfo is None:
             raise ValueError("Baostock observation clock must be timezone-aware")
@@ -92,6 +105,7 @@ def fetch_baostock_industry_membership_snapshot(
     frame["industry"] = frame["industry"].astype(str).str.strip()
     frame["industryClassification"] = frame["industryClassification"].astype(str).str.strip()
     frame["updateDate"] = frame["updateDate"].astype(str).str.strip()
+    frame["query_date"] = as_of_date or ""
     if frame["updateDate"].eq("").any() or frame["industryClassification"].eq("").any():
         raise ValueError("Baostock industry snapshot contains blank updateDate/classification")
     classifications = set(frame["industryClassification"].unique())
@@ -115,7 +129,10 @@ def fetch_baostock_industry_membership_snapshot(
     frame["availability_basis"] = "retrieval_time_only"
     frame["historical_pit_eligible"] = False
     frame["source_id"] = "baostock.query_stock_industry"
-    frame["snapshot_scope"] = "current_membership_observation_only"
+    frame["snapshot_scope"] = (
+        "historical_date_query_candidate" if as_of_date is not None
+        else "current_membership_observation_only"
+    )
     revisions = (
         frame.groupby("industry_code", sort=True)[["symbol", "industry_code", "industry_name"]]
         .apply(lambda group: hashlib.sha256(
@@ -129,7 +146,7 @@ def fetch_baostock_industry_membership_snapshot(
     frame["source_revision"] = frame["industry_code"].map(revisions)
     return frame[[
         "symbol", "industry_code", "industry_name", "industryClassification",
-        "updateDate", "observed_at", "available_time", "snapshot_id",
+        "updateDate", "query_date", "observed_at", "available_time", "snapshot_id",
         "expected_industry_count", "availability_basis", "historical_pit_eligible",
         "source_id", "snapshot_scope", "source_revision",
     ]].reset_index(drop=True)
