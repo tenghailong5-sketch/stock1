@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-13T12:48:44.575761+00:00",
+  "captured_at": "2026-11-13T12:56:52.543624+00:00",
   "source_status": {
     "index_000001": "ok: tencent.stock_zh_index_daily_tx; rows=123",
     "index_399001": "ok: tencent.stock_zh_index_daily_tx; rows=123",
@@ -8,7 +8,8 @@
     "index_000300": "ok: tencent.stock_zh_index_daily_tx; rows=123",
     "market_breadth": "ok: tencent.stock_zh_a_spot_tx",
     "industry_membership": "partial: akshare.stock_sector_detail_sina; symbol_coverage=46.9%; Eastmoney=0.0%; Sina=46.9%; Eastmoney_error=Push2RateLimitError:东方财富 push2 行情服务器断开了连接，通常是短时间内请求过多，当前 IP 被临时限流。首次限流一般约 5 分钟后恢复，反复触发后可能需要 40 分钟以上；等待期间不要重复调用东方财富的行情接口，否则会延长限流。",
-    "limit_pools": "ok"
+    "limit_pools": "ok",
+    "historical_market_context": "ok: kaipanhong.market_emotion_kph; backfilled=118"
   },
   "rows_appended": {
     "index_000001": 0,
@@ -19,7 +20,9 @@
     "industry_membership": 2991,
     "market_breadth": 1,
     "limit_pools": 0,
-    "market_sentiment": 1
+    "market_sentiment": 1,
+    "market_breadth_history_backfill": 118,
+    "market_sentiment_history_backfill": 118
   },
   "partial": true,
   "note": "Unavailable sources are explicitly recorded; missing data is not imputed."
