@@ -1,0 +1,78 @@
+import pandas as pd
+import pytest
+
+from src.providers import sw_industry
+
+
+class Response:
+    def __init__(self, content):
+        self.content = content
+
+    def raise_for_status(self):
+        return None
+
+
+class Session:
+    def __init__(self):
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append(url)
+        return Response(b"stock-file" if "StockClassify" in url else b"code-file")
+
+
+def test_sw_provider_selects_latest_valid_classification_and_stamps_retrieval(monkeypatch):
+    def fake_sheet_rows(content):
+        if content == b"code-file":
+            return (
+                ["行业代码", "一级行业名称", "二级行业名称", "三级行业名称"],
+                iter([
+                    ["110101", "农林牧渔", "种植业", "种子"],
+                    ["220201", "基础化工", "化学原料", "纯碱"],
+                ]),
+            )
+        return (
+            ["股票代码", "计入日期", "行业代码"],
+            iter([
+                ["000001", 45000, "110101"],
+                ["000001", 46000, "220201"],
+                ["600001", 45500, "110101"],
+                ["000002", 46000, "999999"],  # old/unmapped classification is not fabricated
+            ]),
+        )
+
+    monkeypatch.setattr(sw_industry, "_sheet_rows", fake_sheet_rows)
+    session = Session()
+    captured = pd.Timestamp("2026-11-13T14:00:00Z")
+    result = sw_industry.fetch_sw_current_industry_membership_snapshot(
+        session=session, clock=lambda: captured
+    )
+
+    assert session.calls == [sw_industry.STOCK_URL, sw_industry.CODE_URL]
+    assert set(result["symbol"]) == {"000001", "600001"}
+    selected = result.set_index("symbol")
+    assert selected.loc["000001", "industry_code"] == "220201"
+    assert selected.loc["000001", "industry_name"] == "纯碱"
+    assert selected.loc["000001", "industry_level1"] == "基础化工"
+    assert selected.loc["000001", "observed_at"] == captured
+    assert set(result["source_id"]) == {"swsresearch.sw2021_stock_classification"}
+    assert result["historical_pit_eligible"].eq(False).all()
+
+
+def test_sw_provider_rejects_naive_observation_clock(monkeypatch):
+    def fake_sheet_rows(content):
+        if content == b"code-file":
+            return (
+                ["行业代码", "一级行业名称", "二级行业名称", "三级行业名称"],
+                iter([["110101", "农林牧渔", "种植业", "种子"]]),
+            )
+        return (
+            ["股票代码", "计入日期", "行业代码"],
+            iter([["000001", 46000, "110101"]]),
+        )
+
+    monkeypatch.setattr(sw_industry, "_sheet_rows", fake_sheet_rows)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        sw_industry.fetch_sw_current_industry_membership_snapshot(
+            session=Session(), clock=lambda: pd.Timestamp("2026-11-13T14:00:00")
+        )
