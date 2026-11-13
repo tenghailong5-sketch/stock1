@@ -158,7 +158,7 @@ def _validated_spot_frame(snapshot):
     for column in ("price", "amount", "pct_chg"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
     return frame[
-        frame["code"].str.fullmatch(r"\\d{6}", na=False)
+        frame["code"].str.fullmatch(r"\d{6}", na=False)
         & (frame["price"] > 0) & (frame["amount"] > 0)
     ].drop_duplicates("code")
 
@@ -532,7 +532,7 @@ def summarize_m5_blockers(frame):
 def main():
     try:
         # Fetch and retain the complete live A-share quote universe. Only the
-        # deeper per-symbol history requests are bounded to the most liquid 600.
+        # deeper per-symbol history requests use a 600-symbol liquidity pool plus a bounded quote prefilter.
         u=universe()
         OUT.mkdir(exist_ok=True)
         u.to_csv(OUT/"market_snapshot.csv", index=False, encoding="utf-8-sig")
@@ -548,7 +548,7 @@ def main():
         if not w.empty:
             w, observation_audit = rank_price_observations(
                 w, expected_universe_size=len(history_universe),
-                scope_id="top_600_liquidity_history_pool"
+                scope_id="top_600_plus_quote_prefilter_supplement"
             )
         else:
             observation_audit = pd.DataFrame()
