@@ -601,7 +601,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         / f"{captured.tz_convert('Asia/Shanghai').strftime('%Y-%m-%d')}.jsonl"
     )
     manual_evidence = _load_manual_industry_evidence(
-        manual_evidence_path, expected_symbols, captured_at=observed_now()
+        manual_evidence_path, expected_symbols, captured_at=captured
     )
     if not manual_evidence.empty:
         industry_source_snapshots.append(manual_evidence)
