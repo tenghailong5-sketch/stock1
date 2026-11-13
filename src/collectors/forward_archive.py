@@ -393,6 +393,32 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         sw_error = RuntimeError("Shenwan provider was not injected into this collector run")
 
 
+    # CNINFO CSRC classification is an independent per-security source.
+    # Query only symbols still missing from the multi-source union to limit load.
+    cninfo_coverage = None
+    cninfo_error = None
+    cninfo_failed_symbols = 0
+    if expected_symbols and cninfo_industry_fetcher is not None:
+        try:
+            covered_so_far = set().union(*[
+                set(snap["symbol"].astype(str).str.zfill(6)) & expected_symbols
+                for snap in industry_source_snapshots if snap is not None and not snap.empty
+            ]) if industry_source_snapshots else set()
+            cninfo_missing = sorted(expected_symbols - covered_so_far)
+            cninfo_industry = cninfo_industry_fetcher(
+                ak_module, cninfo_missing, clock=industry_clock,
+                pause_seconds=0.5,
+            )
+            cninfo_coverage = _coverage(cninfo_industry)
+            cninfo_failed_symbols = len(getattr(cninfo_industry, "attrs", {}).get("failed_symbols", {}))
+            if cninfo_industry is not None and not cninfo_industry.empty:
+                industry_source_snapshots.append(cninfo_industry.copy())
+        except Exception as exc:
+            cninfo_error = exc
+    elif expected_symbols:
+        cninfo_error = RuntimeError("CNINFO provider was not injected into this collector run")
+
+
     # Only use per-security fallbacks after every bulk source has had a chance.
     # Restrict Eastmoney individual lookups to symbols still missing from the
     # cross-source union, and never let a lower-coverage taxonomy replace a
@@ -454,32 +480,6 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                     individual_coverage = None
             except Exception as exc:
                 individual_error = exc
-
-    # CNINFO CSRC classification is an independent per-security source.
-    # Query only symbols still missing from the multi-source union to limit load.
-    cninfo_coverage = None
-    cninfo_error = None
-    cninfo_failed_symbols = 0
-    if expected_symbols and cninfo_industry_fetcher is not None:
-        try:
-            covered_so_far = set().union(*[
-                set(snap["symbol"].astype(str).str.zfill(6)) & expected_symbols
-                for snap in industry_source_snapshots if snap is not None and not snap.empty
-            ]) if industry_source_snapshots else set()
-            cninfo_missing = sorted(expected_symbols - covered_so_far)
-            cninfo_industry = cninfo_industry_fetcher(
-                ak_module, cninfo_missing, clock=industry_clock,
-                pause_seconds=0.5,
-            )
-            cninfo_coverage = _coverage(cninfo_industry)
-            cninfo_failed_symbols = len(getattr(cninfo_industry, "attrs", {}).get("failed_symbols", {}))
-            if cninfo_industry is not None and not cninfo_industry.empty:
-                industry_source_snapshots.append(cninfo_industry.copy())
-        except Exception as exc:
-            cninfo_error = exc
-    elif expected_symbols:
-        cninfo_error = RuntimeError("CNINFO provider was not injected into this collector run")
-
 
     # Baidu Gushitong provides an independent per-security industry lookup.
     # Query the full verified universe in bounded batches; preserve Baidu's own
