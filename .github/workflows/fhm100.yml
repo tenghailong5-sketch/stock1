@@ -16,6 +16,10 @@ on:
       - "data/forward_archive/limit_pools/**"
   schedule:
     - cron: "0 9 * * 1-5" # 17:00 Beijing time; run after the 16:30 forward archive
+  workflow_run:
+    workflows: ["FHM-100 Forward Data Archive"]
+    types: [completed]
+    branches: [main]
 permissions:
   contents: write
 concurrency:
@@ -23,6 +27,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   scan:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
