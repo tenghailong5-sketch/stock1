@@ -29,6 +29,7 @@ from src.providers.akshare_pit import (
 )
 from src.providers.kaipanhong_market import fetch_historical_market_context
 from src.providers.baostock_industry import fetch_baostock_industry_membership_snapshot
+from src.providers.sw_industry import fetch_sw_current_industry_membership_snapshot
 
 def _call_with_network_retry(call, *args, attempts: int = 3, sleep_fn=time.sleep, **kwargs):
     """Retry transient transport failures only; never mask schema/data errors."""
@@ -290,6 +291,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     sina_error = None
     individual_error = None
     baostock_error = None
+    sw_coverage = None
+    sw_error = None
 
     # Fill missing symbols through the same Eastmoney provider family before
     # considering a different taxonomy. Never combine Sina/申万 labels with
@@ -373,6 +376,19 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     elif chosen_coverage < 1.0:
         baostock_error = RuntimeError("Baostock fallback was not injected into this collector run")
 
+    # Shenwan Hongyuan publishes a bulk SW2021 stock-classification workbook.
+    # It avoids per-symbol requests and is independent of Eastmoney/Baostock.
+    if chosen_coverage < 1.0 and expected_symbols:
+        try:
+            sw_industry = fetch_sw_current_industry_membership_snapshot(clock=industry_clock)
+            sw_coverage = _coverage(sw_industry)
+            if sw_coverage > chosen_coverage:
+                industry = sw_industry
+                chosen_source = "swsresearch.sw2021_stock_classification"
+                chosen_coverage = sw_coverage
+        except Exception as exc:
+            sw_error = exc
+
     if industry is None or industry.empty:
         source_status["industry_membership"] = (
             "unavailable: "
@@ -383,7 +399,9 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             f"Sina={type(sina_error).__name__ if sina_error else 'not_attempted'}: "
             f"{str(sina_error)[:100] if sina_error else 'no data'}; "
             f"Baostock={type(baostock_error).__name__ if baostock_error else 'not_attempted'}: "
-            f"{str(baostock_error)[:100] if baostock_error else 'no data'}"
+            f"{str(baostock_error)[:100] if baostock_error else 'no data'}; "
+            f"Shenwan={type(sw_error).__name__ if sw_error else 'not_attempted'}: "
+            f"{str(sw_error)[:100] if sw_error else 'no data'}"
         )
     elif chosen_coverage >= 1.0 and chosen_source == "akshare.stock_sector_detail_sina":
         source_status["industry_membership"] = (
@@ -397,7 +415,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             f"Eastmoney_individual={f'{individual_coverage:.1%}' if individual_coverage is not None else 'not_available'}; "
             f"individual_failures={individual_failures}; "
             f"Sina={f'{sina_coverage:.1%}' if sina_coverage is not None else 'not_available'}; "
-            f"Baostock={f'{baostock_coverage:.1%}' if baostock_coverage is not None else 'not_available'}"
+            f"Baostock={f'{baostock_coverage:.1%}' if baostock_coverage is not None else 'not_available'}; "
+            f"Shenwan={f'{sw_coverage:.1%}' if sw_coverage is not None else 'not_available'}"
         )
     if not allow_partial and chosen_coverage < 1.0:
         raise RuntimeError(source_status["industry_membership"])
@@ -577,6 +596,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 "sina_error": _error_detail(sina_error),
                 "baostock_coverage": baostock_coverage,
                 "baostock_error": _error_detail(baostock_error),
+                "shenwan_coverage": sw_coverage,
+                "shenwan_error": _error_detail(sw_error),
                 "selected_source": chosen_source,
             },
             "rows_appended": counts,
