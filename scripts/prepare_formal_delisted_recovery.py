@@ -75,6 +75,18 @@ def sanitize_catalog(
             if previous is None or terminal_date > _date(previous, label=f"existing terminal date for {symbol}"):
                 merged[symbol] = terminal_date.isoformat()
 
+    # Seed every Baostock-confirmed formal delisting, even when the slower
+    # Sina probe has not reached that code yet. Existing/raw terminal evidence
+    # remains preferred; the official identity date fills catalogue gaps.
+    identity_seeded = 0
+    for symbol, terminal in formal_symbols.items():
+        symbol = str(symbol).strip()
+        if symbol not in merged:
+            merged[symbol] = _date(
+                terminal, label=f"formal identity terminal date for {symbol}"
+            ).isoformat()
+            identity_seeded += 1
+
     raw_symbols = {str(symbol).strip() for symbol in raw_hits}
     formal_hits = raw_symbols & formal
     current_listed_hits = raw_symbols & (listing_symbols - formal)
@@ -97,6 +109,7 @@ def sanitize_catalog(
         "unmatched_identity_hits_quarantined": len(unmatched_hits),
         "formal_delistings_not_yet_in_raw_catalog": len(formal - raw_symbols),
         "sanitized_recovery_catalog_entries": len(merged),
+        "formal_identity_seeded_into_recovery_catalog": identity_seeded,
         "current_listed_sample": sorted(current_listed_hits)[:20],
         "unmatched_sample": sorted(unmatched_hits)[:20],
         "historical_pit_eligible": False,
