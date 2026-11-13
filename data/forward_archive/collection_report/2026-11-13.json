@@ -1,26 +1,26 @@
 {
-  "captured_at": "2026-11-13T09:27:39.578389+00:00",
+  "captured_at": "2026-11-13T12:31:23.632123+00:00",
   "source_status": {
     "index_000001": "ok: tencent.stock_zh_index_daily_tx; rows=123",
     "index_399001": "ok: tencent.stock_zh_index_daily_tx; rows=123",
     "index_399006": "ok: tencent.stock_zh_index_daily_tx; rows=123",
     "index_000688": "ok: tencent.stock_zh_index_daily_tx; rows=123",
     "index_000300": "ok: tencent.stock_zh_index_daily_tx; rows=123",
-    "industry_membership": "ok: akshare.stock_sector_detail_sina (Eastmoney fallback after Push2RateLimitError)",
     "market_breadth": "ok: tencent.stock_zh_a_spot_tx",
+    "industry_membership": "partial: akshare.stock_sector_detail_sina; symbol_coverage=46.9%; Eastmoney=0.0%; Sina=46.9%",
     "limit_pools": "ok"
   },
   "rows_appended": {
-    "index_000001": 1,
-    "index_399001": 1,
-    "index_399006": 1,
-    "index_000688": 1,
-    "index_000300": 1,
+    "index_000001": 0,
+    "index_399001": 0,
+    "index_399006": 0,
+    "index_000688": 0,
+    "index_000300": 0,
     "industry_membership": 2991,
     "market_breadth": 1,
-    "limit_pools": 3,
+    "limit_pools": 0,
     "market_sentiment": 1
   },
-  "partial": false,
+  "partial": true,
   "note": "Unavailable sources are explicitly recorded; missing data is not imputed."
 }
