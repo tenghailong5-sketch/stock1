@@ -401,7 +401,7 @@ jobs:
           from cnequity.query import load
 
           symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
-          end = os.environ["ACTION_END"]
+          end = os.environ.get("ACTION_END") or os.environ["BAR_END"]
           actions = load("corporate_actions", symbols=symbols, start="2023-01-01", end=end)
           factors = load("adj_factors", symbols=symbols)
           if hasattr(actions, "to_pandas"):
