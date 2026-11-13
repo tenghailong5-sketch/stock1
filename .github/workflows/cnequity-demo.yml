@@ -64,6 +64,13 @@ jobs:
           key: cnequity-delisted-catalog-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ github.sha }}
           restore-keys: |
             cnequity-delisted-catalog-${{ github.event.pull_request.head.ref || github.ref_name }}-
+      - name: Restore bounded sample data lake
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cnequity-demo-lake
+          key: cnequity-sample-lake-v1-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            cnequity-sample-lake-v1-${{ github.event.pull_request.head.ref || github.ref_name }}-
       - name: Create isolated real-data lake configuration without hard TDX preflight
         run: |
           set -euo pipefail
