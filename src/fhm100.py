@@ -171,6 +171,57 @@ def select_history_universe(snapshot, *, max_symbols=600):
     return frame.sort_values(["amount", "code"], ascending=[False, True]).head(max_symbols).reset_index(drop=True)
 
 
+def select_research_history_universe(
+    snapshot, *, max_symbols=60, min_candidate_amount=MIN_AMOUNT,
+    liquidity_share=0.25,
+):
+    """Build a short-term research pool without letting defensive financials dominate.
+
+    This changes only which names receive the bounded deep-history requests.
+    It does not change FHM-100 eligibility, strategy weights, or hard gates.
+    The pool combines a small liquidity anchor with active non-financial names
+    showing positive daily momentum; every selected name is still evaluated
+    by the normal history/factor pipeline.
+    """
+    if max_symbols < 1:
+        raise ValueError("max_symbols must be positive")
+    if not 0 < liquidity_share <= 1:
+        raise ValueError("liquidity_share must be in (0, 1]")
+    frame = _validated_spot_frame(snapshot)
+    # Keep a small liquidity anchor, but do not let banks/insurers/brokers
+    # consume the short-term growth research pool.
+    non_financial = frame[
+        (~frame["name"].astype(str).str.contains(r"银行|证券|保险", regex=True, na=False))
+        & (frame["pct_chg"] <= 8.0)
+    ].copy()
+    anchor_count = max(1, min(max_symbols, int(round(max_symbols * liquidity_share))))
+    anchor = non_financial.sort_values(
+        ["amount", "code"], ascending=[False, True]
+    ).head(anchor_count)
+    remaining = max_symbols - len(anchor)
+    if remaining <= 0:
+        return anchor.reset_index(drop=True)
+    momentum = non_financial[
+        (~non_financial["code"].isin(set(anchor["code"])))
+        & (non_financial["amount"] >= min_candidate_amount)
+        & (non_financial["pct_chg"] > 0)
+        & (non_financial["pct_chg"] <= 8.0)
+    ].sort_values(
+        ["pct_chg", "amount", "code"], ascending=[False, False, True]
+    ).head(remaining)
+    selected = pd.concat([anchor, momentum], ignore_index=True)
+    # If the momentum pool is sparse, fill only from other liquid non-financial
+    # names; never silently reintroduce excluded defensive financials.
+    if len(selected) < max_symbols:
+        fill = non_financial[
+            ~non_financial["code"].isin(set(selected["code"]))
+        ].sort_values(["amount", "code"], ascending=[False, True]).head(
+            max_symbols - len(selected)
+        )
+        selected = pd.concat([selected, fill], ignore_index=True)
+    return selected.drop_duplicates("code").head(max_symbols).reset_index(drop=True)
+
+
 def select_history_universe_with_supplement(
     snapshot, *, max_symbols=600, max_supplement_symbols=200,
     min_candidate_amount=MIN_AMOUNT,
@@ -565,11 +616,19 @@ def main():
         u=universe()
         OUT.mkdir(exist_ok=True)
         u.to_csv(OUT/"market_snapshot.csv", index=False, encoding="utf-8-sig")
-        # First deliverable mode: scan the 60 most liquid symbols for a quick,
-        # provisional shortlist. Expand coverage after the data path is proven.
-        history_universe, history_pool_audit = select_history_universe_with_supplement(
-            u, max_symbols=60, max_supplement_symbols=0,
-        )
+        # Short-term research pool: liquidity anchor + active non-financial
+        # names. This affects retrieval priority only; FHM A/B/C rules remain intact.
+        history_universe = select_research_history_universe(u, max_symbols=60)
+        history_pool_audit = {
+            "selection_mode": "liquidity_anchor_plus_active_nonfinancial",
+            "primary_history_symbols": int(len(history_universe)),
+            "supplement_selected_symbols": 0,
+            "supplement_deferred_symbols": 0,
+            "history_scan_symbols": int(len(history_universe)),
+            "financial_names_excluded_from_research_pool": True,
+            "daily_gain_chase_cap_pct": 8.0,
+            "formal_candidate_filter": False,
+        }
         (OUT/"history_pool_audit.json").write_text(
             json.dumps(history_pool_audit, ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -579,7 +638,7 @@ def main():
         if not w.empty:
             w, observation_audit = rank_price_observations(
                 w, expected_universe_size=len(history_universe),
-                scope_id="top_600_plus_quote_prefilter_supplement"
+                scope_id="research_pool_60_growth_focused"
             )
         else:
             observation_audit = pd.DataFrame()
