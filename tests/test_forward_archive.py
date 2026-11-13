@@ -81,6 +81,7 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
     assert set(counts) == {
         "index_000001", "index_399001", "index_399006",
         "index_000688", "index_000300", "industry_membership", "market_breadth", "limit_pools", "market_sentiment",
+        "market_breadth_history_backfill", "market_sentiment_history_backfill",
     }
     assert all(counts[f"index_{code}"] == 1 for code in ("000001", "399001", "399006", "000688", "000300"))
     assert counts["industry_membership"] == 6  # three symbols across two industries
