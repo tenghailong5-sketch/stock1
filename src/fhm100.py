@@ -191,7 +191,8 @@ def select_research_history_universe(
     # Keep a small liquidity anchor, but do not let banks/insurers/brokers
     # consume the short-term growth research pool.
     non_financial = frame[
-        ~frame["name"].astype(str).str.contains(r"银行|证券|保险", regex=True, na=False)
+        (~frame["name"].astype(str).str.contains(r"银行|证券|保险", regex=True, na=False))
+        & (frame["pct_chg"] <= 8.0)
     ].copy()
     anchor_count = max(1, min(max_symbols, int(round(max_symbols * liquidity_share))))
     anchor = non_financial.sort_values(
