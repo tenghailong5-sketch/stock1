@@ -17,11 +17,29 @@ SAMPLES = ["000017", "002103", "300328", "920001"]
 
 
 def main() -> None:
+    # Test whether CNINFO accepts a comma-separated stock-code batch. If it
+    # does, production can avoid one HTTP request per uncovered security.
+    batch_report = {"requested": ["000017", "002103"], "returned_symbols": [], "error": None}
+    try:
+        batch = ak.stock_industry_change_cninfo(
+            symbol="000017,002103", start_date="19900101",
+            end_date=__import__("datetime").datetime.now().strftime("%Y%m%d"),
+        )
+        batch_report["columns"] = list(batch.columns) if batch is not None else []
+        if batch is not None and not batch.empty and "证券代码" in batch.columns:
+            batch_report["returned_symbols"] = sorted(
+                batch["证券代码"].astype(str).str.extract(r"(\\d{6})", expand=False).dropna().unique().tolist()
+            )
+        batch_report["returned_rows"] = int(len(batch)) if batch is not None else 0
+    except Exception as exc:
+        batch_report["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+
     frame = fetch_cninfo_current_industry_membership_snapshot(
         ak, SAMPLES, pause_seconds=0.5
     )
     report = {
         "source_id": "cninfo.p_stock2110.csrc",
+        "batch_probe": batch_report,
         "requested": SAMPLES,
         "returned_symbols": sorted(frame["symbol"].astype(str).tolist()) if not frame.empty else [],
         "returned_count": int(frame["symbol"].nunique()) if not frame.empty else 0,
