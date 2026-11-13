@@ -257,7 +257,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         else:
             raw_symbols = pd.Series(dtype=str)
         expected_symbols = set(
-            raw_symbols.astype(str).str.extract(r"(\\d{6})", expand=False).dropna().str.zfill(6)
+            raw_symbols.astype(str).str.extract(r"(\d{6})", expand=False).dropna().str.zfill(6)
         )
 
     eastmoney_industry = None
