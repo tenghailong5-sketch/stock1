@@ -18,12 +18,12 @@ class Session:
 
     def get(self, url, **kwargs):
         self.calls.append(url)
-        return Response(b"stock-file" if "StockClassify" in url else b"code-file")
+        return Response(bytes.fromhex("D0CF11E0A1B11AE1") + (b"stock-file" if "StockClassify" in url else b"code-file"))
 
 
 def test_sw_provider_selects_latest_valid_classification_and_stamps_retrieval(monkeypatch):
     def fake_sheet_rows(content):
-        if content == b"code-file":
+        if content.endswith(b"code-file"):
             return (
                 ["行业代码", "一级行业名称", "二级行业名称", "三级行业名称"],
                 iter([
@@ -61,7 +61,7 @@ def test_sw_provider_selects_latest_valid_classification_and_stamps_retrieval(mo
 
 def test_sw_provider_rejects_naive_observation_clock(monkeypatch):
     def fake_sheet_rows(content):
-        if content == b"code-file":
+        if content.endswith(b"code-file"):
             return (
                 ["行业代码", "一级行业名称", "二级行业名称", "三级行业名称"],
                 iter([["110101", "农林牧渔", "种植业", "种子"]]),
