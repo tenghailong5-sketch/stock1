@@ -379,8 +379,17 @@ jobs:
           # First compare Sina and Baostock factor steps. Then fill only those
           # missing event rows that Baostock/CNINFO evidence can explain.
           cne derive adj_factor_source --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/adj-factor-source-audit.log
-          cne repair corporate-action-gaps --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/corporate-action-gaps-plan.log
-          cne repair corporate-action-gaps --config "$CNE_CONFIG" --apply 2>&1 | tee validation/cnequity-demo/corporate-action-gaps-apply.log
+          # corporate-action-gaps requires factor-arbitration evidence. A clean
+          # zero-symbol audit is not evidence that coverage is complete, but it
+          # is also not a reason to abort all remaining delisted-history audits.
+          # Only plan/apply when the audit actually produced candidate symbols.
+          if grep -Eq '"symbols"[[:space:]]*:[[:space:]]*[1-9][0-9]*' validation/cnequity-demo/adj-factor-source-audit.log; then
+            cne repair corporate-action-gaps --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/corporate-action-gaps-plan.log
+            cne repair corporate-action-gaps --config "$CNE_CONFIG" --apply 2>&1 | tee validation/cnequity-demo/corporate-action-gaps-apply.log
+            echo "applied_or_checked_with_arbitration_evidence" > validation/cnequity-demo/corporate-action-reconciliation-status.txt
+          else
+            echo "not_run_no_factor_arbitration_symbols; completeness_not_proven" | tee validation/cnequity-demo/corporate-action-reconciliation-status.txt
+          fi
           # Recompute after any accepted event changes; do not infer coverage
           # completeness or historical public availability from this repair.
           cne derive adj_factors --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/adj-factors-after-action-repair.log
