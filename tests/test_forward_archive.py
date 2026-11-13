@@ -480,3 +480,42 @@ def test_sina_industry_snapshot_rejects_conflicting_duplicate_names():
         fetch_sina_current_industry_membership_snapshot(
             FakeSina(), clock=lambda: pd.Timestamp("2026-11-13T08:00:00Z")
         )
+
+
+def test_collector_prefers_sina_when_eastmoney_industry_coverage_is_incomplete(tmp_path):
+    class IncompleteEastmoneyProvider(FakeArchiveAkshare):
+        def stock_board_industry_cons_em(self, symbol):
+            return pd.DataFrame({"代码": ["000001"]})
+
+        def stock_sector_spot(self, indicator):
+            return pd.DataFrame([
+                {"label": f"industry_{index:02d}", "板块": f"行业{index}"}
+                for index in range(10)
+            ])
+
+        def stock_sector_detail(self, sector):
+            return pd.DataFrame([
+                {"code": "000001", "name": "样例一"},
+                {"code": "600000", "name": "样例二"},
+                {"code": "000002", "name": "样例三"},
+            ])
+
+    provider = IncompleteEastmoneyProvider()
+    counts = collect(
+        provider, tmp_path,
+        captured_at="2026-11-13T16:30:00+08:00",
+        allow_partial=True,
+    )
+    assert counts["industry_membership"] == 30
+    report = json.loads(
+        (tmp_path / "collection_report" / "2026-11-13.json").read_text(encoding="utf-8")
+    )
+    assert report["source_status"]["industry_membership"] == (
+        "ok: akshare.stock_sector_detail_sina; symbol_coverage=100.0%"
+    )
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "industry_membership" / "2026-11-13.jsonl").read_text().splitlines()
+    ]
+    assert {row["source_id"] for row in rows} == {"akshare.stock_sector_detail_sina"}
+    assert {row["symbol"] for row in rows} == {"000001", "600000", "000002"}
