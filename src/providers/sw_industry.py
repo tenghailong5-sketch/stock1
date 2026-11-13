@@ -55,7 +55,7 @@ def _trusted_intermediate_bundle(*, timeout: int = 15) -> str:
     )
     try:
         handle.write(base_pem)
-        handle.write(b"\\n")
+        handle.write(b"\n")
         handle.write(pem)
         handle.flush()
         return handle.name
