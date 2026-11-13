@@ -384,6 +384,81 @@ jobs:
             # no-repair outcome, not proof of complete issuer-event coverage.
             echo "completed_no_candidate_symbols; no_repair_needed; completeness_not_proven" | tee validation/cnequity-demo/corporate-action-reconciliation-status.txt
           fi
+          # Query Baostock independently for every bounded SH/SZ symbol, even
+          # when factor arbitration found zero contradictions. A no-candidate
+          # factor audit must never be mistaken for a second-source event audit.
+          python - <<'PY'
+          import json
+          import os
+          from datetime import date
+          from pathlib import Path
+          from cnequity.adapters.baostock.corporate_actions import fetch_corporate_actions_baostock
+          from cnequity.config import load_config
+          from cnequity.query import load
+
+          symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
+          start = date.fromisoformat(os.environ["BAR_START"])
+          end = date.fromisoformat(os.environ.get("ACTION_END") or os.environ["BAR_END"])
+          config = load_config(os.environ["CNE_CONFIG"])
+          independent, failed = fetch_corporate_actions_baostock(
+              symbols, start, end, config=config
+          )
+          tdx = load("corporate_actions", symbols=symbols, start=start.isoformat(), end=end.isoformat())
+          if hasattr(tdx, "to_pandas"):
+              tdx = tdx.to_pandas()
+          if hasattr(independent, "to_pandas"):
+              independent = independent.to_pandas()
+          keys = ["symbol", "ex_date", "action_type"]
+          terms = ["cash_dividend", "bonus_ratio", "transfer_ratio"]
+          if tdx is None:
+              raise RuntimeError("TDX corporate-action query returned no frame")
+          missing = sorted(set(keys + terms) - set(tdx.columns))
+          if missing:
+              raise RuntimeError(f"TDX corporate-action schema missing fields: {missing}")
+          for frame in (tdx, independent):
+              for col in terms:
+                  if col not in frame.columns:
+                      frame[col] = 0.0
+                  frame[col] = __import__("pandas").to_numeric(frame[col], errors="coerce").fillna(0.0)
+              frame["ex_date"] = __import__("pandas").to_datetime(frame["ex_date"]).dt.strftime("%Y-%m-%d")
+          left = tdx[keys + terms].drop_duplicates(keys)
+          right = independent[keys + terms].drop_duplicates(keys)
+          joined = left.merge(right, on=keys, how="outer", suffixes=("_tdx", "_baostock"), indicator=True)
+          overlap = joined[joined["_merge"] == "both"]
+          mismatches = []
+          for _, row in overlap.iterrows():
+              differences = {
+                  field: {"tdx": float(row[f"{field}_tdx"]), "baostock": float(row[f"{field}_baostock"])}
+                  for field in terms
+                  if abs(float(row[f"{field}_tdx"]) - float(row[f"{field}_baostock"])) > 1e-6
+              }
+              if differences:
+                  mismatches.append({"symbol": row["symbol"], "ex_date": row["ex_date"],
+                                     "action_type": row["action_type"], "differences": differences})
+          report = {
+              "window": {"start": start.isoformat(), "end": end.isoformat()},
+              "queried_symbols": sorted(symbols),
+              "answered_symbols": sorted(set(symbols) - set(failed)),
+              "failed_symbols": sorted(failed),
+              "tdx_rows": int(len(left)),
+              "baostock_rows": int(len(right)),
+              "matched_event_keys": int(len(overlap)),
+              "tdx_only_event_keys": int((joined["_merge"] == "left_only").sum()),
+              "baostock_only_event_keys": int((joined["_merge"] == "right_only").sum()),
+              "term_mismatch_count": len(mismatches),
+              "term_mismatch_examples": mismatches[:50],
+              "source": "baostock_independent_query",
+              "all_symbols_answered": not failed,
+              "historical_pit_eligible": False,
+              "coverage_status": "independent_source_queried; issuer_event_completeness_not_certified",
+              "note": "A successful Baostock response, including an empty event list, is recorded separately from event agreement; this does not certify issuer-wide event completeness."
+          }
+          out = Path("validation/cnequity-demo/corporate-action-independent-source-audit.json")
+          out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          if failed:
+              raise RuntimeError(f"Independent Baostock corporate-action queries failed for: {sorted(failed)}")
+          PY
           # Recompute after any accepted event changes; do not infer coverage
           # completeness or historical public availability from this repair.
           cne derive adj_factors --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/adj-factors-after-action-repair.log
@@ -653,6 +728,7 @@ jobs:
           set -euo pipefail
           STATUS_FILE="validation/cnequity-demo/corporate-action-reconciliation-status.txt"
           AUDIT_FILE="validation/cnequity-demo/adj-factor-source-audit.log"
+          INDEPENDENT_FILE="validation/cnequity-demo/corporate-action-independent-source-audit.json"
           if [[ ! -s "$STATUS_FILE" || ! -s "$AUDIT_FILE" ]]; then
             echo "Cross-source reconciliation evidence is missing; validation cannot pass."
             exit 1
@@ -662,7 +738,22 @@ jobs:
             cat "$STATUS_FILE"
             exit 1
           fi
-          echo "Cross-source arbitration completed; any no-candidate outcome remains explicitly non-certifying."
+          if [[ ! -s "$INDEPENDENT_FILE" ]]; then
+            echo "Independent Baostock corporate-action audit is missing."
+            exit 1
+          fi
+          python - "$INDEPENDENT_FILE" <<'PY'
+          import json, sys
+          from pathlib import Path
+          report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if not report.get("all_symbols_answered") or report.get("failed_symbols"):
+              raise SystemExit(f"Independent-source query incomplete: {report.get('failed_symbols')}")
+          if len(report.get("answered_symbols", [])) != len(report.get("queried_symbols", [])):
+              raise SystemExit("Independent-source response count does not match requested symbols")
+          print("Independent Baostock corporate-action query completed for every requested symbol.")
+          print("Event completeness and historical point-in-time eligibility remain uncertified.")
+          PY
+          echo "Factor arbitration and independent corporate-action source audit completed; completeness remains uncertified."
       - name: Upload validation evidence
         if: always()
         uses: actions/upload-artifact@v4
