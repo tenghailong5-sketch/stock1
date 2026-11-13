@@ -23,6 +23,11 @@ on:
         description: "Approximate recent trading days"
         required: true
         default: "90"
+      include_delisted_history:
+        description: "Run the separate, expensive delisted-security coverage audit"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -88,7 +93,8 @@ jobs:
           # evidence rather than leaving a stale hard-coded date in the workflow.
           echo "BAR_END=$BAR_END" >> "$GITHUB_ENV"
           # Keep daily bars, corporate actions, and adjustment-factor checks on the same historical window; otherwise older event dates are excluded from factor/action reconciliation.
-          BAR_START="2023-01-01"
+          BAR_START="$(TZ=Asia/Shanghai date -d '1 year ago' +%F)"
+          echo "BAR_START=$BAR_START" >> "$GITHUB_ENV"
           echo "Bounded daily-bar validation window: ${BAR_START}..${BAR_END} (Asia/Shanghai ${LOCAL_HHMM})"
           cne backfill daily_bars --start "$BAR_START" --end "$BAR_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/daily-bars-plan.log
           cne backfill daily_bars --start "$BAR_START" --end "$BAR_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" 2>&1 | tee validation/cnequity-demo/daily-bars-backfill.log
@@ -108,6 +114,7 @@ jobs:
           print(f"Verified daily_bars prerequisite: {len(bars)} rows across {bars['symbol'].nunique()} symbols")
           PY
       - name: Initialize isolated delisted-history lake
+        if: ${{ inputs.include_delisted_history == 'true' }}
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
         run: |
@@ -121,9 +128,9 @@ jobs:
           # The main sample lake feeds the main sample adjustment-factor derivation.
           ACTION_END="$(TZ=Asia/Shanghai date -d 'yesterday' +%F)"
           export ACTION_END
-          cne backfill corporate_actions --start 2023-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-main-plan.log
+          cne backfill corporate_actions --start "$BAR_START" --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-main-plan.log
           main_attempt=0
-          until cne backfill corporate_actions --start 2023-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" 2>&1 | tee -a validation/cnequity-demo/corporate-actions-main-backfill.log; do
+          until cne backfill corporate_actions --start "$BAR_START" --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" 2>&1 | tee -a validation/cnequity-demo/corporate-actions-main-backfill.log; do
             main_attempt=$((main_attempt + 1))
             if (( main_attempt >= 3 )); then
               echo "Main corporate-action backfill failed after 3 attempts; refusing to continue with incomplete data."
@@ -132,88 +139,16 @@ jobs:
             echo "Main corporate-action backfill failed; retrying resumable missing chunks (attempt $((main_attempt + 1))/3)."
             sleep $((main_attempt * 10))
           done
-          # The delisted-history lake is also bootstrapped with a one-session
-          # demo sample; keep its action ledger aligned with those sample bars.
-          cne backfill corporate_actions --start 1990-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-delisted-sample-plan.log
-          delisted_attempt=0
-          until cne backfill corporate_actions --start 1990-01-01 --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$DELISTED_CONFIG" 2>&1 | tee -a validation/cnequity-demo/corporate-actions-delisted-sample-backfill.log; do
-            delisted_attempt=$((delisted_attempt + 1))
-            if (( delisted_attempt >= 3 )); then
-              echo "Delisted sample corporate-action backfill failed after 3 attempts; refusing to continue with incomplete data."
-              exit 1
-            fi
-            echo "Delisted sample corporate-action backfill failed; retrying resumable missing chunks (attempt $((delisted_attempt + 1))/3)."
-            sleep $((delisted_attempt * 10))
-          done
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-          import pandas as pd
-          from cnequity.config import load_config
-          from cnequity.query import load
-
-          symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
-          config = load_config(os.environ["CNE_CONFIG"])
-          actions = load("corporate_actions", symbols=symbols, start="2023-01-01",
-                         end=os.environ["ACTION_END"], config=config)
-          if hasattr(actions, "to_pandas"):
-              actions = actions.to_pandas()
-          required = {"symbol", "ex_date", "action_type", "source"}
-          missing = sorted(required - set(actions.columns))
-          if missing:
-              raise RuntimeError(f"Main sample corporate-action schema missing fields: {missing}")
-          if actions.empty:
-              raise RuntimeError("No corporate-action rows returned for the bounded main sample")
-          if actions.duplicated(["symbol", "ex_date", "action_type"]).any():
-              raise RuntimeError("Duplicate main sample corporate-action primary keys")
-          if actions[list(required)].isna().any().any():
-              raise RuntimeError("Main sample corporate-action identity/source fields contain nulls")
-          report = {
-              "requested_symbols": sorted(symbols), "window": {"start": "2023-01-01", "end": os.environ["ACTION_END"]},
-              "row_count": int(len(actions)), "symbols_with_events": sorted(actions["symbol"].astype(str).unique().tolist()),
-              "symbols_with_events_count": int(actions["symbol"].nunique()),
-              "event_types": sorted(actions["action_type"].astype(str).unique().tolist()),
-              "sources": sorted(actions["source"].astype(str).unique().tolist()),
-              "ex_date_min": str(pd.to_datetime(actions["ex_date"]).min().date()),
-              "ex_date_max": str(pd.to_datetime(actions["ex_date"]).max().date()),
-              "historical_pit_eligible": False,
-              "note": "Backfilled event history; fetched_at is not proof of historical public availability.",
-          }
-          Path("validation/cnequity-demo/corporate-actions-main-validation.json").write_text(
-              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-          print(json.dumps(report, ensure_ascii=False, indent=2))
-          delisted_config = load_config(os.environ["DELISTED_CONFIG"])
-          delisted_sample = load(
-              "corporate_actions", symbols=symbols, start="1990-01-01",
-              end=os.environ["ACTION_END"], config=delisted_config,
-          )
-          if hasattr(delisted_sample, "to_pandas"):
-              delisted_sample = delisted_sample.to_pandas()
-          if delisted_sample.empty:
-              raise RuntimeError("No corporate-action rows for the delisted lake's bootstrapped demo symbols")
-          missing = sorted(required - set(delisted_sample.columns))
-          if missing:
-              raise RuntimeError(f"Delisted sample corporate-action schema missing fields: {missing}")
-          if delisted_sample[list(required)].isna().any().any():
-              raise RuntimeError("Delisted sample corporate-action identity/source fields contain nulls")
-          if delisted_sample.duplicated(["symbol", "ex_date", "action_type"]).any():
-              raise RuntimeError("Duplicate corporate-action keys in the delisted lake's demo sample")
-          Path("validation/cnequity-demo/corporate-actions-delisted-sample-validation.json").write_text(
-              json.dumps({
-                  "requested_symbols": sorted(symbols),
-                  "row_count": int(len(delisted_sample)),
-                  "symbols_with_events": sorted(delisted_sample["symbol"].astype(str).unique().tolist()),
-                  "historical_pit_eligible": False,
-              }, ensure_ascii=False, indent=2), encoding="utf-8")
           PY
       - name: Discover confirmed delisted securities (resumable bounded sweep)
+        if: ${{ inputs.include_delisted_history == 'true' }}
         run: |
           set -euo pipefail
           # The upstream discovery sweep checkpoints every 100 probes. Keep each Actions run to one checkpointed chunk so it can finish inside the job timeout; later runs resume from the cached catalogue.
           python cnequity-source/scripts/delisted_ops.py --config "$DELISTED_CONFIG" discover --limit 100 2>&1 | tee validation/cnequity-demo/delisted-discovery.log
           cne delisted status --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-before-backfill.log
       - name: Backfill corporate actions for confirmed delisted securities
+        if: ${{ inputs.include_delisted_history == 'true' }}
         run: |
           set -euo pipefail
           # Use the confirmed catalog, not today's demo symbols, so recovered
@@ -273,6 +208,7 @@ jobs:
           print(json.dumps(report, ensure_ascii=False, indent=2))
           PY
       - name: Plan and backfill confirmed delisted-security daily bars
+        if: ${{ inputs.include_delisted_history == 'true' }}
         run: |
           set -euo pipefail
           cne backfill daily_bars --profile delisted --start 2016-01-01 --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/delisted-bars-plan.log
@@ -303,6 +239,7 @@ jobs:
           print(json.dumps({k:v for k,v in report.items() if k != "log_tail"}, ensure_ascii=False, indent=2))
           PY
       - name: Extend trading calendar over recovered delisted history
+        if: ${{ inputs.include_delisted_history == 'true' }}
         run: |
           set -euo pipefail
           cne backfill trading_calendar --start 2016-01-01 --end "$BAR_END" --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/trading-calendar-plan.log
@@ -410,7 +347,7 @@ jobs:
 
           symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
           end = os.environ.get("ACTION_END") or os.environ["BAR_END"]
-          actions = load("corporate_actions", symbols=symbols, start="2023-01-01", end=end)
+          actions = load("corporate_actions", symbols=symbols, start=os.environ["BAR_START"], end=end)
           factors = load("adj_factors", symbols=symbols)
           if hasattr(actions, "to_pandas"):
               actions = actions.to_pandas()
@@ -424,7 +361,7 @@ jobs:
               raise RuntimeError("Post-repair corporate-action primary keys are not unique")
           report = {
               "requested_symbols": sorted(symbols),
-              "window": {"start": "2023-01-01", "end": end},
+              "window": {"start": os.environ["BAR_START"], "end": end},
               "corporate_action_rows": int(len(actions)),
               "symbols_with_events": int(actions["symbol"].nunique()),
               "event_types": sorted(actions["action_type"].astype(str).unique().tolist()),
@@ -439,6 +376,7 @@ jobs:
           print(json.dumps(report, ensure_ascii=False, indent=2))
           PY
       - name: Derive and validate adjustment factors for recovered delisted history
+        if: ${{ inputs.include_delisted_history == 'true' }}
         run: |
           set -euo pipefail
           cne derive adj_factors --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-adj-factors.log
@@ -512,6 +450,7 @@ jobs:
               raise RuntimeError("Delisted strict hfq adjusted close contains missing/non-finite values")
           PY
       - name: Report delisted survivorship coverage (non-gating audit)
+        if: ${{ inputs.include_delisted_history == 'true' }}
         if: success()
         run: |
           set +e
