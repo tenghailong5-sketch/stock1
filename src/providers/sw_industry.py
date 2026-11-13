@@ -1,0 +1,139 @@
+"""Official Shenwan 2021 current A-share industry membership snapshot.
+
+Downloads the two public XLS files published by Shenwan Hongyuan Research:
+- StockClassifyUse_stock.xls: stock-to-industry change history
+- SwClassCode_2021.xls: industry-code/name hierarchy
+
+The latest entry date per stock is selected. Availability is stamped at retrieval
+time only; this is not a historical point-in-time publication feed.
+"""
+from __future__ import annotations
+
+import hashlib
+import uuid
+from datetime import datetime, timezone
+from io import BytesIO
+
+import pandas as pd
+import requests
+import xlrd
+
+
+BASE_URL = "https://www.swsresearch.com/swindex/pdf/SwClass2021"
+STOCK_URL = f"{BASE_URL}/StockClassifyUse_stock.xls"
+CODE_URL = f"{BASE_URL}/SwClassCode_2021.xls"
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; FHM100/1.0)"}
+
+
+def _text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
+def _sheet_rows(content: bytes):
+    workbook = xlrd.open_workbook(file_contents=content)
+    if workbook.nsheets < 1:
+        raise ValueError("Shenwan XLS has no worksheets")
+    sheet = workbook.sheet_by_index(0)
+    if sheet.nrows < 2:
+        raise ValueError("Shenwan XLS worksheet is empty")
+    headers = [_text(value) for value in sheet.row_values(0)]
+    return headers, (sheet.row_values(i) for i in range(1, sheet.nrows))
+
+
+def _column(headers: list[str], name: str) -> int:
+    try:
+        return headers.index(name)
+    except ValueError as exc:
+        raise ValueError(
+            f"Shenwan XLS missing required column {name!r}; got {headers}"
+        ) from exc
+
+
+def fetch_sw_current_industry_membership_snapshot(
+    *, clock=None, session=None, timeout: int = 60
+) -> pd.DataFrame:
+    """Download official SW2021 tables and select each stock's latest industry."""
+    now = clock or (lambda: datetime.now(timezone.utc))
+    client = session or requests
+    stock_response = client.get(STOCK_URL, headers=HEADERS, timeout=timeout)
+    stock_response.raise_for_status()
+    code_response = client.get(CODE_URL, headers=HEADERS, timeout=timeout)
+    code_response.raise_for_status()
+
+    code_headers, code_rows = _sheet_rows(code_response.content)
+    code_idx = _column(code_headers, "行业代码")
+    l1_idx = _column(code_headers, "一级行业名称")
+    l2_idx = _column(code_headers, "二级行业名称")
+    l3_idx = _column(code_headers, "三级行业名称")
+    code_map = {}
+    for row in code_rows:
+        code = _text(row[code_idx]).zfill(6)
+        names = (_text(row[l1_idx]), _text(row[l2_idx]), _text(row[l3_idx]))
+        if code and all(names):
+            code_map[code] = names
+    if not code_map:
+        raise ValueError("Shenwan industry-code dictionary contains no usable rows")
+
+    stock_headers, stock_rows = _sheet_rows(stock_response.content)
+    symbol_idx = _column(stock_headers, "股票代码")
+    date_idx = _column(stock_headers, "计入日期")
+    industry_idx = _column(stock_headers, "行业代码")
+
+    latest: dict[str, tuple[float, str]] = {}
+    for row in stock_rows:
+        symbol = _text(row[symbol_idx])
+        industry_code = _text(row[industry_idx]).zfill(6)
+        try:
+            entry_date = float(row[date_idx])
+        except (TypeError, ValueError):
+            continue
+        if len(symbol) != 6 or not symbol.isdigit() or industry_code not in code_map:
+            continue
+        current = latest.get(symbol)
+        if current is None or entry_date > current[0]:
+            latest[symbol] = (entry_date, industry_code)
+
+    if not latest:
+        raise ValueError("Shenwan stock classification file contains no current SW2021 members")
+
+    captured = pd.Timestamp(now())
+    if captured.tzinfo is None:
+        raise ValueError("Shenwan observation clock must be timezone-aware")
+    captured = captured.tz_convert("UTC")
+    snapshot_id = str(uuid.uuid4())
+    rows = []
+    for symbol, (entry_date, industry_code) in sorted(latest.items()):
+        level1, level2, level3 = code_map[industry_code]
+        revision = hashlib.sha256(
+            f"{symbol}|{industry_code}|{level1}|{level2}|{level3}|{entry_date}".encode("utf-8")
+        ).hexdigest()
+        rows.append({
+            "symbol": symbol,
+            "industry_code": industry_code,
+            "industry_name": level3,
+            "industry_level1": level1,
+            "industry_level2": level2,
+            "snapshot_id": snapshot_id,
+            "observed_at": captured,
+            "available_time": captured,
+            "availability_basis": "retrieval_time_only",
+            "historical_pit_eligible": False,
+            "source_id": "swsresearch.sw2021_stock_classification",
+            "snapshot_scope": "current_membership_observation_only",
+            "source_revision": revision,
+        })
+    result = pd.DataFrame(rows)
+    if result["symbol"].duplicated().any():
+        raise ValueError("Shenwan current snapshot contains duplicate stock symbols")
+    result["expected_industry_count"] = int(result["industry_code"].nunique())
+    return result[[
+        "symbol", "industry_code", "industry_name", "industry_level1",
+        "industry_level2", "snapshot_id", "expected_industry_count",
+        "observed_at", "available_time", "availability_basis",
+        "historical_pit_eligible", "source_id", "snapshot_scope",
+        "source_revision",
+    ]]
