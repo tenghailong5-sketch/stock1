@@ -139,9 +139,32 @@ def universe():
         d=d[required].copy(); d.columns=["code","name","price","amount","pct_chg"]
     d["code"]=d.code.astype(str).str.zfill(6)
     for c in ["price","amount","pct_chg"]: d[c]=numeric(d[c])
-    d=d[~d.code.str.startswith(("688","689","8","4"))]
+    # Keep every valid currently quoted A-share, including STAR Market and BSE.
+    # Full-market spot coverage is cheap; historical depth requests are tiered
+    # separately by select_history_universe() to keep the daily job bounded.
     d=d[~d.name.str.contains(r"ST|退",na=False)]
-    return d[(d.price>0)&(d.amount>0)].sort_values("amount",ascending=False).head(350)
+    d=d[(d.price>0)&(d.amount>0)].copy()
+    return d.sort_values(["amount","code"],ascending=[False,True]).drop_duplicates("code").reset_index(drop=True)
+
+
+def select_history_universe(snapshot, *, max_symbols=600):
+    """Select a bounded, liquidity-ranked deep-history pool from the full spot universe."""
+    if max_symbols < 1:
+        raise ValueError("max_symbols must be positive")
+    required = {"code", "name", "price", "amount", "pct_chg"}
+    missing = required - set(snapshot.columns)
+    if missing:
+        raise ValueError(f"full-market snapshot missing columns: {sorted(missing)}")
+    frame = snapshot.copy()
+    frame["code"] = frame["code"].astype(str).str.strip().str[-6:].str.zfill(6)
+    for column in ("price", "amount", "pct_chg"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame = frame[
+        frame["code"].str.fullmatch(r"\\d{6}", na=False)
+        & (frame["price"] > 0) & (frame["amount"] > 0)
+    ].drop_duplicates("code")
+    return frame.sort_values(["amount", "code"], ascending=[False, True]).head(max_symbols).reset_index(drop=True)
+
 
 # [live-scan] Verify Tencent universe fallback with live market data
 
@@ -469,19 +492,26 @@ def summarize_m5_blockers(frame):
 
 def main():
     try:
+        # Fetch and retain the complete live A-share quote universe. Only the
+        # deeper per-symbol history requests are bounded to the most liquid 600.
         u=universe()
-        w,e=scan(u)
+        OUT.mkdir(exist_ok=True)
+        u.to_csv(OUT/"market_snapshot.csv", index=False, encoding="utf-8-sig")
+        history_universe=select_history_universe(u, max_symbols=600)
+        w,e=scan(history_universe)
         # [live-scan] verify all-failed history reporting and archive persistence
         w=ensure_watchlist_schema(w)
         if not w.empty:
             w, observation_audit = rank_price_observations(
-                w, expected_universe_size=len(u), scope_id="top_350_turnover_snapshot"
+                w, expected_universe_size=len(history_universe),
+                scope_id="top_600_liquidity_history_pool"
             )
         else:
             observation_audit = pd.DataFrame()
     except Exception as exc:
         # Provider outages/rate limits must produce an auditable report, not a false clean scan.
         u=pd.DataFrame()
+        history_universe=pd.DataFrame()
         w,e=empty_scan_result(exc)
         observation_audit = pd.DataFrame()
     # Freeze one decision cutoff only after all live stock-history requests finish.
@@ -539,6 +569,7 @@ def main():
         "status": formal_status,
         "blockers": formal_blockers,
         "live_universe_count": int(len(u)),
+        "history_scan_universe_count": int(len(history_universe)),
         "valid_history_count": int(len(w)),
         "m3_status": str(m3.get("status")),
         "m5_is_diagnostic_only": True,
@@ -549,7 +580,9 @@ def main():
     observation_audit.to_csv(OUT/"m4_observation_audit.csv",index=False,encoding="utf-8-sig")
     c=w[w["技术观察通过"]&w["流动性观察通过"]]
     lines=["# FHM-100 自动研究扫描报告",f"- 运行时间：{now.isoformat()}",
-      f"- 快照股票池：{len(u)}",f"- 历史数据成功：{len(w)}",f"- 数据异常：{len(e)}",
+      f"- 全市场实时行情快照：{len(u)}只（含沪深北及科创板；见market_snapshot.csv）",
+      f"- 深度历史扫描池：{len(history_universe)}只（按当日成交额排序，最多600只）",
+      f"- 历史数据成功：{len(w)}",f"- 数据异常：{len(e)}",
       f"- 行情采集状态：{'正常' if len(u) else '失败/不可用；本次不产生候选'}",
       f"- 基础技术观察名单：{len(c)}",
       f"- M4价格/流动性观察因子已计算：{len(w)}",
@@ -581,7 +614,7 @@ def main():
         status = "PushPlus推送失败：" + str(exc)[:300]
         push_error = exc
     (OUT/"run_status.json").write_text(json.dumps({"time":now.isoformat(),"universe":len(u),
-      "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
+      "history_scan_universe":len(history_universe),"history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
       "formal_status":formal_status,"formal_blockers":formal_blockers},ensure_ascii=False,indent=2),encoding="utf-8")
     print(report); print(status)
     if push_error is not None:
