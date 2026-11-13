@@ -207,9 +207,22 @@ def select_history_universe_with_supplement(
 
 # [live-scan] Verify Tencent universe fallback with live market data
 
+def _tencent_history_symbol(code):
+    """Map six-digit A-share codes to Tencent exchange-prefixed symbols."""
+    value = str(code).strip().lower()
+    if value.startswith(("bj", "sh", "sz")):
+        return value
+    digits = value.zfill(6)
+    if digits.startswith(("4", "8", "92")):
+        return "bj" + digits
+    if digits.startswith("6"):
+        return "sh" + digits
+    return "sz" + digits
+
+
 def _download_tencent_history(code, start, *, cause):
     """Fetch and strictly normalize Tencent daily bars after Eastmoney failure."""
-    prefix = "sh" if str(code).startswith("6") else "sz"
+    symbol = _tencent_history_symbol(code)
     frame = ak.stock_zh_a_hist_tx(
         symbol=prefix + str(code).zfill(6), start_date=start,
         end_date=datetime.now().strftime("%Y%m%d"), adjust=""
