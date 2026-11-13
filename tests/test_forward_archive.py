@@ -940,6 +940,14 @@ def test_manual_industry_evidence_loader_accepts_only_reconciled_current_sources
             "record_status": "source_url_reconciled_current_observation_candidate",
         },
         {
+            "symbol": "000975", "industry_name": "有色金属—贵金属—黄金",
+            "classification_system": "同花顺行业（F10页面三级行业分类）",
+            "source_id": "10jqka.f10_industry",
+            "source_url": "https://basic.10jqka.com.cn/000975/field.html",
+            "source_title": "山金国际行业地位；页面展示三级行业分类",
+            "record_status": "source_url_reconciled_current_observation_candidate",
+        },
+        {
             "symbol": "000002", "industry_name": "房地产",
             "classification_system": "申万行业",
             "source_id": "sina.finance_f10_sw",
@@ -949,7 +957,7 @@ def test_manual_industry_evidence_loader_accepts_only_reconciled_current_sources
     ]
     path.write_text("\\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\\n", encoding="utf-8")
     result = _load_manual_industry_evidence(
-        path, {"000001", "600000", "000002"},
+        path, {"000001", "000975", "600000", "000002"},
         captured_at="2026-11-14T05:00:00Z",
     )
     assert len(result) == 1
