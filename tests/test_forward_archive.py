@@ -361,6 +361,60 @@ def test_partial_archive_uses_tencent_breadth_when_eastmoney_is_rate_limited(tmp
     assert report["source_status"]["market_breadth"] == "ok: tencent.stock_zh_a_spot_tx"
 
 
+
+def test_collector_uses_official_shenwan_when_existing_taxonomies_are_partial(tmp_path):
+    class PartialTaxonomyProvider(FakeArchiveAkshare):
+        def stock_board_industry_name_em(self):
+            raise type("Push2RateLimitError", (Exception,), {})("Eastmoney cooldown")
+
+        def stock_sector_spot(self, indicator):
+            return pd.DataFrame([
+                {"label": f"industry_{index:02d}", "板块": f"行业{index}"}
+                for index in range(10)
+            ])
+
+        def stock_sector_detail(self, sector):
+            return pd.DataFrame([
+                {"code": "000001", "name": "平安银行"},
+                {"code": "600000", "name": "浦发银行"},
+            ])
+
+    captured = pd.Timestamp("2026-11-13T14:00:00Z")
+    sw_snapshot = pd.DataFrame([
+        {
+            "symbol": symbol,
+            "industry_code": code,
+            "industry_name": name,
+            "snapshot_id": "sw-snapshot",
+            "observed_at": captured,
+            "available_time": captured,
+            "source_id": "swsresearch.sw2021_stock_classification",
+            "snapshot_scope": "current_membership_observation_only",
+            "source_revision": f"revision-{symbol}",
+        }
+        for symbol, code, name in [
+            ("000001", "480101", "银行"),
+            ("600000", "480101", "银行"),
+            ("000002", "430101", "房地产"),
+        ]
+    ])
+
+    counts = collect(
+        PartialTaxonomyProvider(),
+        tmp_path,
+        captured_at="2026-11-13T16:30:00+08:00",
+        allow_partial=True,
+        sw_industry_fetcher=lambda clock=None: sw_snapshot,
+    )
+    report = json.loads(
+        (tmp_path / "collection_report" / "2026-11-13.json").read_text(encoding="utf-8")
+    )
+    assert counts["industry_membership"] == 3
+    assert report["industry_audit"]["selected_source"] == "swsresearch.sw2021_stock_classification"
+    assert report["industry_audit"]["shenwan_coverage"] == 1.0
+    assert report["industry_audit"]["selected_snapshot_coverage"] == 1.0
+    assert report["source_status"]["industry_membership"].startswith("ok: swsresearch.sw2021_stock_classification")
+
 def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tmp_path):
     class SinaFallbackProvider(FakeArchiveAkshare):
         def stock_board_industry_name_em(self):
