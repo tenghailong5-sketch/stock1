@@ -222,6 +222,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     # Collect the current quote universe before industry membership so we can
     # measure actual symbol coverage. A successful provider response is not
     # sufficient evidence that its constituent list covers the market.
+    breadth_raw = None
     breadth_records: list[dict] = []
     try:
         try:
