@@ -30,6 +30,7 @@ from src.providers.akshare_pit import (
 from src.providers.kaipanhong_market import fetch_historical_market_context
 from src.providers.baostock_industry import fetch_baostock_industry_membership_snapshot
 from src.providers.sw_industry import fetch_sw_current_industry_membership_snapshot
+from src.providers.sw_api_industry import fetch_sw_api_industry_membership_snapshot
 from src.providers.baidu_industry import fetch_baidu_industry_membership_snapshot
 
 def _call_with_network_retry(call, *args, attempts: int = 3, sleep_fn=time.sleep, **kwargs):
@@ -152,7 +153,7 @@ def _tencent_breadth_frame(ak_module):
     return out
 
 
-def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None, baostock_module=None, sw_industry_fetcher=None, baidu_industry_fetcher=None) -> dict[str, int]:
+def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None, baostock_module=None, sw_industry_fetcher=None, baidu_industry_fetcher=None, sw_api_industry_fetcher=None) -> dict[str, int]:
     ak_module = _RetryingProvider(ak_module, sleep_fn=retry_sleep)
     captured = pd.Timestamp(
         captured_at if captured_at is not None else datetime.now(ZoneInfo("Asia/Shanghai"))
@@ -298,6 +299,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     baostock_error = None
     sw_coverage = None
     sw_error = None
+    sw_api_coverage = None
+    sw_api_error = None
     baidu_coverage = None
     baidu_error = None
 
@@ -389,6 +392,24 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     elif expected_symbols:
         baostock_error = RuntimeError("Baostock provider was not injected into this collector run")
 
+    # SW Research current index API: an independent live membership endpoint.
+    # It is called even when earlier sources are complete so the raw source layer
+    # can retain independent observations and expose disagreements.
+    if expected_symbols and sw_api_industry_fetcher is not None:
+        try:
+            sw_api_industry = sw_api_industry_fetcher(clock=industry_clock)
+            sw_api_coverage = _coverage(sw_api_industry)
+            if sw_api_industry is not None and not sw_api_industry.empty:
+                industry_source_snapshots.append(sw_api_industry.copy())
+            if sw_api_coverage > chosen_coverage:
+                industry = sw_api_industry
+                chosen_source = "swsresearch.index_publish.component_stocks"
+                chosen_coverage = sw_api_coverage
+        except Exception as exc:
+            sw_api_error = exc
+    elif expected_symbols:
+        sw_api_error = RuntimeError("SW API provider was not injected into this collector run")
+
     # Shenwan Hongyuan publishes a bulk SW2021 stock-classification workbook.
     # It avoids per-symbol requests and is independent of Eastmoney/Baostock.
     if expected_symbols and sw_industry_fetcher is not None:
@@ -432,14 +453,15 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         except Exception as exc:
             baidu_error = exc
     elif baidu_requested_symbols:
-        baidu_error = RuntimeError("Baidu provider was not injected into this collector run")
+        baidu_error = RuntimeError("quarantined: Baidu PAE getrelatedblock disabled pending live endpoint validation")
 
     source_coverage = {
         "eastmoney_board": eastmoney_coverage,
         "eastmoney_individual": individual_coverage,
         "sina": sina_coverage,
         "baostock": baostock_coverage,
-        "shenwan": sw_coverage,
+        "shenwan_xls": sw_coverage,
+        "shenwan_api": sw_api_coverage,
         "baidu": baidu_coverage,
     }
     source_symbols = {}
@@ -491,7 +513,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             f"individual_failures={individual_failures}; "
             f"Sina={f'{sina_coverage:.1%}' if sina_coverage is not None else 'not_available'}; "
             f"Baostock={f'{baostock_coverage:.1%}' if baostock_coverage is not None else 'not_available'}; "
-            f"Shenwan={f'{sw_coverage:.1%}' if sw_coverage is not None else 'not_available'}"
+            f"Shenwan_XLS={f'{sw_coverage:.1%}' if sw_coverage is not None else 'not_available'}; "
+            f"Shenwan_API={f'{sw_api_coverage:.1%}' if sw_api_coverage is not None else 'not_available'}"
         )
     if not allow_partial and chosen_coverage < 1.0:
         raise RuntimeError(source_status["industry_membership"])
@@ -679,6 +702,16 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 "baostock_error": _error_detail(baostock_error),
                 "shenwan_coverage": sw_coverage,
                 "shenwan_error": _error_detail(sw_error),
+                "shenwan_api_coverage": sw_api_coverage,
+                "shenwan_api_error": _error_detail(sw_api_error),
+                "shenwan_api_failed_industry_count": (
+                    len(getattr(sw_api_industry, "attrs", {}).get("failed_industry_codes", []))
+                    if "sw_api_industry" in locals() and sw_api_industry is not None else None
+                ),
+                "shenwan_api_failed_industry_codes": (
+                    getattr(sw_api_industry, "attrs", {}).get("failed_industry_codes", [])
+                    if "sw_api_industry" in locals() and sw_api_industry is not None else []
+                ),
                 "baidu_coverage": baidu_coverage,
                 "baidu_error": _error_detail(baidu_error),
                 "source_coverage": source_coverage,
@@ -716,7 +749,7 @@ def main() -> None:
         historical_market_fetcher=fetch_historical_market_context,
         baostock_module=bs,
         sw_industry_fetcher=fetch_sw_current_industry_membership_snapshot,
-        baidu_industry_fetcher=fetch_baidu_industry_membership_snapshot,
+        sw_api_industry_fetcher=fetch_sw_api_industry_membership_snapshot,
     )
     print(json.dumps({"mode": "dry_run" if args.dry_run else "archive", "validated_rows": counts}, ensure_ascii=False, sort_keys=True))
 
