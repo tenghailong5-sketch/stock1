@@ -265,6 +265,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             raw_symbols.astype(str).str.extract(r"(\d{6})", expand=False).dropna().str.zfill(6)
         )
 
+    industry_source_snapshots: list[pd.DataFrame] = []
     eastmoney_industry = None
     eastmoney_error = None
     try:
@@ -273,6 +274,9 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         )
     except Exception as exc:
         eastmoney_error = exc
+
+    if eastmoney_industry is not None and not eastmoney_industry.empty:
+        industry_source_snapshots.append(eastmoney_industry.copy())
 
     # Coverage denominator is the full current quote universe; READY means exactly 100%.
     def _coverage(snapshot):
@@ -337,6 +341,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 ) if not individual_industry.empty else 0.0
                 individual_failures = len(individual_industry.attrs.get("failed_symbols", {}))
                 if not individual_industry.empty:
+                    industry_source_snapshots.append(individual_industry.copy())
                     individual_industry["snapshot_id"] = eastmoney_industry["snapshot_id"].iloc[0]
                     industry = pd.concat([eastmoney_industry, individual_industry], ignore_index=True)
                     industry_count = int(industry["industry_code"].nunique())
@@ -346,14 +351,17 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             except Exception as exc:
                 individual_error = exc
 
-    # Independent Sina taxonomy is considered only as a complete alternative,
-    # not merged into Eastmoney's industry labels.
-    if chosen_coverage < 1.0:
+    # Always query independent taxonomies for cross-source audit and per-symbol gap coverage.
+    # The raw observations are archived separately; never mix their labels in the
+    # legacy single-taxonomy model-consumption snapshot.
+    if expected_symbols:
         try:
             sina_industry = fetch_sina_current_industry_membership_snapshot(
                 ak_module, clock=industry_clock
             )
             sina_coverage = _coverage(sina_industry)
+            if sina_industry is not None and not sina_industry.empty:
+                industry_source_snapshots.append(sina_industry.copy())
             if sina_coverage > chosen_coverage:
                 industry = sina_industry
                 chosen_source = "akshare.stock_sector_detail_sina"
@@ -364,52 +372,82 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     # Baostock is an independent free source; use it only when it improves
     # coverage. Its updateDate is metadata, not a historical publication time.
     # Inject the provider from the production CLI; tests never contact its socket.
-    if chosen_coverage < 1.0 and baostock_module is not None:
+    if expected_symbols and baostock_module is not None:
         try:
             baostock_industry = fetch_baostock_industry_membership_snapshot(
                 baostock_module, clock=industry_clock
             )
             baostock_coverage = _coverage(baostock_industry)
+            if baostock_industry is not None and not baostock_industry.empty:
+                industry_source_snapshots.append(baostock_industry.copy())
             if baostock_coverage > chosen_coverage:
                 industry = baostock_industry
                 chosen_source = "baostock.query_stock_industry"
                 chosen_coverage = baostock_coverage
         except Exception as exc:
             baostock_error = exc
-    elif chosen_coverage < 1.0:
-        baostock_error = RuntimeError("Baostock fallback was not injected into this collector run")
+    elif expected_symbols:
+        baostock_error = RuntimeError("Baostock provider was not injected into this collector run")
 
     # Shenwan Hongyuan publishes a bulk SW2021 stock-classification workbook.
     # It avoids per-symbol requests and is independent of Eastmoney/Baostock.
-    if chosen_coverage < 1.0 and expected_symbols and sw_industry_fetcher is not None:
+    if expected_symbols and sw_industry_fetcher is not None:
         try:
             sw_industry = sw_industry_fetcher(clock=industry_clock)
             sw_coverage = _coverage(sw_industry)
+            if sw_industry is not None and not sw_industry.empty:
+                industry_source_snapshots.append(sw_industry.copy())
             if sw_coverage > chosen_coverage:
                 industry = sw_industry
                 chosen_source = "swsresearch.sw2021_stock_classification"
                 chosen_coverage = sw_coverage
         except Exception as exc:
             sw_error = exc
-    elif chosen_coverage < 1.0 and expected_symbols:
-        sw_error = RuntimeError("Shenwan fallback was not injected into this collector run")
+    elif expected_symbols:
+        sw_error = RuntimeError("Shenwan provider was not injected into this collector run")
 
 
     # Baidu Gushitong provides an independent per-security industry lookup.
     # Query the full verified universe in bounded batches; preserve Baidu's own
     # taxonomy and select it only when its measured symbol coverage is better.
-    if chosen_coverage < 1.0 and expected_symbols and baidu_industry_fetcher is not None:
+    if expected_symbols and baidu_industry_fetcher is not None:
         try:
             baidu_industry = baidu_industry_fetcher(sorted(expected_symbols))
             baidu_coverage = _coverage(baidu_industry)
+            if baidu_industry is not None and not baidu_industry.empty:
+                industry_source_snapshots.append(baidu_industry.copy())
             if baidu_coverage > chosen_coverage:
                 industry = baidu_industry
                 chosen_source = "baidu.gushitong.relatedblock"
                 chosen_coverage = baidu_coverage
         except Exception as exc:
             baidu_error = exc
-    elif chosen_coverage < 1.0 and expected_symbols:
-        baidu_error = RuntimeError("Baidu fallback was not injected into this collector run")
+    elif expected_symbols:
+        baidu_error = RuntimeError("Baidu provider was not injected into this collector run")
+
+    source_coverage = {
+        "eastmoney_board": eastmoney_coverage,
+        "eastmoney_individual": individual_coverage,
+        "sina": sina_coverage,
+        "baostock": baostock_coverage,
+        "shenwan": sw_coverage,
+        "baidu": baidu_coverage,
+    }
+    source_symbols = {}
+    for snapshot in industry_source_snapshots:
+        source_id = str(snapshot["source_id"].iloc[0]) if "source_id" in snapshot.columns and not snapshot.empty else "unknown"
+        source_symbols.setdefault(source_id, set()).update(
+            snapshot["symbol"].astype(str).str.zfill(6) & expected_symbols
+        )
+    multi_source_covered_symbols = set().union(*source_symbols.values()) if source_symbols else set()
+    uncovered_symbols = sorted(expected_symbols - multi_source_covered_symbols)
+    multi_source_coverage = (
+        len(multi_source_covered_symbols) / len(expected_symbols) if expected_symbols else 0.0
+    )
+    industry_source_records = (
+        _records(pd.concat(industry_source_snapshots, ignore_index=True, sort=False))
+        if industry_source_snapshots else []
+    )
 
     if industry is None or industry.empty:
         source_status["industry_membership"] = (
@@ -533,6 +571,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         return {
             **{f"index_{code}": sum(1 for row in index_records if row["index_symbol"] == code) for code in INDEXES},
             "industry_membership": len(industry_records),
+            "industry_membership_sources": len(industry_source_records),
             "market_breadth": len(breadth_records),
             "limit_pools": len(limit_pool_records),
             "market_sentiment": int(sentiment is not None),
@@ -555,6 +594,11 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         industry_records,
         ("snapshot_id", "symbol", "industry_code", "source_revision"),
     ) if industry_records else 0
+    counts["industry_membership_sources"] = append_jsonl_atomic(
+        archive_root / "industry_membership_sources" / f"{day}.jsonl",
+        industry_source_records,
+        ("snapshot_id", "source_id", "symbol", "industry_code", "source_revision"),
+    ) if industry_source_records else 0
     counts["market_breadth"] = append_jsonl_atomic(
         archive_root / "market_breadth" / f"{day}.jsonl",
         breadth_records,
@@ -622,6 +666,15 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 "shenwan_error": _error_detail(sw_error),
                 "baidu_coverage": baidu_coverage,
                 "baidu_error": _error_detail(baidu_error),
+                "source_coverage": source_coverage,
+                "multi_source_covered_symbol_count": len(multi_source_covered_symbols),
+                "multi_source_coverage": multi_source_coverage,
+                "uncovered_symbols": uncovered_symbols,
+                "source_record_count": len(industry_source_records),
+                "source_taxonomy_count": len({
+                    (str(row.get("source_id")), str(row.get("industry_code")))
+                    for row in industry_source_records
+                }),
                 "selected_source": chosen_source,
             },
             "rows_appended": counts,
