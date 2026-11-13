@@ -316,11 +316,15 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             ) if not individual_industry.empty else 0.0
             individual_failures = len(individual_industry.attrs.get("failed_symbols", {}))
             if not individual_industry.empty:
-                industry = (
-                    pd.concat([eastmoney_industry, individual_industry], ignore_index=True)
-                    if eastmoney_industry is not None and not eastmoney_industry.empty
-                    else individual_industry
-                )
+                if eastmoney_industry is not None and not eastmoney_industry.empty:
+                    # One assembled daily Eastmoney snapshot ID, while retaining
+                    # each row's actual provider-response availability timestamp.
+                    individual_industry["snapshot_id"] = eastmoney_industry["snapshot_id"].iloc[0]
+                    industry = pd.concat([eastmoney_industry, individual_industry], ignore_index=True)
+                else:
+                    industry = individual_industry
+                industry_count = int(industry["industry_code"].nunique())
+                industry["expected_industry_count"] = industry_count
                 chosen_source = "eastmoney_board_plus_individual_info"
                 chosen_coverage = _coverage(industry)
         except Exception as exc:
