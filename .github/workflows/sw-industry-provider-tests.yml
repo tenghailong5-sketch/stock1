@@ -35,6 +35,15 @@ jobs:
         run: python -m pip install --upgrade pip pandas requests xlrd pytest
       - name: Test SW industry providers
         run: python -m pytest -q tests/test_sw_industry.py tests/test_sw_api_industry.py
+      - name: Inspect official SW TLS certificate chain
+        run: |
+          set +e
+          openssl s_client -connect www.swsresearch.com:443 -servername www.swsresearch.com -showcerts </dev/null 2>/dev/null \\
+            | awk 'BEGIN { n=0 } /BEGIN CERTIFICATE/ { n++ } n>0 { print > ("/tmp/sw-cert-" n ".pem") }'
+          for cert in /tmp/sw-cert-*.pem; do
+            echo "=== $cert ==="
+            openssl x509 -in "$cert" -noout -subject -issuer -fingerprint -sha1 2>&1
+          done
       - name: Live official SW2021 XLS smoke test
         run: |
           python - <<'PY'
