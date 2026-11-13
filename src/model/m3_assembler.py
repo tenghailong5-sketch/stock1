@@ -155,7 +155,10 @@ def assemble_m3_history(
         if pd.isna(coverage) or coverage < min_breadth_coverage:
             reasons.append(f"{day}:breadth_coverage_below_minimum")
             continue
-        if breadth.get("total_amount_status") != "complete_provider_snapshot_sum" or pd.isna(amount) or amount < 0:
+        if breadth.get("total_amount_status") not in {
+            "complete_provider_snapshot_sum",
+            "complete_provider_market_aggregate",
+        } or pd.isna(amount) or amount < 0:
             reasons.append(f"{day}:turnover_incomplete")
             continue
         if pd.isna(ratio) or not 0 <= ratio <= 1:
