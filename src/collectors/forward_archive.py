@@ -151,7 +151,7 @@ def _tencent_breadth_frame(ak_module):
     return out
 
 
-def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None, baostock_module=None) -> dict[str, int]:
+def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None, baostock_module=None, sw_industry_fetcher=None) -> dict[str, int]:
     ak_module = _RetryingProvider(ak_module, sleep_fn=retry_sleep)
     captured = pd.Timestamp(
         captured_at if captured_at is not None else datetime.now(ZoneInfo("Asia/Shanghai"))
@@ -378,9 +378,9 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
 
     # Shenwan Hongyuan publishes a bulk SW2021 stock-classification workbook.
     # It avoids per-symbol requests and is independent of Eastmoney/Baostock.
-    if chosen_coverage < 1.0 and expected_symbols:
+    if chosen_coverage < 1.0 and expected_symbols and sw_industry_fetcher is not None:
         try:
-            sw_industry = fetch_sw_current_industry_membership_snapshot(clock=industry_clock)
+            sw_industry = sw_industry_fetcher(clock=industry_clock)
             sw_coverage = _coverage(sw_industry)
             if sw_coverage > chosen_coverage:
                 industry = sw_industry
@@ -388,6 +388,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 chosen_coverage = sw_coverage
         except Exception as exc:
             sw_error = exc
+    elif chosen_coverage < 1.0 and expected_symbols:
+        sw_error = RuntimeError("Shenwan fallback was not injected into this collector run")
 
     if industry is None or industry.empty:
         source_status["industry_membership"] = (
@@ -622,6 +624,7 @@ def main() -> None:
         ak, Path(args.output), write=not args.dry_run, allow_partial=True,
         historical_market_fetcher=fetch_historical_market_context,
         baostock_module=bs,
+        sw_industry_fetcher=fetch_sw_current_industry_membership_snapshot,
     )
     print(json.dumps({"mode": "dry_run" if args.dry_run else "archive", "validated_rows": counts}, ensure_ascii=False, sort_keys=True))
 
