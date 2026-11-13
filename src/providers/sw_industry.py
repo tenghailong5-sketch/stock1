@@ -10,6 +10,7 @@ time only; this is not a historical point-in-time publication feed.
 from __future__ import annotations
 
 import hashlib
+import os
 import uuid
 from datetime import datetime, timezone
 from io import BytesIO
@@ -23,6 +24,30 @@ BASE_URL = "https://www.swsresearch.com/swindex/pdf/SwClass2021"
 STOCK_URL = f"{BASE_URL}/StockClassifyUse_stock.xls"
 CODE_URL = f"{BASE_URL}/SwClassCode_2021.xls"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; FHM100/1.0)"}
+SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+
+
+def _download_xls(client, url: str, timeout: int) -> bytes:
+    """Download an XLS with verified TLS; retry with the OS trust store on CA errors.
+
+    Never disable certificate verification. Some hosted runners/proxies install
+    additional roots in the OS bundle but not in certifi's bundle.
+    """
+    try:
+        response = client.get(url, headers=HEADERS, timeout=timeout)
+    except requests.exceptions.SSLError:
+        if not os.path.isfile(SYSTEM_CA_BUNDLE):
+            raise
+        response = client.get(
+            url, headers=HEADERS, timeout=timeout, verify=SYSTEM_CA_BUNDLE
+        )
+    response.raise_for_status()
+    content = response.content
+    # Legacy Excel .xls files are OLE compound documents. Reject HTML error pages
+    # and proxy login pages before handing their bytes to xlrd.
+    if not content or not content.startswith(bytes.fromhex("D0CF11E0A1B11AE1")):
+        raise ValueError(f"Shenwan XLS download is not a valid OLE .xls file: {url}")
+    return content
 
 
 def _text(value) -> str:
@@ -59,12 +84,10 @@ def fetch_sw_current_industry_membership_snapshot(
     """Download official SW2021 tables and select each stock's latest industry."""
     now = clock or (lambda: datetime.now(timezone.utc))
     client = session or requests
-    stock_response = client.get(STOCK_URL, headers=HEADERS, timeout=timeout)
-    stock_response.raise_for_status()
-    code_response = client.get(CODE_URL, headers=HEADERS, timeout=timeout)
-    code_response.raise_for_status()
+    stock_content = _download_xls(client, STOCK_URL, timeout)
+    code_content = _download_xls(client, CODE_URL, timeout)
 
-    code_headers, code_rows = _sheet_rows(code_response.content)
+    code_headers, code_rows = _sheet_rows(code_content)
     code_idx = _column(code_headers, "行业代码")
     l1_idx = _column(code_headers, "一级行业名称")
     l2_idx = _column(code_headers, "二级行业名称")
@@ -78,7 +101,7 @@ def fetch_sw_current_industry_membership_snapshot(
     if not code_map:
         raise ValueError("Shenwan industry-code dictionary contains no usable rows")
 
-    stock_headers, stock_rows = _sheet_rows(stock_response.content)
+    stock_headers, stock_rows = _sheet_rows(stock_content)
     symbol_idx = _column(stock_headers, "股票代码")
     date_idx = _column(stock_headers, "计入日期")
     industry_idx = _column(stock_headers, "行业代码")
