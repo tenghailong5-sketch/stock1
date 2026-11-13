@@ -13,7 +13,7 @@ permissions:
   contents: write
 concurrency:
   group: fhm100-daily
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   scan:
     runs-on: ubuntu-latest
