@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: delisted-discovery-main
+  group: delisted-discovery-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -30,7 +30,6 @@ jobs:
         run: ruby -e 'require "yaml"; YAML.load_file(".github/workflows/delisted-discovery.yml"); puts "workflow YAML syntax OK"'
 
   discover:
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -50,7 +49,7 @@ jobs:
           python -m pip install cnequity
       - name: Prepare persistent discovery checkpoint
         run: mkdir -p "$RUNNER_TEMP/cnequity-delisted-lake/meta/state"
-      - name: Restore latest main-branch discovery checkpoint
+      - name: Restore latest branch checkpoint (fall back to main)
         uses: actions/cache@v4
         with:
           path: |
@@ -58,10 +57,11 @@ jobs:
             ${{ runner.temp }}/cnequity-delisted-lake/meta/quality/evidence/delisted_security_identity/baostock-v1.json
           # A unique key per run is essential: Actions caches are immutable.
           # Restore the newest prior checkpoint, then save the advanced one.
-          key: delisted-catalog-main-${{ github.run_id }}
+          key: delisted-catalog-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ github.run_id }}
           restore-keys: |
+            delisted-catalog-${{ github.event.pull_request.head.ref || github.ref_name }}-
             delisted-catalog-main-
-          # Keep completed 100-code checkpoints even if a later step/job fails.
+          # Keep completed 750-code checkpoints even if a later step/job fails.
           save-always: true
       - name: Initialize minimal isolated lake
         run: |
