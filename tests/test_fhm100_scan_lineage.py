@@ -266,3 +266,12 @@ def test_partial_tencent_spot_snapshot_is_rejected_and_sina_fallback_is_used(mon
 
     assert len(result) == 4500
     assert result["code"].is_unique
+
+
+def test_tencent_history_symbol_uses_correct_exchange_prefix_for_all_a_share_boards():
+    assert fhm100._tencent_history_symbol("600000") == "sh600000"
+    assert fhm100._tencent_history_symbol("000001") == "sz000001"
+    assert fhm100._tencent_history_symbol("300750") == "sz300750"
+    assert fhm100._tencent_history_symbol("430047") == "bj430047"
+    assert fhm100._tencent_history_symbol("830799") == "bj830799"
+    assert fhm100._tencent_history_symbol("920002") == "bj920002"
