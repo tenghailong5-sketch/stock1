@@ -34,6 +34,7 @@ class LoginResult:
 class FakeBaostock:
     def __init__(self, login_results):
         self.login_results = list(login_results)
+        self.industry_query_dates = []
         self.login_calls = 0
         self.logout_calls = 0
 
@@ -44,7 +45,8 @@ class FakeBaostock:
     def logout(self):
         self.logout_calls += 1
 
-    def query_stock_industry(self):
+    def query_stock_industry(self, date=None):
+        self.industry_query_dates.append(date)
         return FakeResult([
             ["2026-11-09", "sz.000001", "平安银行", "银行", "申万一级行业"],
             ["2026-11-09", "sh.600000", "浦发银行", "银行", "申万一级行业"],
@@ -82,3 +84,25 @@ def test_baostock_provider_stops_after_bounded_login_retries():
         )
     assert module.login_calls == 2
     assert sleeps == [1]
+
+
+def test_baostock_provider_passes_historical_query_date_but_keeps_pit_blocked():
+    module = FakeBaostock([LoginResult("0")])
+    frame = fetch_baostock_industry_membership_snapshot(
+        module,
+        as_of_date="2024-12-31",
+        clock=lambda: pd.Timestamp("2026-11-14T08:00:00Z"),
+    )
+    assert module.industry_query_dates == ["2024-12-31"]
+    assert frame["query_date"].eq("2024-12-31").all()
+    assert frame["historical_pit_eligible"].eq(False).all()
+    assert frame["snapshot_scope"].eq("historical_date_query_candidate").all()
+
+
+def test_baostock_provider_rejects_non_iso_query_date():
+    module = FakeBaostock([LoginResult("0")])
+    with pytest.raises(ValueError, match="YYYY-MM-DD"):
+        fetch_baostock_industry_membership_snapshot(
+            module, as_of_date="20241231"
+        )
+    assert module.login_calls == 0
