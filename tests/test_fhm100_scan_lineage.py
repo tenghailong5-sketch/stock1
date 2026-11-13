@@ -203,3 +203,40 @@ def test_all_failed_history_scan_gets_sortable_empty_watchlist_schema():
         ["技术观察通过", "流动性观察通过", "当日成交额"],
         ascending=[False, False, False],
     ).empty
+
+def test_forward_industry_audit_reports_full_universe_coverage_without_claiming_pit(tmp_path):
+    import json
+
+    archive = tmp_path / "industry_membership"
+    archive.mkdir()
+    common = {
+        "snapshot_id": "batch-2026-11-13",
+        "expected_industry_count": 2,
+        "observed_at": "2026-11-13T00:00:00Z",
+        "available_time": "2026-11-13T00:00:00Z",
+        "source_id": "akshare.stock_sector_detail_sina",
+        "source_revision": "revision",
+        "snapshot_scope": "current_membership_observation_only",
+        "availability_basis": "retrieval_time_only",
+        "historical_pit_eligible": False,
+    }
+    rows = [
+        {**common, "symbol": "000001", "industry_code": "IND-A"},
+        {**common, "symbol": "000002", "industry_code": "IND-A"},
+        {**common, "symbol": "000001", "industry_code": "IND-B"},
+    ]
+    (archive / "2026-11-13.jsonl").write_text(
+        "\\n".join(json.dumps(row) for row in rows) + "\\n", encoding="utf-8"
+    )
+
+    selected, audit = fhm100.audit_forward_industry_membership(
+        tmp_path, ["000001", "000002"],
+        decision_time="2026-11-13T01:00:00Z",
+    )
+
+    assert audit["status"] == "ready_forward_only"
+    assert audit["selected_symbol_count"] == 2
+    assert audit["membership_coverage"] == 1.0
+    assert audit["historical_pit_eligible"] is False
+    assert set(selected["symbol"]) == {"000001", "000002"}
+
