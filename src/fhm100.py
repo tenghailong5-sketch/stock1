@@ -616,11 +616,19 @@ def main():
         u=universe()
         OUT.mkdir(exist_ok=True)
         u.to_csv(OUT/"market_snapshot.csv", index=False, encoding="utf-8-sig")
-        # First deliverable mode: scan the 60 most liquid symbols for a quick,
-        # provisional shortlist. Expand coverage after the data path is proven.
-        history_universe, history_pool_audit = select_history_universe_with_supplement(
-            u, max_symbols=60, max_supplement_symbols=0,
-        )
+        # Short-term research pool: liquidity anchor + active non-financial
+        # names. This affects retrieval priority only; FHM A/B/C rules remain intact.
+        history_universe = select_research_history_universe(u, max_symbols=60)
+        history_pool_audit = {
+            "selection_mode": "liquidity_anchor_plus_active_nonfinancial",
+            "primary_history_symbols": int(len(history_universe)),
+            "supplement_selected_symbols": 0,
+            "supplement_deferred_symbols": 0,
+            "history_scan_symbols": int(len(history_universe)),
+            "financial_names_excluded_from_research_pool": True,
+            "daily_gain_chase_cap_pct": 8.0,
+            "formal_candidate_filter": False,
+        }
         (OUT/"history_pool_audit.json").write_text(
             json.dumps(history_pool_audit, ensure_ascii=False, indent=2), encoding="utf-8"
         )
