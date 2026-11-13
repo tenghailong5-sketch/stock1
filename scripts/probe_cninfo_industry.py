@@ -28,7 +28,7 @@ def main() -> None:
         batch_report["columns"] = list(batch.columns) if batch is not None else []
         if batch is not None and not batch.empty and "证券代码" in batch.columns:
             batch_report["returned_symbols"] = sorted(
-                batch["证券代码"].astype(str).str.extract(r"(\\d{6})", expand=False).dropna().unique().tolist()
+                batch["证券代码"].astype(str).str.extract(r"(\d{6}), expand=False).dropna().unique().tolist()
             )
         batch_report["returned_rows"] = int(len(batch)) if batch is not None else 0
     except Exception as exc:
