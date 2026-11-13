@@ -309,6 +309,18 @@ def scan(u,archive_root=Path("data/forward_archive")):
             m4_bars = h.rename(columns={"date": "trade_date"}).copy()
             m4_bars["symbol"] = s.code
             m4 = price_structure(m4_bars, decision_time=decision_at.isoformat()).iloc[-1]
+            # Fast exploratory indicators: raw, unadjusted history only.
+            # These are deliberately labelled provisional and never enter formal M5.
+            raw_close = pd.to_numeric(h["close"], errors="coerce").dropna()
+            raw_amount = pd.to_numeric(h["amount"], errors="coerce")
+            raw_volume = pd.to_numeric(h["volume"], errors="coerce")
+            quick_r5 = raw_close.pct_change(5).iloc[-1] if len(raw_close) > 5 else np.nan
+            quick_r20 = raw_close.pct_change(20).iloc[-1] if len(raw_close) > 20 else np.nan
+            quick_amount_ma20 = raw_amount.tail(20).mean()
+            quick_volume_ratio = (
+                raw_volume.iloc[-1] / raw_volume.tail(20).mean()
+                if len(raw_volume) >= 20 and raw_volume.tail(20).mean() > 0 else np.nan
+            )
             available_at = pd.Timestamp(m4.available_time).to_pydatetime()
             liq=pd.notna(m4.amount_ma20) and m4.amount_ma20>=MIN_AMOUNT
             trend=(pd.notna(m4.return_5) and pd.notna(m4.return_20)
@@ -337,6 +349,10 @@ def scan(u,archive_root=Path("data/forward_archive")):
               "M4距20日高点交易日":m4.pullback_duration,
               "M4高量滞涨":bool(m4.high_volume_stall) if pd.notna(m4.high_volume_stall) else None,
               "M4缩量回撤":bool(m4.low_volume_pullback) if pd.notna(m4.low_volume_pullback) else None,
+              "快速5日收益%":quick_r5 * 100 if pd.notna(quick_r5) else np.nan,
+              "快速20日收益%":quick_r20 * 100 if pd.notna(quick_r20) else np.nan,
+              "快速量比20日":quick_volume_ratio,
+              "快速20日平均成交额":quick_amount_ma20,
               "M4数据口径":"原始OHLC仅用于当日K线结构；跨日特征仅接受经公司行为账本验证的点时总收益序列；本次抓取时间戳不具备历史PIT资格",
               "M4跨日价格状态":m4.cross_session_price_status,
               "流动性观察通过":bool(liq),"技术观察通过":bool(trend and structure and pullback),
@@ -549,8 +565,10 @@ def main():
         u=universe()
         OUT.mkdir(exist_ok=True)
         u.to_csv(OUT/"market_snapshot.csv", index=False, encoding="utf-8-sig")
+        # First deliverable mode: scan the 60 most liquid symbols for a quick,
+        # provisional shortlist. Expand coverage after the data path is proven.
         history_universe, history_pool_audit = select_history_universe_with_supplement(
-            u, max_symbols=600, max_supplement_symbols=200,
+            u, max_symbols=60, max_supplement_symbols=0,
         )
         (OUT/"history_pool_audit.json").write_text(
             json.dumps(history_pool_audit, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -604,7 +622,24 @@ def main():
     (OUT/"industry_membership_forward_audit.json").write_text(
         json.dumps(industry_audit, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
-    w=w.sort_values(["技术观察通过","流动性观察通过","当日成交额"],ascending=[False,False,False])
+    # Cross-sectional quick score is an exploratory ranking only. It uses raw
+    # unadjusted history and is not an official FHM-100 A/B/C score.
+    quick_columns = ["快速5日收益%", "快速20日收益%", "CLV", "快速量比20日", "快速20日平均成交额"]
+    if not w.empty and all(column in w.columns for column in quick_columns):
+        percentile = w[quick_columns].apply(pd.to_numeric, errors="coerce").rank(pct=True)
+        w["快速初筛分"] = (percentile.mean(axis=1) * 100).where(percentile.notna().sum(axis=1) >= 4)
+        w["快速初筛通过"] = (
+            (pd.to_numeric(w["快速20日平均成交额"], errors="coerce") >= MIN_AMOUNT)
+            & (pd.to_numeric(w["快速5日收益%"], errors="coerce") > 0)
+            & (pd.to_numeric(w["快速20日收益%"], errors="coerce") > 0)
+            & (pd.to_numeric(w["CLV"], errors="coerce") >= 0.55)
+            & w["快速初筛分"].notna()
+        )
+    else:
+        w["快速初筛分"] = np.nan
+        w["快速初筛通过"] = False
+    w=w.sort_values(["快速初筛通过","快速初筛分","技术观察通过","流动性观察通过","当日成交额"],
+                    ascending=[False,False,False,False,False])
     # M5 remains diagnostic-only. A/C receive the defined M3 market factor
     # only when M3 is independently READY; all other factors and gates remain fail-closed.
     m5_input = build_m5_diagnostic_input(w, m3)
@@ -655,6 +690,7 @@ def main():
       f"- 历史数据成功：{len(w)}",f"- 数据异常：{len(e)}",
       f"- 行情采集状态：{'正常' if len(u) else '失败/不可用；本次不产生候选'}",
       f"- 基础技术观察名单：{len(c)}",
+      f"- 快速初筛通过：{int(w['快速初筛通过'].sum()) if '快速初筛通过' in w else 0}只（临时探索排名，不是正式FHM分数）",
       f"- M4价格/流动性观察因子已计算：{len(w)}",
       f"- M4观察分位审计记录：{len(observation_audit)}条",
       f"- 个股行情最新可用时间：{latest_stock_available or '无'}；统一决策时点：{now.isoformat()}",
@@ -672,6 +708,10 @@ def main():
       "M4已新增CLV、BodyStrength、5/10/20日收益、20日突破和上影线的横截面观察分位，并输出m4_observation_audit.csv。分位仅在同一交易日、声明的当前高成交额股票池完整覆盖且因子覆盖率达到95%时生成；不完整则全部留空。它们不是价格结构/成交质量复合分，也未接入M5。M3仅在前瞻归档状态READY时传入M5；行业/残差分位及策略硬门槛仍未全部接入，因此M5仍是诊断而非正式评分。",
       "不输出A/B/C正式评分、P_up、预期收益或买入指令；观察名单不等于达到80分门槛。AI仅作文字点评，不参与评分、不放宽硬门槛。",
       "价格口径：本扫描仅用未复权原始日线；尚无点时公司行为账本，分红送转附近的跨日收益/均线可能失真，相关观察值不得进入正式模型评分或回测标签。",
+      "## 快速初筛排名（临时研究结果，非正式FHM信号/非买入指令）",
+      (w[w["快速初筛通过"]].sort_values("快速初筛分", ascending=False).head(20).to_markdown(index=False)
+       if "快速初筛通过" in w and w["快速初筛通过"].any()
+       else "暂无股票通过快速初筛条件。"),
       "## 技术观察名单（非买入信号）",
       c.head(30).to_markdown(index=False) if len(c) else "暂无满足基础技术观察条件的股票。",
       "## 数据异常",e.head(30).to_markdown(index=False) if len(e) else "无记录"]
