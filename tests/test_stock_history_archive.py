@@ -85,3 +85,23 @@ def test_stock_history_archive_rejects_naive_capture_time(tmp_path):
             _bars(), "000001", captured_at="2026-11-12T08:30:00",
             archive_root=tmp_path,
         )
+
+def test_stock_history_archive_preserves_identical_rows_from_distinct_providers(tmp_path):
+    first = archive_stock_history_snapshot(
+        _bars(), "000001", captured_at="2026-11-12T08:30:00+00:00",
+        archive_root=tmp_path, source_id="akshare.stock_zh_a_hist",
+    )
+    second = archive_stock_history_snapshot(
+        _bars(), "000001", captured_at="2026-11-12T08:40:00+00:00",
+        archive_root=tmp_path, source_id="akshare.stock_zh_a_hist_tx",
+    )
+
+    assert first["rows_appended"] == 2
+    assert second["rows_appended"] == 2
+    rows_path = tmp_path / "stock_daily" / "000001.jsonl"
+    rows = [json.loads(line) for line in rows_path.read_text().splitlines()]
+    assert len(rows) == 4
+    assert {row["source_id"] for row in rows} == {
+        "akshare.stock_zh_a_hist", "akshare.stock_zh_a_hist_tx"
+    }
+
