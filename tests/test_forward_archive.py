@@ -84,11 +84,13 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
     )
     assert set(counts) == {
         "index_000001", "index_399001", "index_399006",
-        "index_000688", "index_000300", "industry_membership", "market_breadth", "limit_pools", "market_sentiment",
+        "index_000688", "index_000300", "industry_membership", "industry_membership_sources",
+        "market_breadth", "limit_pools", "market_sentiment",
         "market_breadth_history_backfill", "market_sentiment_history_backfill",
     }
     assert all(counts[f"index_{code}"] == 1 for code in ("000001", "399001", "399006", "000688", "000300"))
-    assert counts["industry_membership"] == 6  # three symbols across two industries
+    assert counts["industry_membership"] == 6  # selected taxonomy: three symbols across two industries
+    assert counts["industry_membership_sources"] == 6
     assert counts["market_breadth"] == 1
     assert counts["market_sentiment"] == 1
     index_file = tmp_path / "index_daily" / "000001.jsonl"
@@ -589,6 +591,73 @@ def test_collector_prefers_sina_when_eastmoney_industry_coverage_is_incomplete(t
     ]
     assert {row["source_id"] for row in rows} == {"akshare.stock_sector_detail_sina"}
     assert {row["symbol"] for row in rows} == {"000001", "600000", "000002"}
+
+
+
+def test_collector_archives_all_industry_sources_and_reports_union_coverage(tmp_path):
+    class SplitCoverageProvider(FakeArchiveAkshare):
+        def stock_board_industry_cons_em(self, symbol):
+            return pd.DataFrame({"代码": ["000001"]})
+
+        def stock_sector_spot(self, indicator):
+            return pd.DataFrame([
+                {"label": f"industry_{index:02d}", "板块": f"行业{index}"}
+                for index in range(10)
+            ])
+
+        def stock_sector_detail(self, sector):
+            return pd.DataFrame([
+                {"code": "000001", "name": "样例一"},
+                {"code": "600000", "name": "样例二"},
+            ])
+
+    def baidu_fetcher(symbols):
+        assert symbols == ["000001", "000002", "600000"]
+        return pd.DataFrame([{
+            "symbol": "000002",
+            "industry_code": "BD-TECH",
+            "industry_name": "百度行业样例",
+            "industry_level1": "百度分类",
+            "industry_level2": "百度行业样例",
+            "snapshot_id": "baidu-snapshot",
+            "expected_industry_count": 1,
+            "observed_at": "2026-11-13T08:00:00Z",
+            "available_time": "2026-11-13T08:00:00Z",
+            "availability_basis": "retrieval_time_only",
+            "historical_pit_eligible": False,
+            "source_id": "baidu.gushitong.relatedblock",
+            "snapshot_scope": "current_membership_observation_only",
+            "source_revision": "baidu-revision",
+        }])
+
+    counts = collect(
+        SplitCoverageProvider(), tmp_path,
+        captured_at="2026-11-13T16:30:00+08:00",
+        allow_partial=True,
+        baidu_industry_fetcher=baidu_fetcher,
+    )
+    assert counts["industry_membership_sources"] > counts["industry_membership"]
+    report = json.loads(
+        (tmp_path / "collection_report" / "2026-11-13.json").read_text(encoding="utf-8")
+    )
+    audit = report["industry_audit"]
+    assert audit["quote_universe_symbol_count"] == 3
+    assert audit["multi_source_covered_symbol_count"] == 3
+    assert audit["multi_source_coverage"] == 1.0
+    assert audit["uncovered_symbols"] == []
+    raw_rows = [
+        json.loads(line)
+        for line in (tmp_path / "industry_membership_sources" / "2026-11-13.jsonl").read_text().splitlines()
+    ]
+    assert {"akshare.stock_board_industry_cons_em", "akshare.stock_sector_detail_sina",
+            "baidu.gushitong.relatedblock"}.issubset({row["source_id"] for row in raw_rows})
+    assert {row["symbol"] for row in raw_rows} == {"000001", "000002", "600000"}
+    # The selected model-consumption snapshot remains one taxonomy only.
+    selected_rows = [
+        json.loads(line)
+        for line in (tmp_path / "industry_membership" / "2026-11-13.jsonl").read_text().splitlines()
+    ]
+    assert len({row["source_id"] for row in selected_rows}) == 1
 
 
 def test_collector_backfills_missing_historical_market_context(tmp_path):
