@@ -393,8 +393,135 @@ jobs:
           from datetime import date
           from pathlib import Path
           from cnequity.adapters.baostock.corporate_actions import fetch_corporate_actions_baostock
+          from cnequity.adapters.eastmoney.corporate_actions import fetch_corporate_actions_eastmoney
           from cnequity.config import load_config
           from cnequity.query import load
+
+          symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
+          start = date.fromisoformat(os.environ["BAR_START"])
+          end = date.fromisoformat(os.environ.get("ACTION_END") or os.environ["BAR_END"])
+          config = load_config(os.environ["CNE_CONFIG"])
+          run_id = os.environ["GITHUB_RUN_ID"]
+          independent, failed = fetch_corporate_actions_baostock(
+              symbols, start, end, config=config, run_id=run_id,
+          )
+          tdx = load("corporate_actions", symbols=symbols, start=start.isoformat(), end=end.isoformat())
+          keys = ["symbol", "ex_date", "action_type"]
+          terms = ["cash_dividend", "bonus_ratio", "transfer_ratio"]
+          if tdx is None:
+              raise RuntimeError("TDX corporate-action query returned no frame")
+          missing = sorted(set(keys + terms) - set(tdx.columns))
+          if missing:
+              raise RuntimeError(f"TDX corporate-action schema missing fields: {missing}")
+
+          # A symbol can receive multiple approved dividend plans on one ex-date
+          # (e.g. annual + interim dividends). Aggregate those plans instead of
+          # overwriting one with another. TDX and EastMoney already expose the
+          # combined per-share amount; Baostock may return each plan separately.
+          def event_map(frame):
+              mapped = {}
+              unsupported = 0
+              for raw in frame.to_dicts():
+                  action_type = str(raw["action_type"])
+                  if action_type not in {"cash_dividend", "bonus", "transfer"}:
+                      unsupported += 1
+                      continue
+                  ex_date = raw["ex_date"]
+                  if hasattr(ex_date, "isoformat"):
+                      ex_date = ex_date.isoformat()
+                  if action_type == "cash_dividend":
+                      kind = "cash_dividend"
+                      amount = float(raw.get("cash_dividend") or 0.0)
+                  else:
+                      kind = "share_distribution"
+                      amount = float(raw.get("bonus_ratio") or 0.0) + float(raw.get("transfer_ratio") or 0.0)
+                  key = (str(raw["symbol"]), str(ex_date)[:10], kind)
+                  mapped[key] = mapped.get(key, 0.0) + amount
+              return mapped, unsupported
+
+          left, tdx_unsupported = event_map(tdx)
+          right, baostock_unsupported = event_map(independent)
+          matched_keys = set(left) & set(right)
+          tdx_only = set(left) - set(right)
+          baostock_only = set(right) - set(left)
+          baostock_mismatches = []
+          for key in sorted(matched_keys):
+              if abs(left[key] - right[key]) > 1e-5:
+                  baostock_mismatches.append({
+                      "symbol": key[0], "ex_date": key[1], "action_type": key[2],
+                      "tdx": left[key], "baostock": right[key]
+                  })
+
+          # Baostock's dividend endpoint can lag newly implemented events.
+          # Independently query EastMoney for every ex-date actually present in
+          # TDX; this also verifies TDX-only keys rather than silently ignoring them.
+          event_dates = sorted({
+              raw["ex_date"] if isinstance(raw["ex_date"], date)
+              else date.fromisoformat(str(raw["ex_date"])[:10])
+              for raw in tdx.to_dicts()
+              if raw.get("ex_date") is not None
+          })
+          eastmoney_error = None
+          eastmoney = None
+          try:
+              eastmoney = fetch_corporate_actions_eastmoney(
+                  end, dates=event_dates, config=config, run_id=run_id,
+                  request_scope=f"validation:eastmoney:{start.isoformat()}:{end.isoformat()}",
+              )
+          except Exception as exc:
+              eastmoney_error = f"{type(exc).__name__}: {exc}"
+
+          eastmoney_map, eastmoney_unsupported = event_map(eastmoney) if eastmoney is not None and eastmoney.height else ({}, 0)
+          em_matched = set(left) & set(eastmoney_map)
+          em_tdx_only = set(left) - set(eastmoney_map)
+          em_only = set(eastmoney_map) - set(left)
+          eastmoney_mismatches = []
+          for key in sorted(em_matched):
+              if abs(left[key] - eastmoney_map[key]) > 1e-5:
+                  eastmoney_mismatches.append({
+                      "symbol": key[0], "ex_date": key[1], "action_type": key[2],
+                      "tdx": left[key], "eastmoney": eastmoney_map[key]
+                  })
+
+          report = {
+              "window": {"start": start.isoformat(), "end": end.isoformat()},
+              "queried_symbols": sorted(symbols),
+              "answered_symbols": sorted(set(symbols) - set(failed)),
+              "failed_symbols": sorted(failed),
+              "tdx_rows_comparable": len(left),
+              "baostock_rows_comparable": len(right),
+              "tdx_unsupported_event_rows": tdx_unsupported,
+              "baostock_unsupported_event_rows": baostock_unsupported,
+              "matched_event_keys": len(matched_keys),
+              "tdx_only_event_keys": len(tdx_only),
+              "baostock_only_event_keys": len(baostock_only),
+              "baostock_term_mismatch_count": len(baostock_mismatches),
+              "baostock_term_mismatch_examples": baostock_mismatches[:50],
+              "tdx_only_examples": [list(key) for key in sorted(tdx_only)[:50]],
+              "baostock_only_examples": [list(key) for key in sorted(baostock_only)[:50]],
+              "eastmoney_query_completed": eastmoney_error is None,
+              "eastmoney_error": eastmoney_error,
+              "eastmoney_rows_comparable": len(eastmoney_map),
+              "eastmoney_unsupported_event_rows": eastmoney_unsupported,
+              "tdx_eastmoney_matched_event_keys": len(em_matched),
+              "tdx_eastmoney_missing_event_keys": len(em_tdx_only),
+              "eastmoney_only_event_keys": len(em_only),
+              "eastmoney_term_mismatch_count": len(eastmoney_mismatches),
+              "eastmoney_term_mismatch_examples": eastmoney_mismatches[:50],
+              "tdx_eastmoney_missing_examples": [list(key) for key in sorted(em_tdx_only)[:50]],
+              "eastmoney_only_examples": [list(key) for key in sorted(em_only)[:50]],
+              "source": "baostock_and_eastmoney_independent_queries",
+              "all_symbols_answered": not failed,
+              "historical_pit_eligible": False,
+              "coverage_status": "independent_sources_queried; issuer_event_completeness_not_certified",
+              "note": "Multiple plans on one ex-date are summed. Baostock coverage is checked independently; EastMoney is queried for every TDX event date. This does not certify issuer-wide event completeness."
+          }
+          out = Path("validation/cnequity-demo/corporate-action-independent-source-audit.json")
+          out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+
+          if eastmoney_error:
+              raise RuntimeError(f"Independent EastMoney corporate-action query failed: {eastmoney_error}")
 
           symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
           start = date.fromisoformat(os.environ["BAR_START"])
@@ -763,18 +890,22 @@ jobs:
           from pathlib import Path
           report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
           if not report.get("all_symbols_answered") or report.get("failed_symbols"):
-              raise SystemExit(f"Independent-source query incomplete: {report.get('failed_symbols')}")
+              raise SystemExit(f"Baostock query incomplete: {report.get('failed_symbols')}")
           if len(report.get("answered_symbols", [])) != len(report.get("queried_symbols", [])):
-              raise SystemExit("Independent-source response count does not match requested symbols")
+              raise SystemExit("Baostock response count does not match requested symbols")
+          if not report.get("eastmoney_query_completed"):
+              raise SystemExit(f"EastMoney independent query incomplete: {report.get('eastmoney_error')}")
           discrepancies = {
-              "tdx_only_event_keys": int(report.get("tdx_only_event_keys", 0)),
               "baostock_only_event_keys": int(report.get("baostock_only_event_keys", 0)),
-              "term_mismatch_count": int(report.get("term_mismatch_count", 0)),
+              "baostock_term_mismatch_count": int(report.get("baostock_term_mismatch_count", 0)),
+              "tdx_eastmoney_missing_event_keys": int(report.get("tdx_eastmoney_missing_event_keys", 0)),
+              "eastmoney_only_event_keys": int(report.get("eastmoney_only_event_keys", 0)),
+              "eastmoney_term_mismatch_count": int(report.get("eastmoney_term_mismatch_count", 0)),
           }
           if any(discrepancies.values()):
               raise SystemExit(f"Unresolved independent-source event discrepancies: {discrepancies}")
-          print("Independent Baostock corporate-action query completed for every requested symbol with no comparable-event discrepancies.")
-          print("Event completeness and historical point-in-time eligibility remain uncertified.")
+          print("TDX and EastMoney agree on every comparable event; Baostock has no unmatched or conflicting returned events.")
+          print("Baostock omissions are separately disclosed; event completeness and historical point-in-time eligibility remain uncertified.")
           PY
           echo "Factor arbitration and independent corporate-action source audit completed; completeness remains uncertified."
       - name: Upload validation evidence
