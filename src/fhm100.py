@@ -224,7 +224,7 @@ def _download_tencent_history(code, start, *, cause):
     """Fetch and strictly normalize Tencent daily bars after Eastmoney failure."""
     symbol = _tencent_history_symbol(code)
     frame = ak.stock_zh_a_hist_tx(
-        symbol=prefix + str(code).zfill(6), start_date=start,
+        symbol=symbol, start_date=start,
         end_date=datetime.now().strftime("%Y%m%d"), adjust=""
     )
     if frame is None or frame.empty:
