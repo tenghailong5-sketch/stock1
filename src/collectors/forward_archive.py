@@ -437,12 +437,18 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     for snapshot in industry_source_snapshots:
         source_id = str(snapshot["source_id"].iloc[0]) if "source_id" in snapshot.columns and not snapshot.empty else "unknown"
         source_symbols.setdefault(source_id, set()).update(
-            snapshot["symbol"].astype(str).str.zfill(6) & expected_symbols
+            set(snapshot["symbol"].astype(str).str.zfill(6)) & expected_symbols
         )
     multi_source_covered_symbols = set().union(*source_symbols.values()) if source_symbols else set()
     uncovered_symbols = sorted(expected_symbols - multi_source_covered_symbols)
     multi_source_coverage = (
         len(multi_source_covered_symbols) / len(expected_symbols) if expected_symbols else 0.0
+    )
+    source_status["industry_membership_multisource"] = (
+        f"ok: covered={len(multi_source_covered_symbols)}/{len(expected_symbols)} "
+        if multi_source_coverage >= 1.0 else
+        f"partial: covered={len(multi_source_covered_symbols)}/{len(expected_symbols)}; "
+        f"uncovered={len(uncovered_symbols)}"
     )
     industry_source_records = (
         _records(pd.concat(industry_source_snapshots, ignore_index=True, sort=False))
