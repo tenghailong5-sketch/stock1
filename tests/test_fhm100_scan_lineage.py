@@ -226,7 +226,7 @@ def test_forward_industry_audit_reports_full_universe_coverage_without_claiming_
         {**common, "symbol": "000001", "industry_code": "IND-B"},
     ]
     (archive / "2026-11-13.jsonl").write_text(
-        "\\n".join(json.dumps(row) for row in rows) + "\\n", encoding="utf-8"
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
     )
 
     selected, audit = fhm100.audit_forward_industry_membership(
