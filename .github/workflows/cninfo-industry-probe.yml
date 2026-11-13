@@ -1,0 +1,34 @@
+name: CNINFO Industry Live Probe
+
+on:
+  pull_request:
+    paths:
+      - "src/providers/cninfo_industry.py"
+      - "scripts/probe_cninfo_industry.py"
+      - ".github/workflows/cninfo-industry-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install project dependencies
+        run: pip install -r requirements.txt
+      - name: Probe live CNINFO classification for three securities
+        run: python scripts/probe_cninfo_industry.py
+      - name: Upload live probe report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cninfo-industry-live-probe
+          path: output/cninfo_industry_probe.json
+          if-no-files-found: warn
+          retention-days: 30
