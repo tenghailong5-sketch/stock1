@@ -114,7 +114,7 @@ jobs:
           print(f"Verified daily_bars prerequisite: {len(bars)} rows across {bars['symbol'].nunique()} symbols")
           PY
       - name: Initialize isolated delisted-history lake
-        if: ${{ inputs.include_delisted_history == 'true' }}
+        if: ${{ inputs.include_delisted_history == true }}
         env:
           DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
         run: |
@@ -127,6 +127,7 @@ jobs:
           set -euo pipefail
           # The main sample lake feeds the main sample adjustment-factor derivation.
           ACTION_END="$(TZ=Asia/Shanghai date -d 'yesterday' +%F)"
+          echo "ACTION_END=$ACTION_END" >> "$GITHUB_ENV"
           export ACTION_END
           cne backfill corporate_actions --start "$BAR_START" --end "$ACTION_END" --symbols "$DEMO_SYMBOLS" --config "$CNE_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/corporate-actions-main-plan.log
           main_attempt=0
@@ -179,14 +180,14 @@ jobs:
           print(json.dumps(report, ensure_ascii=False, indent=2))
           PY
       - name: Discover confirmed delisted securities (resumable bounded sweep)
-        if: ${{ inputs.include_delisted_history == 'true' }}
+        if: ${{ inputs.include_delisted_history == true }}
         run: |
           set -euo pipefail
           # The upstream discovery sweep checkpoints every 100 probes. Keep each Actions run to one checkpointed chunk so it can finish inside the job timeout; later runs resume from the cached catalogue.
           python cnequity-source/scripts/delisted_ops.py --config "$DELISTED_CONFIG" discover --limit 100 2>&1 | tee validation/cnequity-demo/delisted-discovery.log
           cne delisted status --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-status-before-backfill.log
       - name: Backfill corporate actions for confirmed delisted securities
-        if: ${{ inputs.include_delisted_history == 'true' }}
+        if: ${{ inputs.include_delisted_history == true }}
         run: |
           set -euo pipefail
           # Use the confirmed catalog, not today's demo symbols, so recovered
@@ -246,7 +247,7 @@ jobs:
           print(json.dumps(report, ensure_ascii=False, indent=2))
           PY
       - name: Plan and backfill confirmed delisted-security daily bars
-        if: ${{ inputs.include_delisted_history == 'true' }}
+        if: ${{ inputs.include_delisted_history == true }}
         run: |
           set -euo pipefail
           cne backfill daily_bars --profile delisted --start 2016-01-01 --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/delisted-bars-plan.log
@@ -277,7 +278,7 @@ jobs:
           print(json.dumps({k:v for k,v in report.items() if k != "log_tail"}, ensure_ascii=False, indent=2))
           PY
       - name: Extend trading calendar over recovered delisted history
-        if: ${{ inputs.include_delisted_history == 'true' }}
+        if: ${{ inputs.include_delisted_history == true }}
         run: |
           set -euo pipefail
           cne backfill trading_calendar --start 2016-01-01 --end "$BAR_END" --config "$DELISTED_CONFIG" --plan 2>&1 | tee validation/cnequity-demo/trading-calendar-plan.log
@@ -414,7 +415,7 @@ jobs:
           print(json.dumps(report, ensure_ascii=False, indent=2))
           PY
       - name: Derive and validate adjustment factors for recovered delisted history
-        if: ${{ inputs.include_delisted_history == 'true' }}
+        if: ${{ inputs.include_delisted_history == true }}
         run: |
           set -euo pipefail
           cne derive adj_factors --config "$DELISTED_CONFIG" 2>&1 | tee validation/cnequity-demo/delisted-adj-factors.log
@@ -488,7 +489,7 @@ jobs:
               raise RuntimeError("Delisted strict hfq adjusted close contains missing/non-finite values")
           PY
       - name: Report delisted survivorship coverage (non-gating audit)
-        if: ${{ inputs.include_delisted_history == 'true' }}
+        if: ${{ inputs.include_delisted_history == true }}
         if: success()
         run: |
           set +e
