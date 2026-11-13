@@ -331,3 +331,79 @@ def json_dumps_stable(value: dict) -> str:
     """Serialize summary values deterministically for revision hashing."""
     import json
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def fetch_eastmoney_individual_industry_membership_snapshot(
+    ak_module, symbols, *, clock=None, pause_seconds: float = 0.15,
+    sleep_fn=time.sleep, industry_code_by_name=None, max_attempts: int = 2,
+) -> pd.DataFrame:
+    """Fill current industry gaps through Eastmoney's per-security profile API.
+
+    This remains one Eastmoney taxonomy: known industry names reuse the
+    corresponding board code; unseen names receive a deterministic name key.
+    Each row is stamped only after its own profile response returns. Failed
+    lookups are retained in DataFrame.attrs for an explicit coverage audit.
+    """
+    provider = getattr(ak_module, "stock_individual_info_em", None)
+    if not callable(provider):
+        raise RuntimeError("Eastmoney individual-info industry endpoint is unavailable")
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+    now = clock or (lambda: datetime.now(timezone.utc))
+    code_map = dict(industry_code_by_name or {})
+    requested = sorted({str(value).strip().zfill(6) for value in symbols if str(value).strip()})
+    rows, failures = [], {}
+    snapshot_id = str(uuid.uuid4())
+
+    for position, symbol in enumerate(requested):
+        last_error = None
+        for attempt in range(max_attempts):
+            try:
+                frame = provider(symbol=symbol)
+                captured = _utc(now())
+                if frame is None or frame.empty or not {"item", "value"}.issubset(frame.columns):
+                    raise ValueError("individual-info response missing item/value fields")
+                values = frame.loc[frame["item"].astype(str).str.strip().eq("行业"), "value"]
+                industry_name = str(values.iloc[-1]).strip() if not values.empty else ""
+                if not industry_name or industry_name.lower() in {"nan", "none", "--", "-"}:
+                    raise ValueError("individual-info response has no usable industry")
+                industry_code = code_map.get(industry_name, "EM::" + industry_name)
+                rows.append({
+                    "symbol": symbol,
+                    "industry_code": industry_code,
+                    "industry_name": industry_name,
+                    "snapshot_id": snapshot_id,
+                    "observed_at": captured,
+                    "available_time": captured,
+                    "availability_basis": "retrieval_time_only",
+                    "historical_pit_eligible": False,
+                    "source_id": "akshare.stock_individual_info_em",
+                    "snapshot_scope": "current_membership_observation_only",
+                    "source_revision": hashlib.sha256(
+                        (symbol + "|" + industry_code + "|" + industry_name).encode("utf-8")
+                    ).hexdigest(),
+                })
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = f"{type(exc).__name__}: {str(exc)[:180]}"
+                if attempt + 1 < max_attempts:
+                    sleep_fn(min(2 ** attempt, 4))
+        if last_error is not None:
+            failures[symbol] = last_error
+        if pause_seconds > 0 and position + 1 < len(requested):
+            sleep_fn(pause_seconds)
+
+    result = pd.DataFrame(rows)
+    if not result.empty:
+        result["expected_industry_count"] = int(result["industry_code"].nunique())
+        result = result[[
+            "symbol", "industry_code", "industry_name", "snapshot_id",
+            "expected_industry_count", "observed_at", "available_time",
+            "availability_basis", "historical_pit_eligible", "source_id",
+            "snapshot_scope", "source_revision",
+        ]]
+    result.attrs["requested_symbol_count"] = len(requested)
+    result.attrs["success_symbol_count"] = len(rows)
+    result.attrs["failed_symbols"] = failures
+    return result
