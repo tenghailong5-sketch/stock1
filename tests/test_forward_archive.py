@@ -955,7 +955,7 @@ def test_manual_industry_evidence_loader_accepts_only_reconciled_current_sources
             "record_status": "conflict_requires_taxonomy_reconciliation",
         },
     ]
-    path.write_text("\\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\\n", encoding="utf-8")
+    path.write_text("\\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
     result = _load_manual_industry_evidence(
         path, {"000001", "000975", "600000", "000002"},
         captured_at="2026-11-14T05:00:00Z",
@@ -981,7 +981,7 @@ def test_collector_adds_manual_evidence_to_multisource_archive_only(tmp_path):
         "source_id": "sina.finance_f10_sw",
         "source_url": "https://money.finance.sina.com.cn/corp/go.php/vCI_CorpOtherInfo/stockid/000001.phtml",
         "record_status": "source_url_reconciled_current_observation_candidate",
-    }, ensure_ascii=False) + "\\n", encoding="utf-8")
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
     counts = collect(
         FakeArchiveAkshare(), tmp_path,
         captured_at="2026-11-11T16:30:00+08:00",
