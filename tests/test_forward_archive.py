@@ -612,7 +612,7 @@ def test_collector_archives_all_industry_sources_and_reports_union_coverage(tmp_
             ])
 
     def baidu_fetcher(symbols):
-        assert symbols == ["000001", "000002", "600000"]
+        assert symbols == ["000002"]
         return pd.DataFrame([{
             "symbol": "000002",
             "industry_code": "BD-TECH",
