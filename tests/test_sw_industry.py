@@ -89,7 +89,10 @@ def test_download_retries_with_pinned_intermediate_bundle_after_ssl_error(monkey
                 raise sw_industry.requests.exceptions.SSLError("untrusted local issuer")
             return Response(bytes.fromhex("D0CF11E0A1B11AE1") + b"xls")
 
-    monkeypatch.setattr(sw_industry, "_trusted_intermediate_bundle", lambda timeout=15: "/tmp/pinned-sw-ca.pem")
+    monkeypatch.setattr(
+        sw_industry, "_trusted_intermediate_bundle",
+        lambda timeout=15: "/tmp/pinned-sw-ca.pem",
+    )
     session = SSLFailOnceSession()
     content = sw_industry._download_xls(session, sw_industry.STOCK_URL, 30)
 
