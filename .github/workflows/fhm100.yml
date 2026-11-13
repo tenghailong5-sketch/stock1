@@ -1,6 +1,12 @@
 name: FHM-100 Daily Research
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "requirements.txt"
+      - ".github/workflows/fhm100.yml"
   schedule:
     - cron: "0 9 * * 1-5" # 17:00 Beijing time; run after the 16:30 forward archive
 permissions:
