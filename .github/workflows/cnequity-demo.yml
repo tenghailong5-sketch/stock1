@@ -1,15 +1,6 @@
 name: CNEquity Bounded Demo Validation
 
 on:
-  push:
-    branches: [feat/corporate-action-cross-source-reconciliation]
-    paths:
-      - "src/providers/cnequity.py"
-      - "src/model/data_layer.py"
-      - "tests/test_cnequity*.py"
-      - "requirements.txt"
-      - "pyproject.toml"
-      - ".github/workflows/cnequity-demo.yml"
   pull_request:
     types: [opened, synchronize, reopened]
     # The bounded real-provider demo can take a long time and consumes external
