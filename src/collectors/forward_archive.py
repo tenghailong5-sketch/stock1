@@ -307,56 +307,6 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     baidu_coverage = None
     baidu_error = None
 
-    # Fill missing symbols through the same Eastmoney provider family before
-    # considering a different taxonomy. Never combine Sina/申万 labels with
-    # Eastmoney board labels into one artificial industry ranking.
-    if expected_symbols and eastmoney_coverage < 1.0:
-        rate_limit_text = (
-            f"{type(eastmoney_error).__name__ if eastmoney_error else ''} "
-            f"{str(eastmoney_error) if eastmoney_error else ''}"
-        ).lower()
-        eastmoney_rate_limited = any(
-            marker in rate_limit_text
-            for marker in (
-                "ratelimit", "rate limit", "cooldown", "too many requests",
-                "请求过于频繁", "访问过于频繁", "40分钟", "40 minutes",
-                "5分钟", "5 minutes",
-            )
-        )
-        if eastmoney_rate_limited:
-            individual_error = RuntimeError("skipped_due_to_eastmoney_rate_limit")
-        elif eastmoney_industry is None or eastmoney_industry.empty:
-            individual_error = RuntimeError("skipped_due_to_missing_eastmoney_board_snapshot")
-        else:
-            try:
-                board_members = set(
-                    eastmoney_industry["symbol"].astype(str).str.zfill(6)
-                )
-                missing_symbols = expected_symbols - board_members
-                industry_code_by_name = (
-                    eastmoney_industry.drop_duplicates("industry_name")
-                    .set_index("industry_name")["industry_code"].astype(str).to_dict()
-                )
-                individual_industry = fetch_eastmoney_individual_industry_membership_snapshot(
-                    ak_module, missing_symbols, clock=industry_clock,
-                    pause_seconds=1.0, industry_code_by_name=industry_code_by_name,
-                )
-                individual_coverage = (
-                    len(set(individual_industry["symbol"].astype(str)) & expected_symbols)
-                    / len(expected_symbols)
-                ) if not individual_industry.empty else 0.0
-                individual_failures = len(individual_industry.attrs.get("failed_symbols", {}))
-                if not individual_industry.empty:
-                    industry_source_snapshots.append(individual_industry.copy())
-                    individual_industry["snapshot_id"] = eastmoney_industry["snapshot_id"].iloc[0]
-                    industry = pd.concat([eastmoney_industry, individual_industry], ignore_index=True)
-                    industry_count = int(industry["industry_code"].nunique())
-                    industry["expected_industry_count"] = industry_count
-                    chosen_source = "eastmoney_board_plus_individual_info"
-                    chosen_coverage = _coverage(industry)
-            except Exception as exc:
-                individual_error = exc
-
     # Always query independent taxonomies for cross-source audit and per-symbol gap coverage.
     # The raw observations are archived separately; never mix their labels in the
     # legacy single-taxonomy model-consumption snapshot.
@@ -442,6 +392,68 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     elif expected_symbols:
         sw_error = RuntimeError("Shenwan provider was not injected into this collector run")
 
+
+    # Only use per-security fallbacks after every bulk source has had a chance.
+    # Restrict Eastmoney individual lookups to symbols still missing from the
+    # cross-source union, and never let a lower-coverage taxonomy replace a
+    # better selected snapshot.
+    if expected_symbols and eastmoney_coverage < 1.0:
+        rate_limit_text = (
+            f"{type(eastmoney_error).__name__ if eastmoney_error else ''} "
+            f"{str(eastmoney_error) if eastmoney_error else ''}"
+        ).lower()
+        eastmoney_rate_limited = any(
+            marker in rate_limit_text
+            for marker in (
+                "ratelimit", "rate limit", "cooldown", "too many requests",
+                "请求过于频繁", "访问过于频繁", "40分钟", "40 minutes",
+                "5分钟", "5 minutes",
+            )
+        )
+        if eastmoney_rate_limited:
+            individual_error = RuntimeError("skipped_due_to_eastmoney_rate_limit")
+        elif eastmoney_industry is None or eastmoney_industry.empty:
+            individual_error = RuntimeError("skipped_due_to_missing_eastmoney_board_snapshot")
+        else:
+            try:
+                board_members = set(
+                    eastmoney_industry["symbol"].astype(str).str.zfill(6)
+                )
+                covered_before_individual = set().union(*[
+                    set(snapshot["symbol"].astype(str).str.zfill(6)) & expected_symbols
+                    for snapshot in industry_source_snapshots
+                    if snapshot is not None and not snapshot.empty
+                ]) if industry_source_snapshots else set()
+                missing_symbols = expected_symbols - covered_before_individual
+                industry_code_by_name = (
+                    eastmoney_industry.drop_duplicates("industry_name")
+                    .set_index("industry_name")["industry_code"].astype(str).to_dict()
+                )
+                if missing_symbols:
+                    individual_industry = fetch_eastmoney_individual_industry_membership_snapshot(
+                        ak_module, missing_symbols, clock=industry_clock,
+                        pause_seconds=1.0, industry_code_by_name=industry_code_by_name,
+                    )
+                    individual_failures = len(individual_industry.attrs.get("failed_symbols", {}))
+                    if not individual_industry.empty:
+                        industry_source_snapshots.append(individual_industry.copy())
+                        individual_industry["snapshot_id"] = eastmoney_industry["snapshot_id"].iloc[0]
+                        combined_eastmoney = pd.concat(
+                            [eastmoney_industry, individual_industry], ignore_index=True
+                        )
+                        industry_count = int(combined_eastmoney["industry_code"].nunique())
+                        combined_eastmoney["expected_industry_count"] = industry_count
+                        individual_coverage = _coverage(combined_eastmoney)
+                        if individual_coverage > chosen_coverage:
+                            industry = combined_eastmoney
+                            chosen_source = "eastmoney_board_plus_individual_info"
+                            chosen_coverage = individual_coverage
+                    else:
+                        individual_coverage = eastmoney_coverage
+                else:
+                    individual_coverage = eastmoney_coverage
+            except Exception as exc:
+                individual_error = exc
 
     # CNINFO CSRC classification is an independent per-security source.
     # Query only symbols still missing from the multi-source union to limit load.
