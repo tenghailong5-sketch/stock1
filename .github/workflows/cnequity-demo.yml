@@ -139,6 +139,44 @@ jobs:
             echo "Main corporate-action backfill failed; retrying resumable missing chunks (attempt $((main_attempt + 1))/3)."
             sleep $((main_attempt * 10))
           done
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import pandas as pd
+          from cnequity.query import load
+
+          symbols = [s.strip() for s in os.environ["DEMO_SYMBOLS"].split(",") if s.strip()]
+          actions = load("corporate_actions", symbols=symbols, start=os.environ["BAR_START"],
+                         end=os.environ["ACTION_END"], config=os.environ["CNE_CONFIG"])
+          if hasattr(actions, "to_pandas"):
+              actions = actions.to_pandas()
+          required = {"symbol", "ex_date", "action_type", "source"}
+          missing = sorted(required - set(actions.columns))
+          if missing:
+              raise RuntimeError(f"Main sample corporate-action schema missing fields: {missing}")
+          if actions.empty:
+              raise RuntimeError("No corporate-action rows returned for the bounded main sample")
+          if actions.duplicated(["symbol", "ex_date", "action_type"]).any():
+              raise RuntimeError("Duplicate main sample corporate-action primary keys")
+          if actions[list(required)].isna().any().any():
+              raise RuntimeError("Main sample corporate-action identity/source fields contain nulls")
+          report = {
+              "requested_symbols": sorted(symbols),
+              "window": {"start": os.environ["BAR_START"], "end": os.environ["ACTION_END"]},
+              "row_count": int(len(actions)),
+              "symbols_with_events": sorted(actions["symbol"].astype(str).unique().tolist()),
+              "symbols_with_events_count": int(actions["symbol"].nunique()),
+              "event_types": sorted(actions["action_type"].astype(str).unique().tolist()),
+              "sources": sorted(actions["source"].astype(str).unique().tolist()),
+              "ex_date_min": str(pd.to_datetime(actions["ex_date"]).min().date()),
+              "ex_date_max": str(pd.to_datetime(actions["ex_date"]).max().date()),
+              "historical_pit_eligible": False,
+              "note": "Backfilled event history; fetched_at is not proof of historical public availability.",
+          }
+          Path("validation/cnequity-demo/corporate-actions-main-validation.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
           PY
       - name: Discover confirmed delisted securities (resumable bounded sweep)
         if: ${{ inputs.include_delisted_history == 'true' }}
