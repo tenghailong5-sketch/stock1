@@ -26,6 +26,7 @@ from src.providers.akshare_pit import (
     normalize_index_history_snapshot,
     normalize_market_breadth_snapshot,
 )
+from src.providers.kaipanhong_market import fetch_historical_market_context
 
 def _call_with_network_retry(call, *args, attempts: int = 3, sleep_fn=time.sleep, **kwargs):
     """Retry transient transport failures only; never mask schema/data errors."""
@@ -147,7 +148,7 @@ def _tencent_breadth_frame(ak_module):
     return out
 
 
-def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False) -> dict[str, int]:
+def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None) -> dict[str, int]:
     ak_module = _RetryingProvider(ak_module, sleep_fn=retry_sleep)
     captured = pd.Timestamp(
         captured_at if captured_at is not None else datetime.now(ZoneInfo("Asia/Shanghai"))
@@ -349,6 +350,71 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         if not allow_partial:
             raise
 
+    historical_breadth_records: list[dict] = []
+    historical_sentiment_records: list[dict] = []
+    historical_market_failures: list[str] = []
+    if historical_market_fetcher is not None and expected_symbols:
+        index_dates = sorted({
+            pd.Timestamp(row.get("trade_date")).strftime("%Y-%m-%d")
+            for row in index_records
+            if row.get("trade_date") is not None
+        })[-119:]
+        current_day = captured.tz_convert("Asia/Shanghai").strftime("%Y-%m-%d")
+        for history_day in index_dates:
+            # Today's current breadth and limit pools are collected above.
+            if history_day >= current_day:
+                continue
+            breadth_path = archive_root / "market_breadth" / f"{history_day}.jsonl"
+            sentiment_path = archive_root / "market_sentiment" / f"{history_day}.jsonl"
+
+            def _has_kph_source(path):
+                if not path.exists() or path.stat().st_size == 0:
+                    return False
+                try:
+                    rows = [
+                        json.loads(line)
+                        for line in path.read_text(encoding="utf-8").splitlines()
+                        if line.strip()
+                    ]
+                except (OSError, json.JSONDecodeError):
+                    return False
+                return any(
+                    row.get("source_id") == "kaipanhong.market_emotion_kph"
+                    for row in rows
+                )
+
+            if _has_kph_source(breadth_path) and _has_kph_source(sentiment_path):
+                continue
+            try:
+                historical_breadth, historical_sentiment = historical_market_fetcher(
+                    history_day, expected_market_count=len(expected_symbols)
+                )
+                historical_breadth_records.append(historical_breadth)
+                historical_sentiment_records.append(historical_sentiment)
+            except Exception as exc:
+                historical_market_failures.append(
+                    f"{history_day}:{type(exc).__name__}:{str(exc)[:140]}"
+                )
+        fetched_days = len({
+            row["trade_date"] for row in historical_breadth_records
+        } | {
+            row["trade_date"] for row in historical_sentiment_records
+        })
+        if historical_market_failures:
+            source_status["historical_market_context"] = (
+                f"partial: kaipanhong.market_emotion_kph; "
+                f"backfilled={fetched_days}; failed={len(historical_market_failures)}; "
+                + " | ".join(historical_market_failures[:3])
+            )
+        else:
+            source_status["historical_market_context"] = (
+                f"ok: kaipanhong.market_emotion_kph; backfilled={fetched_days}"
+            )
+    else:
+        source_status["historical_market_context"] = (
+            "ok: historical backfill not requested or no verified current market universe"
+        )
+
     if not write:
         return {
             **{f"index_{code}": sum(1 for row in index_records if row["index_symbol"] == code) for code in INDEXES},
@@ -356,6 +422,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             "market_breadth": len(breadth_records),
             "limit_pools": len(limit_pool_records),
             "market_sentiment": int(sentiment is not None),
+            "market_breadth_history_backfill": len(historical_breadth_records),
+            "market_sentiment_history_backfill": len(historical_sentiment_records),
         }
 
     counts: dict[str, int] = {}
@@ -388,6 +456,22 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         [sentiment],
         ("trade_date", "capture_time"),
     ) if sentiment is not None else 0
+    counts["market_breadth_history_backfill"] = 0
+    for record in historical_breadth_records:
+        history_day = str(record["trade_date"])
+        counts["market_breadth_history_backfill"] += append_jsonl_atomic(
+            archive_root / "market_breadth" / f"{history_day}.jsonl",
+            [record],
+            ("trade_date", "source_id", "source_revision"),
+        )
+    counts["market_sentiment_history_backfill"] = 0
+    for record in historical_sentiment_records:
+        history_day = str(record["trade_date"])
+        counts["market_sentiment_history_backfill"] += append_jsonl_atomic(
+            archive_root / "market_sentiment" / f"{history_day}.jsonl",
+            [record],
+            ("trade_date", "source_id", "source_revision"),
+        )
     if allow_partial:
         report = {
             "captured_at": captured.isoformat(),
@@ -409,7 +493,10 @@ def main() -> None:
     args = parser.parse_args()
     import akshare as ak
 
-    counts = collect(ak, Path(args.output), write=not args.dry_run, allow_partial=True)
+    counts = collect(
+        ak, Path(args.output), write=not args.dry_run, allow_partial=True,
+        historical_market_fetcher=fetch_historical_market_context,
+    )
     print(json.dumps({"mode": "dry_run" if args.dry_run else "archive", "validated_rows": counts}, ensure_ascii=False, sort_keys=True))
 
 

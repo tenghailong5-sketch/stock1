@@ -78,21 +78,50 @@ def assemble_m3_history(
         eligible = []
         for row in snapshots:
             captured = _utc(row.get("snapshot_time"), "breadth snapshot_time")
+            available_value = row.get("available_time", row.get("snapshot_time"))
+            available = _utc(available_value, "breadth available_time")
             local = captured.tz_convert("Asia/Shanghai")
-            if local.strftime("%Y-%m-%d") == day and local.strftime("%H:%M") >= "15:30" and captured <= cutoff:
+            if (
+                local.strftime("%Y-%m-%d") == day
+                and local.strftime("%H:%M") >= "15:30"
+                and captured <= cutoff
+                and available <= cutoff
+            ):
                 eligible.append((captured, row))
         if eligible:
-            breadth_by_date[day] = max(eligible, key=lambda item: item[0])[1]
+            preferred = [
+                item for item in eligible
+                if item[1].get("source_id") == "kaipanhong.market_emotion_kph"
+            ]
+            breadth_by_date[day] = max(
+                preferred or eligible, key=lambda item: item[0]
+            )[1]
 
     sentiment_by_date = {}
     for path in sorted((root / "market_sentiment").glob("*.jsonl")):
         for row in _read_jsonl(path):
             day = str(row.get("trade_date", ""))
             captured = _utc(row.get("capture_time"), "sentiment capture_time")
+            available_value = row.get("available_time", row.get("capture_time"))
+            available = _utc(available_value, "sentiment available_time")
             local = captured.tz_convert("Asia/Shanghai")
-            if local.strftime("%Y-%m-%d") == day and local.strftime("%H:%M") >= "15:30" and captured <= cutoff:
+            if (
+                local.strftime("%Y-%m-%d") == day
+                and local.strftime("%H:%M") >= "15:30"
+                and captured <= cutoff
+                and available <= cutoff
+            ):
                 old = sentiment_by_date.get(day)
-                if old is None or captured > old[0]:
+                is_preferred = row.get("source_id") == "kaipanhong.market_emotion_kph"
+                old_preferred = (
+                    old is not None
+                    and old[1].get("source_id") == "kaipanhong.market_emotion_kph"
+                )
+                if (
+                    old is None
+                    or (is_preferred and not old_preferred)
+                    or (is_preferred == old_preferred and captured > old[0])
+                ):
                     sentiment_by_date[day] = (captured, row)
 
     merged = idx.copy()
@@ -112,13 +141,24 @@ def assemble_m3_history(
             continue
         sentiment_time, sentiment = sentiment_pair
         breadth_time = _utc(breadth.get("snapshot_time"), "breadth snapshot_time")
+        breadth_available_time = _utc(
+            breadth.get("available_time", breadth.get("snapshot_time")),
+            "breadth available_time",
+        )
+        sentiment_available_time = _utc(
+            sentiment.get("available_time", sentiment.get("capture_time")),
+            "sentiment available_time",
+        )
         coverage = pd.to_numeric(breadth.get("breadth_coverage"), errors="coerce")
         amount = pd.to_numeric(breadth.get("total_amount"), errors="coerce")
         ratio = pd.to_numeric(breadth.get("breadth"), errors="coerce")
         if pd.isna(coverage) or coverage < min_breadth_coverage:
             reasons.append(f"{day}:breadth_coverage_below_minimum")
             continue
-        if breadth.get("total_amount_status") != "complete_provider_snapshot_sum" or pd.isna(amount) or amount < 0:
+        if breadth.get("total_amount_status") not in {
+            "complete_provider_snapshot_sum",
+            "complete_provider_market_aggregate",
+        } or pd.isna(amount) or amount < 0:
             reasons.append(f"{day}:turnover_incomplete")
             continue
         if pd.isna(ratio) or not 0 <= ratio <= 1:
@@ -133,7 +173,9 @@ def assemble_m3_history(
         merged.at[i, "amount"] = float(amount)
         merged.at[i, "limit_up_cnt"] = float(up)
         merged.at[i, "limit_down_cnt"] = float(down)
-        merged.at[i, "snapshot_available_time"] = max(breadth_time, sentiment_time)
+        merged.at[i, "snapshot_available_time"] = max(
+            breadth_available_time, sentiment_available_time
+        )
 
     merged["amount_ma20"] = merged.amount.rolling(20, min_periods=20).mean()
     merged["available_time"] = merged[["available_time", "snapshot_available_time"]].max(axis=1)
