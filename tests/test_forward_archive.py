@@ -7,6 +7,7 @@ from src.collectors.forward_archive import append_jsonl_atomic, collect, _call_w
 from types import SimpleNamespace
 
 from src.providers.baostock_industry import fetch_baostock_industry_membership_snapshot
+from src.providers.cninfo_industry import fetch_cninfo_current_industry_membership_snapshot
 from src.providers.akshare_pit import (
     fetch_current_industry_membership_snapshot,
     fetch_sina_current_industry_membership_snapshot,
@@ -882,3 +883,41 @@ def test_collector_fills_eastmoney_industry_gaps_from_individual_profiles(tmp_pa
     }
     assert all(row["historical_pit_eligible"] is False for row in rows)
 
+
+
+
+def test_cninfo_adapter_keeps_latest_csrc_classification_and_audits_failures():
+    class FakeCninfo:
+        def stock_industry_change_cninfo(self, symbol, start_date, end_date):
+            if symbol == "000002":
+                return pd.DataFrame()
+            return pd.DataFrame([
+                {
+                    "分类标准编码": "008001", "分类标准": "证监会行业分类标准",
+                    "行业编码": "C39", "行业门类": "制造业", "行业次类": "计算机、通信和其他电子设备制造业",
+                    "行业大类": "计算机、通信和其他电子设备制造业", "行业中类": "计算机、通信和其他电子设备制造业",
+                    "变更日期": "2020-01-01",
+                },
+                {
+                    "分类标准编码": "008002", "分类标准": "巨潮行业分类标准",
+                    "行业编码": "A01", "行业门类": "农林牧渔", "行业次类": "农业",
+                    "行业大类": "种植业", "行业中类": "其他种植业", "变更日期": "2025-01-01",
+                },
+                {
+                    "分类标准编码": "008001", "分类标准": "证监会行业分类标准",
+                    "行业编码": "C39", "行业门类": "制造业", "行业次类": "计算机、通信和其他电子设备制造业",
+                    "行业大类": "计算机、通信和其他电子设备制造业", "行业中类": "计算机、通信和其他电子设备制造业",
+                    "变更日期": "2024-01-01",
+                },
+            ])
+
+    captured = pd.Timestamp("2026-11-14T00:00:00Z")
+    result = fetch_cninfo_current_industry_membership_snapshot(
+        FakeCninfo(), ["000001", "000002"],
+        clock=lambda: captured, pause_seconds=0, sleep_fn=lambda _: None,
+    )
+    assert result["symbol"].tolist() == ["000001"]
+    assert result.iloc[0]["industry_code"] == "C39"
+    assert result.iloc[0]["source_id"] == "cninfo.p_stock2110.csrc"
+    assert bool(result.iloc[0]["historical_pit_eligible"]) is False
+    assert result.attrs["failed_symbols"] == {"000002": "empty_response"}
