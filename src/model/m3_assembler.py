@@ -141,6 +141,14 @@ def assemble_m3_history(
             continue
         sentiment_time, sentiment = sentiment_pair
         breadth_time = _utc(breadth.get("snapshot_time"), "breadth snapshot_time")
+        breadth_available_time = _utc(
+            breadth.get("available_time", breadth.get("snapshot_time")),
+            "breadth available_time",
+        )
+        sentiment_available_time = _utc(
+            sentiment.get("available_time", sentiment.get("capture_time")),
+            "sentiment available_time",
+        )
         coverage = pd.to_numeric(breadth.get("breadth_coverage"), errors="coerce")
         amount = pd.to_numeric(breadth.get("total_amount"), errors="coerce")
         ratio = pd.to_numeric(breadth.get("breadth"), errors="coerce")
@@ -162,7 +170,9 @@ def assemble_m3_history(
         merged.at[i, "amount"] = float(amount)
         merged.at[i, "limit_up_cnt"] = float(up)
         merged.at[i, "limit_down_cnt"] = float(down)
-        merged.at[i, "snapshot_available_time"] = max(breadth_time, sentiment_time)
+        merged.at[i, "snapshot_available_time"] = max(
+            breadth_available_time, sentiment_available_time
+        )
 
     merged["amount_ma20"] = merged.amount.rolling(20, min_periods=20).mean()
     merged["available_time"] = merged[["available_time", "snapshot_available_time"]].max(axis=1)
