@@ -300,7 +300,9 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             else:
                 source_status["industry_membership"] = (
                     f"partial: {chosen_source}; symbol_coverage={chosen_coverage:.1%}; "
-                    f"Eastmoney={eastmoney_coverage:.1%}; Sina={sina_coverage:.1%}"
+                    f"Eastmoney={eastmoney_coverage:.1%}; Sina={sina_coverage:.1%}; "
+                    f"Eastmoney_error={type(eastmoney_error).__name__ if eastmoney_error else 'none'}:"
+                    f"{str(eastmoney_error)[:180] if eastmoney_error else 'no error'}"
                 )
                 if not allow_partial:
                     raise RuntimeError(source_status["industry_membership"])
@@ -309,7 +311,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 source_status["industry_membership"] = (
                     "unavailable: Eastmoney "
                     f"{type(eastmoney_error).__name__ if eastmoney_error else 'unknown'}: "
-                    f"{str(eastmoney_error)[:100] if eastmoney_error else 'no snapshot'} | "
+                    f"{str(eastmoney_error)[:180] if eastmoney_error else 'no snapshot'} | "
                     f"Sina {type(sina_exc).__name__}: {str(sina_exc)[:120]}"
                 )
                 if not allow_partial:
