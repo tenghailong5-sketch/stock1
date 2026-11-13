@@ -155,7 +155,7 @@ def _write_forward_industry_batch(tmp_path, source_ids):
             "source_revision": f"revision-{index}",
         })
     (root / "2026-11-13.jsonl").write_text(
-        "\\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\\n",
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
         encoding="utf-8",
     )
 
