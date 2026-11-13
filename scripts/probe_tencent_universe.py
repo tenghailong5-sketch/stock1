@@ -78,6 +78,29 @@ def fetch_exchange_universe():
 
 
 
+def stratified_sample(universe: pd.DataFrame, sample_size: int = 100) -> list[str]:
+    """Deterministic proportional sample across SH/SZ/BJ."""
+    if sample_size < 3:
+        raise ValueError("sample_size must be at least 3")
+    groups = {p: universe[universe["symbol"].astype(str).str.startswith(p)].sort_values("symbol").reset_index(drop=True) for p in ("sh", "sz", "bj")}
+    if any(g.empty for g in groups.values()):
+        raise ValueError("all three exchanges must be represented")
+    total = sum(len(g) for g in groups.values())
+    quotas = {p: sample_size * len(g) / total for p, g in groups.items()}
+    allocation = {p: int(q) for p, q in quotas.items()}
+    left = sample_size - sum(allocation.values())
+    for p in sorted(groups, key=lambda k: quotas[k] - allocation[k], reverse=True)[:left]:
+        allocation[p] += 1
+    picks = []
+    for p, g in groups.items():
+        n = allocation[p]
+        positions = sorted(set(round(i * (len(g)-1) / max(n-1, 1)) for i in range(n)))
+        picks.extend(g.iloc[positions]["symbol"].astype(str).tolist())
+    if len(picks) != sample_size or len(set(picks)) != sample_size:
+        raise ValueError("sample allocation did not produce the requested unique count")
+    return picks
+
+
 def attach_row_lineage(frame: pd.DataFrame, symbol: str, fetched_at: str) -> pd.DataFrame:
     """Attach auditable retrieval-time lineage without implying historical PIT."""
     out = frame.copy()
@@ -121,22 +144,17 @@ def main():
         report["universe_error"] = f"{type(exc).__name__}: {str(exc)[:1500]}"
         report["qualified"] = False
         report["qualification_scope"] = "not qualified: exchange-native symbol universe unavailable"
-        (OUT / "tencent_60_symbol_probe.json").write_text(
+        (OUT / "tencent_100_symbol_probe.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
         raise SystemExit("Exchange-native universe acquisition failed")
 
-    # Deterministic stratified sample across all three exchanges.
-    picks = []
-    for prefix in ("sh", "sz", "bj"):
-        group = universe[universe["symbol"].str.startswith(prefix)]
-        count = min(20, len(group))
-        if count:
-            positions = sorted(set(round(i * (len(group) - 1) / max(count - 1, 1)) for i in range(count)))
-            picks.extend(group.iloc[positions]["symbol"].tolist())
-    picks = list(dict.fromkeys(picks))
+    # Fixed 100-symbol sample, allocated proportionally across SH/SZ/BJ.
+    picks = stratified_sample(universe, sample_size=100)
     report["sample_size"] = len(picks)
+    report["sample_method"] = "deterministic_exchange_proportional_stratification"
+    report["sample_exchange_counts"] = {p: sum(s.startswith(p) for s in picks) for p in ("sh", "sz", "bj")}
 
     items, frames = [], []
     for index, symbol in enumerate(picks, 1):
@@ -199,7 +217,7 @@ def main():
         report["minimum_sessions"] = int(counts.min())
         report["maximum_sessions"] = int(counts.max())
         report["symbols_with_at_least_119_sessions"] = int((counts >= 119).sum())
-        path = OUT / "tencent_60_symbol_sample.csv"
+        path = OUT / "tencent_100_symbol_sample.csv"
         combined.to_csv(path, index=False)
         report["artifact_file"] = str(path)
         report["artifact_bytes"] = path.stat().st_size
