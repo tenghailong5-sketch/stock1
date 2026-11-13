@@ -205,6 +205,10 @@ def fetch_sina_current_industry_membership_snapshot(
     detail_rows = []
     for sector in sectors.itertuples(index=False):
         detail = ak_module.stock_sector_detail(sector=sector.industry_code)
+        # Stamp each industry immediately after its own response returns.
+        # A single timestamp after all 49 requests would backdate early rows
+        # and overstate when the complete batch became observable.
+        captured = _utc(now())
         if detail is None or detail.empty or not {"code", "name"}.issubset(detail.columns):
             raise ValueError(
                 "Sina constituent detail missing/empty for industry " + sector.industry_code
@@ -216,7 +220,11 @@ def fetch_sina_current_industry_membership_snapshot(
         members["symbol"] = members["symbol"].astype(str).str.zfill(6)
         members["industry_code"] = sector.industry_code
         members["industry_name"] = sector.industry_name
-        detail_rows.append(members[["symbol", "industry_code", "industry_name"]])
+        members["observed_at"] = captured
+        members["available_time"] = captured
+        detail_rows.append(members[[
+            "symbol", "industry_code", "industry_name", "observed_at", "available_time"
+        ]])
 
     source = pd.concat(detail_rows, ignore_index=True)
     if source.empty or source.duplicated(["symbol", "industry_code"]).any():
@@ -226,13 +234,10 @@ def fetch_sina_current_industry_membership_snapshot(
     if observed_industries != expected_industries:
         raise ValueError("Sina constituent snapshot does not cover every listed industry")
 
-    captured = _utc(now())
     snapshot_id = str(uuid.uuid4())
     expected_industry_count = len(expected_industries)
     source["snapshot_id"] = snapshot_id
     source["expected_industry_count"] = expected_industry_count
-    source["observed_at"] = captured
-    source["available_time"] = captured
     source["availability_basis"] = "retrieval_time_only"
     source["historical_pit_eligible"] = False
     source["source_id"] = "akshare.stock_sector_detail_sina"
