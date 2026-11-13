@@ -32,6 +32,7 @@ from src.providers.baostock_industry import fetch_baostock_industry_membership_s
 from src.providers.sw_industry import fetch_sw_current_industry_membership_snapshot
 from src.providers.sw_api_industry import fetch_sw_api_industry_membership_snapshot
 from src.providers.baidu_industry import fetch_baidu_industry_membership_snapshot
+from src.providers.cninfo_industry import fetch_cninfo_current_industry_membership_snapshot
 
 def _call_with_network_retry(call, *args, attempts: int = 3, sleep_fn=time.sleep, **kwargs):
     """Retry transient transport failures only; never mask schema/data errors."""
@@ -153,7 +154,7 @@ def _tencent_breadth_frame(ak_module):
     return out
 
 
-def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None, baostock_module=None, sw_industry_fetcher=None, baidu_industry_fetcher=None, sw_api_industry_fetcher=None) -> dict[str, int]:
+def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None, baostock_module=None, sw_industry_fetcher=None, baidu_industry_fetcher=None, sw_api_industry_fetcher=None, cninfo_industry_fetcher=None) -> dict[str, int]:
     ak_module = _RetryingProvider(ak_module, sleep_fn=retry_sleep)
     captured = pd.Timestamp(
         captured_at if captured_at is not None else datetime.now(ZoneInfo("Asia/Shanghai"))
@@ -386,6 +387,30 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         except Exception as exc:
             sina_secondary_error = exc
 
+    # CNINFO CSRC classification is an independent per-security source.
+    # Query only symbols still missing from the multi-source union to limit load.
+    cninfo_coverage = None
+    cninfo_error = None
+    cninfo_failed_symbols = 0
+    if expected_symbols and cninfo_industry_fetcher is not None:
+        try:
+            covered_so_far = set().union(*[
+                set(snap["symbol"].astype(str).str.zfill(6)) & expected_symbols
+                for snap in industry_source_snapshots if snap is not None and not snap.empty
+            ]) if industry_source_snapshots else set()
+            cninfo_missing = sorted(expected_symbols - covered_so_far)
+            cninfo_industry = cninfo_industry_fetcher(
+                ak_module, cninfo_missing, clock=industry_clock
+            )
+            cninfo_coverage = _coverage(cninfo_industry)
+            cninfo_failed_symbols = len(getattr(cninfo_industry, "attrs", {}).get("failed_symbols", {}))
+            if cninfo_industry is not None and not cninfo_industry.empty:
+                industry_source_snapshots.append(cninfo_industry.copy())
+        except Exception as exc:
+            cninfo_error = exc
+    elif expected_symbols:
+        cninfo_error = RuntimeError("CNINFO provider was not injected into this collector run")
+
     # Baostock is an independent free source; use it only when it improves
     # coverage. Its updateDate is metadata, not a historical publication time.
     # Inject the provider from the production CLI; tests never contact its socket.
@@ -474,6 +499,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         "eastmoney_individual": individual_coverage,
         "sina": sina_coverage,
         "sina_secondary_industry": sina_secondary_coverage,
+        "cninfo_csrc": cninfo_coverage,
         "baostock": baostock_coverage,
         "shenwan_xls": sw_coverage,
         "shenwan_api": sw_api_coverage,
@@ -715,6 +741,9 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 "sina_error": _error_detail(sina_error),
                 "sina_secondary_industry_coverage": sina_secondary_coverage,
                 "sina_secondary_industry_error": _error_detail(sina_secondary_error),
+                "cninfo_coverage": cninfo_coverage,
+                "cninfo_error": _error_detail(cninfo_error),
+                "cninfo_failed_symbol_count": cninfo_failed_symbols,
                 "baostock_coverage": baostock_coverage,
                 "baostock_error": _error_detail(baostock_error),
                 "shenwan_coverage": sw_coverage,
@@ -767,6 +796,7 @@ def main() -> None:
         baostock_module=bs,
         sw_industry_fetcher=fetch_sw_current_industry_membership_snapshot,
         sw_api_industry_fetcher=fetch_sw_api_industry_membership_snapshot,
+        cninfo_industry_fetcher=fetch_cninfo_current_industry_membership_snapshot,
     )
     print(json.dumps({"mode": "dry_run" if args.dry_run else "archive", "validated_rows": counts}, ensure_ascii=False, sort_keys=True))
 
