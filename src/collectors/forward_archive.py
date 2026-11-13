@@ -141,7 +141,7 @@ def _load_manual_industry_evidence(
         "expected_industry_count", "observed_at", "available_time",
         "availability_basis", "historical_pit_eligible", "source_id",
         "snapshot_scope", "source_revision", "classification_system",
-        "source_url", "evidence_status",
+        "source_url", "source_title", "source_refs", "evidence_status",
     ]
     if not path.exists():
         return pd.DataFrame(columns=columns)
@@ -150,7 +150,16 @@ def _load_manual_industry_evidence(
         raise ValueError("manual evidence capture time must be timezone-aware")
     captured = captured.tz_convert("UTC")
     rows = []
-    allowed_hosts = {"money.finance.sina.com.cn", "basic.10jqka.com.cn"}
+    allowed_sources = {
+        "sina.finance_f10_sw": {
+            "host": "money.finance.sina.com.cn",
+            "taxonomy_prefix": "申万行业",
+        },
+        "10jqka.f10_industry": {
+            "host": "basic.10jqka.com.cn",
+            "taxonomy_prefix": "同花顺行业",
+        },
+    }
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
@@ -167,13 +176,14 @@ def _load_manual_industry_evidence(
         industry_name = str(item.get("industry_name", "")).strip()
         if symbol not in expected_symbols:
             continue
-        if not (source_url.startswith("https://") and any(
-            source_url.startswith("https://" + host + "/") for host in allowed_hosts
-        )):
+        source_rule = allowed_sources.get(source_id)
+        if source_rule is None:
             continue
-        if source_id not in {"sina.finance_f10_sw", "10jqka.f10_sw"}:
+        if not source_url.startswith("https://" + source_rule["host"] + "/"):
             continue
-        if not taxonomy.startswith("申万行业"):
+        if f"/{symbol}" not in source_url:
+            continue
+        if not taxonomy.startswith(source_rule["taxonomy_prefix"]):
             continue
         if not industry_name:
             continue
@@ -194,6 +204,8 @@ def _load_manual_industry_evidence(
             "source_revision": revision,
             "classification_system": taxonomy,
             "source_url": source_url,
+            "source_title": str(item.get("source_title", "")).strip(),
+            "source_refs": item.get("source_refs", []),
             "evidence_status": "source_url_reconciled_current_observation",
         })
     return pd.DataFrame(rows, columns=columns)
@@ -589,7 +601,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         / f"{captured.tz_convert('Asia/Shanghai').strftime('%Y-%m-%d')}.jsonl"
     )
     manual_evidence = _load_manual_industry_evidence(
-        manual_evidence_path, expected_symbols, captured_at=observed_now()
+        manual_evidence_path, expected_symbols, captured_at=captured
     )
     if not manual_evidence.empty:
         industry_source_snapshots.append(manual_evidence)
