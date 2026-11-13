@@ -76,3 +76,32 @@ def test_sw_provider_rejects_naive_observation_clock(monkeypatch):
         sw_industry.fetch_sw_current_industry_membership_snapshot(
             session=Session(), clock=lambda: pd.Timestamp("2026-11-13T14:00:00")
         )
+
+
+def test_download_retries_with_system_ca_after_ssl_error(monkeypatch):
+    class SSLFailOnceSession:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise sw_industry.requests.exceptions.SSLError("untrusted local issuer")
+            return Response(bytes.fromhex("D0CF11E0A1B11AE1") + b"xls")
+
+    monkeypatch.setattr(sw_industry.os.path, "isfile", lambda path: True)
+    session = SSLFailOnceSession()
+    content = sw_industry._download_xls(session, sw_industry.STOCK_URL, 30)
+
+    assert content.endswith(b"xls")
+    assert len(session.calls) == 2
+    assert session.calls[1]["verify"] == sw_industry.SYSTEM_CA_BUNDLE
+
+
+def test_download_rejects_html_error_page():
+    class HtmlSession:
+        def get(self, url, **kwargs):
+            return Response(b"<html>blocked</html>")
+
+    with pytest.raises(ValueError, match="not a valid OLE"):
+        sw_industry._download_xls(HtmlSession(), sw_industry.STOCK_URL, 30)
