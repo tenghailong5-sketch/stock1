@@ -47,7 +47,7 @@ class FakeArchiveAkshare:
         ])
 
     def stock_board_industry_cons_em(self, symbol):
-        return pd.DataFrame({"代码": ["000001", "600000"]})
+        return pd.DataFrame({"代码": ["000001", "600000", "000002"]})
 
 
 def test_append_jsonl_is_idempotent_and_preserves_existing_rows(tmp_path):
@@ -82,7 +82,7 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
         "index_000688", "index_000300", "industry_membership", "market_breadth", "limit_pools", "market_sentiment",
     }
     assert all(counts[f"index_{code}"] == 1 for code in ("000001", "399001", "399006", "000688", "000300"))
-    assert counts["industry_membership"] == 4  # two symbols across two industries
+    assert counts["industry_membership"] == 6  # three symbols across two industries
     assert counts["market_breadth"] == 1
     assert counts["market_sentiment"] == 1
     index_file = tmp_path / "index_daily" / "000001.jsonl"
@@ -93,7 +93,7 @@ def test_collector_archives_indexes_and_daily_industry_snapshot(tmp_path):
 
     industry_file = tmp_path / "industry_membership" / "2026-11-11.jsonl"
     industry_rows = [json.loads(line) for line in industry_file.read_text(encoding="utf-8").splitlines()]
-    assert len(industry_rows) == 4
+    assert len(industry_rows) == 6
     assert {row["snapshot_scope"] for row in industry_rows} == {
         "current_membership_observation_only"
     }
@@ -215,11 +215,11 @@ def test_same_day_repeated_industry_captures_are_archived_as_separate_batches(tm
     captured = "2026-11-11T16:30:00+08:00"
     first = collect(FakeArchiveAkshare(), tmp_path, captured_at=captured)
     second = collect(FakeArchiveAkshare(), tmp_path, captured_at=captured)
-    assert first["industry_membership"] == 4
-    assert second["industry_membership"] == 4
+    assert first["industry_membership"] == 6
+    assert second["industry_membership"] == 6
     path = tmp_path / "industry_membership" / "2026-11-11.jsonl"
     archived = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-    assert len(archived) == 8
+    assert len(archived) == 12
     assert len({row["snapshot_id"] for row in archived}) == 2
 
 def test_industry_rows_record_each_response_completion_time(tmp_path):
