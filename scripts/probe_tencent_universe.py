@@ -76,6 +76,24 @@ def fetch_exchange_universe():
     return universe.reset_index(drop=True), diagnostics
 
 
+
+
+def attach_row_lineage(frame: pd.DataFrame, symbol: str, fetched_at: str) -> pd.DataFrame:
+    """Attach auditable retrieval-time lineage without implying historical PIT."""
+    out = frame.copy()
+    out.insert(0, "symbol", str(symbol))
+    revisions = []
+    for row in out[["date", "open", "close", "high", "low", "volume", "amount"]].to_dict(orient="records"):
+        canonical = json.dumps(row, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
+        revisions.append(hashlib.sha256(canonical.encode("utf-8")).hexdigest())
+    out["available_time"] = fetched_at
+    out["source_id"] = "akshare.stock_zh_a_hist_tx"
+    out["source_revision"] = revisions
+    out["historical_pit_eligible"] = False
+    out["availability_basis"] = "retrieval_time_only"
+    return out
+
+
 def main():
     checked = datetime.now(timezone.utc)
     end = checked.date()
@@ -130,6 +148,7 @@ def main():
                 end_date=report["requested_end"],
                 adjust="",
             )
+            fetched_at = datetime.now(timezone.utc).isoformat()
             required = {"date", "open", "close", "high", "low", "volume", "amount"}
             if frame is None or frame.empty:
                 raise ValueError("empty_response")
@@ -153,10 +172,13 @@ def main():
             if (data[["volume", "amount"]] < 0).any().any():
                 raise ValueError("negative_volume_or_amount")
             data = data.sort_values("date").reset_index(drop=True)
-            data.insert(0, "symbol", symbol)
+            data = attach_row_lineage(data, symbol, fetched_at)
             frames.append(data)
             item.update({
                 "status": "OK",
+                "available_time": fetched_at,
+                "source_id": "akshare.stock_zh_a_hist_tx",
+                "historical_pit_eligible": False,
                 "rows": int(len(data)),
                 "first_date": data["date"].min().strftime("%Y-%m-%d"),
                 "last_date": data["date"].max().strftime("%Y-%m-%d"),
