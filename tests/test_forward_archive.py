@@ -442,13 +442,12 @@ def test_sina_industry_snapshot_collapses_exact_duplicate_memberships():
     class FakeSina:
         def stock_sector_spot(self, indicator):
             return pd.DataFrame([
-                {"label": "IND-A", "板块": "行业A"},
-                {"label": "IND-B", "板块": "行业B"},
-            ] * 5)
+                {"label": f"IND-{i}", "板块": f"行业{i}"} for i in range(10)
+            ])
 
         def stock_sector_detail(self, sector):
             # Repeated rows within an industry are provider duplication;
-            # the same symbol in two different industries remains valid.
+            # the same symbol in different industries remains valid.
             return pd.DataFrame([
                 {"code": "000001", "name": "平安银行"},
                 {"code": "000001", "name": "平安银行"},
@@ -458,9 +457,9 @@ def test_sina_industry_snapshot_collapses_exact_duplicate_memberships():
     result = fetch_sina_current_industry_membership_snapshot(
         FakeSina(), clock=lambda: pd.Timestamp("2026-11-13T08:00:00Z")
     )
-    assert len(result) == 4
+    assert len(result) == 20
     assert not result.duplicated(["symbol", "industry_code"]).any()
-    assert result.groupby("symbol")["industry_code"].nunique().loc["000001"] == 2
+    assert result.groupby("symbol")["industry_code"].nunique().loc["000001"] == 10
     assert result["historical_pit_eligible"].eq(False).all()
 
 
