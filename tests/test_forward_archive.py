@@ -969,6 +969,8 @@ def test_manual_industry_evidence_loader_accepts_only_reconciled_current_sources
     assert ths_row["source_id"] == "10jqka.f10_industry"
     assert ths_row["classification_system"].startswith("同花顺行业")
     assert ths_row["industry_name"] == "有色金属—贵金属—黄金"
+    assert ths_row["source_title"] == "山金国际行业地位；页面展示三级行业分类"
+    assert ths_row["source_refs"] == []
     assert sina_row["availability_basis"] == "retrieval_time_only"
     assert bool(sina_row["historical_pit_eligible"]) is False
     assert sina_row["snapshot_scope"] == "current_membership_observation_only"
