@@ -12,7 +12,7 @@ import tempfile
 import time
 
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -147,7 +147,7 @@ def _tencent_breadth_frame(ak_module):
     return out
 
 
-def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, allow_partial: bool = False) -> dict[str, int]:
+def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False) -> dict[str, int]:
     ak_module = _RetryingProvider(ak_module, sleep_fn=retry_sleep)
     captured = pd.Timestamp(
         captured_at if captured_at is not None else datetime.now(ZoneInfo("Asia/Shanghai"))
@@ -157,6 +157,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     captured = captured.tz_convert("UTC")
     start_date = (captured - pd.Timedelta(days=180)).strftime("%Y%m%d")
     end_date = captured.strftime("%Y%m%d")
+    observed_now = observation_clock or (lambda: datetime.now(timezone.utc))
 
     # Fetch and validate every source before writing anything. A provider error
     # therefore cannot leave a partially refreshed set of archives.
@@ -201,8 +202,13 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             if "amount" in fallback.columns:
                 raw_data["成交额"] = fallback["amount"]
             raw = pd.DataFrame(raw_data)
+        # Availability is stamped after this specific provider response returns,
+        # not at batch start; otherwise a slow multi-index collection backdates PIT.
+        index_observed_at = pd.Timestamp(observed_now())
+        if index_observed_at.tzinfo is None:
+            raise ValueError("observation_clock must return timezone-aware timestamps")
         normalized = normalize_index_history_snapshot(
-            raw, symbol=code, fetched_at=captured
+            raw, symbol=code, fetched_at=index_observed_at
         )
         index_records.extend(_records(normalized))
 
@@ -245,8 +251,11 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 raise
             breadth_raw = _tencent_breadth_frame(ak_module)
             breadth_source = "tencent.stock_zh_a_spot_tx"
+        breadth_observed_at = pd.Timestamp(observed_now())
+        if breadth_observed_at.tzinfo is None:
+            raise ValueError("observation_clock must return timezone-aware timestamps")
         breadth = normalize_market_breadth_snapshot(
-            breadth_raw, fetched_at=captured, source_id=breadth_source
+            breadth_raw, fetched_at=breadth_observed_at, source_id=breadth_source
         )
         breadth_records = _records(breadth)
         source_status["market_breadth"] = f"ok: {breadth_source}"
@@ -261,12 +270,13 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         limit_pools = fetch_limit_pool_snapshots(
             ak_module,
             trade_date=captured.tz_convert("Asia/Shanghai").strftime("%Y%m%d"),
-            captured_at=captured,
+            captured_at=None,
+            clock=observed_now,
         )
         limit_pool_records = _records(limit_pools)
         sentiment = summarize_limit_pool_sentiment(limit_pools)
         sentiment["trade_date"] = captured.tz_convert("Asia/Shanghai").strftime("%Y-%m-%d")
-        sentiment["capture_time"] = captured.isoformat()
+        sentiment["capture_time"] = pd.to_datetime(limit_pools["capture_time"], utc=True).max().isoformat()
         source_status["limit_pools"] = "ok"
     except Exception as exc:
         source_status["limit_pools"] = f"unavailable: {type(exc).__name__}: {str(exc)[:240]}"
