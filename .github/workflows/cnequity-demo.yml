@@ -59,26 +59,16 @@ jobs:
           key: cnequity-delisted-catalog-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ github.sha }}
           restore-keys: |
             cnequity-delisted-catalog-${{ github.event.pull_request.head.ref || github.ref_name }}-
-      - name: Record CNEquity version and initialize isolated real-data demo
-        env:
-          DEMO_SYMBOLS: ${{ inputs.symbols || '600519.SH,000001.SZ,000858.SZ,300750.SZ,601318.SH,600036.SH,000333.SZ,002594.SZ,688981.SH,601899.SH,600000.SH,600900.SH,601166.SH,601088.SH,600276.SH,002415.SZ,002230.SZ,300059.SZ,300760.SZ,688012.SH' }}
-          DEMO_DAYS: ${{ inputs.days || '90' }}
+      - name: Create isolated real-data lake configuration without hard TDX preflight
         run: |
           set -euo pipefail
           mkdir -p validation/cnequity-demo
           python -c "from importlib.metadata import version; print('cnequity', version('cnequity'))" | tee validation/cnequity-demo/cne-version.txt
-          # The provider occasionally returns an empty Shenzhen instrument response.
-          # Retry the isolated demo bootstrap, and fail the job if it never succeeds.
-          initialized=0
-          for attempt in 1 2 3; do
-            if cne init --profile demo --symbols "$DEMO_SYMBOLS" --days "$DEMO_DAYS" --data-root "$RUNNER_TEMP/cnequity-demo-lake" --config-out "$RUNNER_TEMP/cnequity-demo.toml" 2>&1 | tee "validation/cnequity-demo/init-attempt-$attempt.log"; then
-              initialized=1
-              break
-            fi
-            sleep $((attempt * 5))
-          done
-          test "$initialized" -eq 1
-          cp "validation/cnequity-demo/init-attempt-$attempt.log" validation/cnequity-demo/init.log
+          # cne init --profile demo hard-stops when TDX is unreachable, before
+          # the normal daily-bar fallback chain can run. Create the config
+          # offline, then let the bounded backfill prove which real source works.
+          cne config create --config "$RUNNER_TEMP/cnequity-demo.toml" --data-root "$RUNNER_TEMP/cnequity-demo-lake" 2>&1 | tee validation/cnequity-demo/config-create.log
+          cne config validate --config "$RUNNER_TEMP/cnequity-demo.toml" 2>&1 | tee validation/cnequity-demo/config-validate.log
           echo "CNE_CONFIG=$RUNNER_TEMP/cnequity-demo.toml" >> "$GITHUB_ENV"
       - name: Ensure bounded demo daily bars exist before downstream derivations
         env:
