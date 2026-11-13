@@ -10,6 +10,7 @@ import requests
 from src.model.m4_factors import price_structure
 from src.model.m4_observation import rank_price_observations
 from src.model.pipeline import evaluate_candidates
+from src.model.m4_industry_observations import select_latest_observed_industry_snapshot
 from src.model.m3_assembler import assemble_m3_history
 from src.collectors.forward_archive import append_jsonl_atomic
 from src.providers.akshare_pit import normalize_daily_history_snapshot
@@ -334,6 +335,63 @@ def load_m3_market_context(decision_time=None, archive_root=Path("data/forward_a
         "quality_warnings": result.get("quality_warnings", []),
     }
 
+def audit_forward_industry_membership(archive_root, expected_symbols, *, decision_time):
+    """Audit latest complete forward-only industry snapshot against this run's universe.
+
+    This is an audit artifact only. Current membership observations are never
+    treated as historical PIT membership or silently promoted into M5 factors.
+    """
+    root = Path(archive_root) / "industry_membership"
+    files = sorted(root.glob("*.jsonl")) if root.exists() else []
+    frames = []
+    for path in files:
+        try:
+            frame = pd.read_json(path, lines=True, dtype={"symbol": str})
+        except (ValueError, OSError) as exc:
+            return pd.DataFrame(), {
+                "status": "invalid_archive_file",
+                "reason": f"{path.name}:{type(exc).__name__}:{str(exc)[:160]}",
+                "expected_universe_size": len(set(map(str, expected_symbols))),
+                "selected_symbol_count": 0,
+                "membership_coverage": 0.0,
+                "historical_pit_eligible": False,
+            }
+        if not frame.empty:
+            frames.append(frame)
+    if not frames:
+        return pd.DataFrame(), {
+            "status": "no_snapshot",
+            "expected_universe_size": len(set(map(str, expected_symbols))),
+            "selected_symbol_count": 0,
+            "membership_coverage": 0.0,
+            "historical_pit_eligible": False,
+        }
+    membership = pd.concat(frames, ignore_index=True, sort=False)
+    if "source_id" not in membership:
+        return pd.DataFrame(), {
+            "status": "invalid_archive_schema",
+            "expected_universe_size": len(set(map(str, expected_symbols))),
+            "selected_symbol_count": 0,
+            "membership_coverage": 0.0,
+            "historical_pit_eligible": False,
+        }
+    membership = membership.loc[
+        membership["source_id"].astype(str).eq("akshare.stock_sector_detail_sina")
+    ].copy()
+    if membership.empty:
+        return pd.DataFrame(), {
+            "status": "no_supported_forward_snapshot",
+            "expected_universe_size": len(set(map(str, expected_symbols))),
+            "selected_symbol_count": 0,
+            "membership_coverage": 0.0,
+            "historical_pit_eligible": False,
+        }
+    selected, audit = select_latest_observed_industry_snapshot(
+        membership, expected_symbols, decision_time=decision_time, max_age="2D"
+    )
+    return selected, audit
+
+
 def build_m5_diagnostic_input(watchlist, market_context):
     """Pass only independently READY M3 market-environment scores into M5.
 
@@ -438,6 +496,16 @@ def main():
     else:
         latest_stock_available = None
     m3 = load_m3_market_context(decision_time=now)
+    expected_symbols = u["code"].astype(str).str.zfill(6).tolist() if "code" in u else []
+    industry_membership, industry_audit = audit_forward_industry_membership(
+        Path("data/forward_archive"), expected_symbols, decision_time=now
+    )
+    industry_membership.to_csv(
+        OUT/"industry_membership_forward_audit.csv", index=False, encoding="utf-8-sig"
+    )
+    (OUT/"industry_membership_forward_audit.json").write_text(
+        json.dumps(industry_audit, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
     w=w.sort_values(["技术观察通过","流动性观察通过","当日成交额"],ascending=[False,False,False])
     # M5 remains diagnostic-only. A/C receive the defined M3 market factor
     # only when M3 is independently READY; all other factors and gates remain fail-closed.
@@ -458,6 +526,8 @@ def main():
         formal_blockers.append("NO_VALID_STOCK_HISTORY")
     if m3.get("status") != "READY":
         formal_blockers.append("M3_NOT_READY:" + str(m3.get("status")))
+    if industry_audit.get("status") != "ready_forward_only":
+        formal_blockers.append("FORWARD_INDUSTRY_SNAPSHOT_NOT_READY:" + str(industry_audit.get("status")))
     formal_blockers.extend([
         "M5_FACTOR_PIPELINE_NOT_CONNECTED_TO_LIVE_CANDIDATES",
         "M6_OUT_OF_SAMPLE_PREDICTION_NOT_VALIDATED",
@@ -487,6 +557,7 @@ def main():
       f"- 个股行情最新可用时间：{latest_stock_available or '无'}；统一决策时点：{now.isoformat()}",
       f"- M3市场状态：{m3['status']}；状态={m3['market_state'] or '未确认'}；有效会话={m3['valid_sessions']}；最新日期={m3['latest_trade_date'] or '无'}",
       f"- M3仓位系数：{m3['position_scale'] if m3['position_scale'] is not None else '不可用'}；原因={m3['reason'] or '无'}",
+      f"- 前瞻行业快照：{industry_audit.get('status')}；覆盖={industry_audit.get('selected_symbol_count', 0)}/{industry_audit.get('expected_universe_size', 0)}；仅作当日观察审计，不具备历史PIT资格",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
       f"- 正式模型状态：{formal_status}",
       "## 正式模型阻塞项",
