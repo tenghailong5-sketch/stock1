@@ -4,7 +4,10 @@ import pandas as pd
 import pytest
 
 from src.collectors.forward_archive import append_jsonl_atomic, collect, _call_with_network_retry
-from src.providers.akshare_pit import fetch_current_industry_membership_snapshot
+from src.providers.akshare_pit import (
+    fetch_current_industry_membership_snapshot,
+    fetch_sina_current_industry_membership_snapshot,
+)
 
 
 class FakeArchiveAkshare:
@@ -382,3 +385,35 @@ def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tm
     assert {row["expected_industry_count"] for row in rows} == {10}
     assert all(row["historical_pit_eligible"] is False for row in rows)
     assert all("valid_from" not in row and "valid_to" not in row for row in rows)
+
+
+def test_sina_industry_rows_record_each_sector_response_completion_time():
+    class SinaProvider:
+        def stock_sector_spot(self, indicator):
+            assert indicator == "新浪行业"
+            return pd.DataFrame([
+                {"label": f"industry_{index:02d}", "板块": f"行业{index}"}
+                for index in range(10)
+            ])
+
+        def stock_sector_detail(self, sector):
+            index = int(sector.rsplit("_", 1)[1])
+            return pd.DataFrame([
+                {"code": "000001", "name": "平安银行"},
+                {"code": f"6000{index:02d}", "name": f"样本股票{index}"},
+            ])
+
+    start = pd.Timestamp("2026-11-12T08:30:00Z")
+    times = iter(start + pd.Timedelta(seconds=i) for i in range(10))
+    snapshot = fetch_sina_current_industry_membership_snapshot(
+        SinaProvider(), clock=lambda: next(times)
+    )
+
+    by_industry = snapshot.groupby("industry_code")["available_time"].first()
+    assert len(by_industry) == 10
+    assert sorted(by_industry.tolist()) == sorted(
+        start + pd.Timedelta(seconds=i) for i in range(10)
+    )
+    assert snapshot.groupby("industry_code")["available_time"].nunique().eq(1).all()
+    assert snapshot["snapshot_id"].nunique() == 1
+    assert snapshot["historical_pit_eligible"].eq(False).all()
