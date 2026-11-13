@@ -460,6 +460,8 @@ jobs:
               "baostock_only_event_keys": len(baostock_only),
               "term_mismatch_count": len(mismatches),
               "term_mismatch_examples": mismatches[:50],
+              "tdx_only_examples": [list(key) for key in sorted(tdx_only)[:50]],
+              "baostock_only_examples": [list(key) for key in sorted(baostock_only)[:50]],
               "source": "baostock_independent_query",
               "all_symbols_answered": not failed,
               "historical_pit_eligible": False,
@@ -763,7 +765,14 @@ jobs:
               raise SystemExit(f"Independent-source query incomplete: {report.get('failed_symbols')}")
           if len(report.get("answered_symbols", [])) != len(report.get("queried_symbols", [])):
               raise SystemExit("Independent-source response count does not match requested symbols")
-          print("Independent Baostock corporate-action query completed for every requested symbol.")
+          discrepancies = {
+              "tdx_only_event_keys": int(report.get("tdx_only_event_keys", 0)),
+              "baostock_only_event_keys": int(report.get("baostock_only_event_keys", 0)),
+              "term_mismatch_count": int(report.get("term_mismatch_count", 0)),
+          }
+          if any(discrepancies.values()):
+              raise SystemExit(f"Unresolved independent-source event discrepancies: {discrepancies}")
+          print("Independent Baostock corporate-action query completed for every requested symbol with no comparable-event discrepancies.")
           print("Event completeness and historical point-in-time eligibility remain uncertified.")
           PY
           echo "Factor arbitration and independent corporate-action source audit completed; completeness remains uncertified."
