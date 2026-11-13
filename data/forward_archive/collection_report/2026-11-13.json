@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-13T14:41:48.594666+00:00",
+  "captured_at": "2026-11-13T14:53:02.917128+00:00",
   "source_status": {
     "index_000001": "ok: tencent.stock_zh_index_daily_tx; rows=123",
     "index_399001": "ok: tencent.stock_zh_index_daily_tx; rows=123",
@@ -7,7 +7,7 @@
     "index_000688": "ok: tencent.stock_zh_index_daily_tx; rows=123",
     "index_000300": "ok: tencent.stock_zh_index_daily_tx; rows=123",
     "market_breadth": "ok: tencent.stock_zh_a_spot_tx",
-    "industry_membership": "partial: akshare.stock_sector_detail_sina; symbol_coverage=46.9%; Eastmoney_board=0.0%; Eastmoney_individual=not_available; individual_failures=0; Sina=46.9%; Baostock=not_available",
+    "industry_membership": "partial: akshare.stock_sector_detail_sina; symbol_coverage=46.9%; Eastmoney_board=0.0%; Eastmoney_individual=not_available; individual_failures=0; Sina=46.9%; Baostock=not_available; Shenwan=not_available",
     "limit_pools": "ok",
     "historical_market_context": "ok: kaipanhong.market_emotion_kph; backfilled=0"
   },
@@ -26,6 +26,8 @@
     "sina_error": null,
     "baostock_coverage": null,
     "baostock_error": "RuntimeError: Baostock login failed: 网络接收错误。",
+    "shenwan_coverage": null,
+    "shenwan_error": "SSLError: HTTPSConnectionPool(host='www.swsresearch.com', port=443): Max retries exceeded with url: /swindex/pdf/SwClass2021/StockClassifyUse_stock.xls (Caused by SSLError(SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1018)')))",
     "selected_source": "akshare.stock_sector_detail_sina"
   },
   "rows_appended": {
