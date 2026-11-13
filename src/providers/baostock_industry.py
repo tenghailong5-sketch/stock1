@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -34,15 +35,41 @@ def _result_frame(result) -> pd.DataFrame:
 
 
 def fetch_baostock_industry_membership_snapshot(
-    baostock_module, *, clock=None
+    baostock_module, *, clock=None, login_attempts: int = 3,
+    sleep_fn=time.sleep,
 ) -> pd.DataFrame:
-    """Fetch one complete Baostock industry response and stamp retrieval time."""
+    """Fetch one complete Baostock industry response and stamp retrieval time.
+
+    Transient login/network errors are retried with bounded exponential backoff.
+    """
+    if login_attempts < 1:
+        raise ValueError("login_attempts must be at least 1")
     now = clock or (lambda: datetime.now(timezone.utc))
-    login = baostock_module.login()
-    if str(getattr(login, "error_code", "")) != "0":
+    login_error = None
+    logged_in = False
+    for attempt in range(login_attempts):
+        try:
+            login = baostock_module.login()
+            if str(getattr(login, "error_code", "")) == "0":
+                logged_in = True
+                break
+            login_error = RuntimeError(
+                "Baostock login failed: "
+                + str(getattr(login, "error_msg", "unknown error"))[:240]
+            )
+        except Exception as exc:
+            login_error = exc
+        if attempt + 1 < login_attempts:
+            try:
+                baostock_module.logout()
+            except Exception:
+                pass
+            sleep_fn(2 ** attempt)
+    if not logged_in:
         raise RuntimeError(
-            "Baostock login failed: " + str(getattr(login, "error_msg", "unknown error"))[:240]
-        )
+            "Baostock login failed after "
+            f"{login_attempts} attempts: {type(login_error).__name__}: {str(login_error)[:240]}"
+        ) from login_error
     try:
         result = baostock_module.query_stock_industry()
         captured = pd.Timestamp(now())
