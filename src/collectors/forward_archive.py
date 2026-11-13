@@ -291,6 +291,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     chosen_source = "akshare.stock_board_industry_cons_em"
     chosen_coverage = eastmoney_coverage
     sina_coverage = None
+    sina_secondary_coverage = None
+    sina_secondary_error = None
     individual_coverage = None
     individual_failures = 0
     baostock_coverage = None
@@ -371,6 +373,18 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 chosen_coverage = sina_coverage
         except Exception as exc:
             sina_error = exc
+
+        # Sina's separate "行业" directory is a second independent taxonomy,
+        # not a synonym for "新浪行业". Archive it under its own source_id.
+        try:
+            sina_secondary = fetch_sina_current_industry_membership_snapshot(
+                ak_module, clock=industry_clock, indicator="行业"
+            )
+            sina_secondary_coverage = _coverage(sina_secondary)
+            if sina_secondary is not None and not sina_secondary.empty:
+                industry_source_snapshots.append(sina_secondary.copy())
+        except Exception as exc:
+            sina_secondary_error = exc
 
     # Baostock is an independent free source; use it only when it improves
     # coverage. Its updateDate is metadata, not a historical publication time.
@@ -459,6 +473,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         "eastmoney_board": eastmoney_coverage,
         "eastmoney_individual": individual_coverage,
         "sina": sina_coverage,
+        "sina_secondary_industry": sina_secondary_coverage,
         "baostock": baostock_coverage,
         "shenwan_xls": sw_coverage,
         "shenwan_api": sw_api_coverage,
@@ -698,6 +713,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 "eastmoney_individual_failed_symbol_count": individual_failures,
                 "sina_coverage": sina_coverage,
                 "sina_error": _error_detail(sina_error),
+                "sina_secondary_industry_coverage": sina_secondary_coverage,
+                "sina_secondary_industry_error": _error_detail(sina_secondary_error),
                 "baostock_coverage": baostock_coverage,
                 "baostock_error": _error_detail(baostock_error),
                 "shenwan_coverage": sw_coverage,

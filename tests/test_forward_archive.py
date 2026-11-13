@@ -423,9 +423,9 @@ def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tm
             raise type("Push2RateLimitError", (Exception,), {})("Eastmoney cooldown")
 
         def stock_sector_spot(self, indicator):
-            assert indicator == "新浪行业"
+            assert indicator in {"新浪行业", "行业"}
             return pd.DataFrame([
-                {"label": f"industry_{index:02d}", "板块": f"行业{index}"}
+                {"label": f"{indicator}_{index:02d}", "板块": f"{indicator}{index}"}
                 for index in range(10)
             ])
 
