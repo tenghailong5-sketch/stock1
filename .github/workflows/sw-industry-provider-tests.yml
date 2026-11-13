@@ -35,3 +35,28 @@ jobs:
         run: python -m pip install --upgrade pip pandas requests xlrd pytest
       - name: Test SW industry providers
         run: python -m pytest -q tests/test_sw_industry.py tests/test_sw_api_industry.py
+      - name: Live official SW2021 XLS smoke test
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from src.providers.sw_industry import fetch_sw_current_industry_membership_snapshot
+
+          snapshot = fetch_sw_current_industry_membership_snapshot()
+          if snapshot.empty or snapshot["symbol"].nunique() < 4000:
+              raise SystemExit(f"Unexpectedly small official SW snapshot: {len(snapshot)} rows")
+          if snapshot["symbol"].duplicated().any():
+              raise SystemExit("Duplicate symbols in official SW snapshot")
+          Path("sw2021-live-snapshot.csv").write_text(
+              snapshot.to_csv(index=False), encoding="utf-8"
+          )
+          print(f"SW2021_LIVE_OK rows={len(snapshot)} symbols={snapshot['symbol'].nunique()} "
+                f"industries={snapshot['industry_code'].nunique()} "
+                f"observed_at={snapshot['observed_at'].iloc[0]}")
+          PY
+      - name: Upload live SW2021 snapshot
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sw2021-live-snapshot
+          path: sw2021-live-snapshot.csv
+          retention-days: 7
