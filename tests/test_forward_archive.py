@@ -133,13 +133,13 @@ def test_market_observation_times_are_stamped_after_each_provider_response(tmp_p
     index_row = json.loads((tmp_path / "index_daily" / "000001.jsonl").read_text().splitlines()[0])
     breadth_row = json.loads((tmp_path / "market_breadth" / "2026-11-12.jsonl").read_text().splitlines()[0])
     pool_rows = [json.loads(line) for line in (tmp_path / "limit_pools" / "2026-11-12.jsonl").read_text().splitlines()]
-    assert index_row["available_time"] == start.isoformat()
-    assert breadth_row["available_time"] == (start + pd.Timedelta(seconds=5)).isoformat()
-    assert sorted(row["capture_time"] for row in pool_rows) == sorted(
-        (start + pd.Timedelta(seconds=i)).isoformat() for i in range(6, 11)
+    assert pd.Timestamp(index_row["available_time"]) == start
+    assert pd.Timestamp(breadth_row["available_time"]) == start + pd.Timedelta(seconds=5)
+    assert sorted(pd.Timestamp(row["capture_time"]) for row in pool_rows) == sorted(
+        start + pd.Timedelta(seconds=i) for i in range(6, 11)
     )
     sentiment = json.loads((tmp_path / "market_sentiment" / "2026-11-12.jsonl").read_text().splitlines()[0])
-    assert sentiment["capture_time"] == (start + pd.Timedelta(seconds=10)).isoformat()
+    assert pd.Timestamp(sentiment["capture_time"]) == start + pd.Timedelta(seconds=10)
 
 
 def test_collector_dry_run_validates_without_writing(tmp_path):
