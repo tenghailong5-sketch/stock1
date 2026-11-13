@@ -106,10 +106,11 @@ def stratified_sample(universe: pd.DataFrame, sample_size: int = 100) -> list[st
 def fetch_corporate_action_audit(ak_module, symbol: str, *, sleep_fn=time.sleep):
     """Check dividend and rights-issue API coverage; never mark retrieval-time data PIT."""
     today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
+    code = str(symbol)[-6:]
     specs = [
-        ("dividend", "stock_dividend_cninfo", {"symbol": symbol}),
+        ("dividend", "stock_dividend_cninfo", {"symbol": code}),
         ("allotment", "stock_allotment_cninfo", {
-            "symbol": symbol, "start_date": "19700101", "end_date": today
+            "symbol": code, "start_date": "19700101", "end_date": today
         }),
     ]
     statuses, frames = [], []
