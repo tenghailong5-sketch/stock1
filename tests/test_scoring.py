@@ -156,3 +156,38 @@ def test_candidate_floor_never_overrides_failed_hard_gate():
     qualified = qualify_candidate(result)
     assert not qualified.eligible
     assert "hard_gate_failed:industry_top_30pct" in qualified.reasons
+
+
+def test_factor_readiness_audit_lists_missing_inputs_without_fabricating_scores():
+    import pandas as pd
+    from src.model.pipeline import factor_readiness_audit
+
+    audit = factor_readiness_audit(pd.DataFrame([{
+        "symbol": "600000", "market_state": "NEUTRAL",
+        "market_environment": 72.0,
+    }]))
+    a = audit[(audit.symbol == "600000") & (audit.strategy == "A")]
+    market = a[(a.input_type == "factor") & (a.input_name == "market_environment")]
+    industry = a[(a.input_type == "factor") & (a.input_name == "industry_relative_strength")]
+    gap = a[(a.input_type == "hard_gate") & (a.input_name == "next_open_gap_pct")]
+    assert market.status.tolist() == ["available"]
+    assert industry.status.tolist() == ["missing"]
+    assert gap.status.tolist() == ["optional_absent"]
+    assert set(audit.status).issubset({
+        "available", "missing", "invalid", "failed", "optional_absent",
+        "stage_deferred", "missing_market_state",
+    })
+
+
+def test_factor_readiness_audit_defers_b_strategy_until_next_day():
+    import pandas as pd
+    from src.model.pipeline import factor_readiness_audit
+
+    audit = factor_readiness_audit(pd.DataFrame([{
+        "symbol": "000001", "market_state": "NEUTRAL",
+    }]), stage="close")
+    b_next_day = audit[
+        (audit.strategy == "B")
+        & (audit.input_name == "next_day_price_action")
+    ]
+    assert b_next_day.status.tolist() == ["stage_deferred"]
