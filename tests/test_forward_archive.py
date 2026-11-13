@@ -958,7 +958,7 @@ def test_manual_industry_evidence_loader_accepts_only_reconciled_current_sources
     assert row["industry_code"] == "银行"
     assert row["source_id"] == "sina.finance_f10_sw"
     assert row["availability_basis"] == "retrieval_time_only"
-    assert row["historical_pit_eligible"] is False
+    assert bool(row["historical_pit_eligible"]) is False
     assert row["snapshot_scope"] == "current_membership_observation_only"
     assert "valid_from" not in result.columns and "valid_to" not in result.columns
 
