@@ -6,6 +6,7 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import akshare as ak
 import pandas as pd
@@ -78,6 +79,87 @@ def fetch_exchange_universe():
 
 
 
+def stratified_sample(universe: pd.DataFrame, sample_size: int = 100) -> list[str]:
+    """Deterministic proportional sample across SH/SZ/BJ."""
+    if sample_size < 3:
+        raise ValueError("sample_size must be at least 3")
+    groups = {p: universe[universe["symbol"].astype(str).str.startswith(p)].sort_values("symbol").reset_index(drop=True) for p in ("sh", "sz", "bj")}
+    if any(g.empty for g in groups.values()):
+        raise ValueError("all three exchanges must be represented")
+    total = sum(len(g) for g in groups.values())
+    quotas = {p: sample_size * len(g) / total for p, g in groups.items()}
+    allocation = {p: int(q) for p, q in quotas.items()}
+    left = sample_size - sum(allocation.values())
+    for p in sorted(groups, key=lambda k: quotas[k] - allocation[k], reverse=True)[:left]:
+        allocation[p] += 1
+    picks = []
+    for p, g in groups.items():
+        n = allocation[p]
+        positions = sorted(set(round(i * (len(g)-1) / max(n-1, 1)) for i in range(n)))
+        picks.extend(g.iloc[positions]["symbol"].astype(str).tolist())
+    if len(picks) != sample_size or len(set(picks)) != sample_size:
+        raise ValueError("sample allocation did not produce the requested unique count")
+    return picks
+
+
+
+def fetch_corporate_action_audit(ak_module, symbol: str, *, sleep_fn=time.sleep):
+    """Check dividend and rights-issue API coverage; never mark retrieval-time data PIT."""
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
+    code = str(symbol)[-6:]
+    specs = [
+        ("dividend", "stock_dividend_cninfo", {"symbol": code}),
+        ("allotment", "stock_allotment_cninfo", {
+            "symbol": code, "start_date": "19700101", "end_date": today
+        }),
+    ]
+    statuses, frames = [], []
+    for action_type, api_name, kwargs in specs:
+        api = getattr(ak_module, api_name, None)
+        status = {
+            "symbol": symbol, "action_type": action_type,
+            "source_id": "akshare." + api_name,
+        }
+        if not callable(api):
+            statuses.append({**status, "status": "unavailable", "row_count": 0,
+                             "error": "provider_function_missing", "columns": []})
+            continue
+        frame, error = None, None
+        for attempt in range(1, 4):
+            try:
+                frame = api(**kwargs)
+                if frame is None or not isinstance(frame, pd.DataFrame) or len(frame.columns) == 0:
+                    raise ValueError("provider returned no tabular schema")
+                error = None
+                break
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {str(exc)[:180]}"
+                if attempt < 3:
+                    sleep_fn(min(2 ** (attempt - 1), 4))
+        if error is not None:
+            statuses.append({**status, "status": "error", "row_count": 0,
+                             "error": error, "columns": []})
+            continue
+        captured = datetime.now(timezone.utc).isoformat()
+        statuses.append({
+            **status, "status": "ok_response", "row_count": int(len(frame)),
+            "error": None, "columns": [str(col) for col in frame.columns],
+            "available_time": captured, "availability_basis": "retrieval_time_only",
+            "historical_pit_eligible": False,
+        })
+        if not frame.empty:
+            data = frame.copy()
+            data.insert(0, "symbol", symbol)
+            data.insert(1, "action_type", action_type)
+            data.insert(2, "source_id", "akshare." + api_name)
+            data.insert(3, "available_time", captured)
+            data["availability_basis"] = "retrieval_time_only"
+            data["historical_pit_eligible"] = False
+            frames.append(data)
+        sleep_fn(0.5)
+    return statuses, frames
+
+
 def attach_row_lineage(frame: pd.DataFrame, symbol: str, fetched_at: str) -> pd.DataFrame:
     """Attach auditable retrieval-time lineage without implying historical PIT."""
     out = frame.copy()
@@ -121,24 +203,19 @@ def main():
         report["universe_error"] = f"{type(exc).__name__}: {str(exc)[:1500]}"
         report["qualified"] = False
         report["qualification_scope"] = "not qualified: exchange-native symbol universe unavailable"
-        (OUT / "tencent_60_symbol_probe.json").write_text(
+        (OUT / "tencent_100_symbol_probe.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
         raise SystemExit("Exchange-native universe acquisition failed")
 
-    # Deterministic stratified sample across all three exchanges.
-    picks = []
-    for prefix in ("sh", "sz", "bj"):
-        group = universe[universe["symbol"].str.startswith(prefix)]
-        count = min(20, len(group))
-        if count:
-            positions = sorted(set(round(i * (len(group) - 1) / max(count - 1, 1)) for i in range(count)))
-            picks.extend(group.iloc[positions]["symbol"].tolist())
-    picks = list(dict.fromkeys(picks))
+    # Fixed 100-symbol sample, allocated proportionally across SH/SZ/BJ.
+    picks = stratified_sample(universe, sample_size=100)
     report["sample_size"] = len(picks)
+    report["sample_method"] = "deterministic_exchange_proportional_stratification"
+    report["sample_exchange_counts"] = {p: sum(s.startswith(p) for s in picks) for p in ("sh", "sz", "bj")}
 
-    items, frames = [], []
+    items, frames, action_frames, action_statuses = [], [], [], []
     for index, symbol in enumerate(picks, 1):
         item = {"symbol": symbol}
         try:
@@ -186,10 +263,33 @@ def main():
         except Exception as exc:
             item.update({"status": "ERROR", "error": f"{type(exc).__name__}: {str(exc)[:220]}"})
         items.append(item)
-        print(json.dumps({"progress": f"{index}/{len(picks)}", **item}, ensure_ascii=False), flush=True)
-        time.sleep(0.2)
+        statuses, captured_actions = fetch_corporate_action_audit(ak, symbol)
+        action_statuses.extend(statuses)
+        action_frames.extend(captured_actions)
+        print(json.dumps({
+            "progress": f"{index}/{len(picks)}", **item,
+            "corporate_actions": statuses,
+        }, ensure_ascii=False), flush=True)
+        time.sleep(0.3)
 
     report["items"] = items
+    report["corporate_action_audit"] = {
+        "symbols_attempted": len(picks),
+        "dividend_symbols_ok": sum(x["status"] == "ok_response" for x in action_statuses if x["action_type"] == "dividend"),
+        "allotment_symbols_ok": sum(x["status"] == "ok_response" for x in action_statuses if x["action_type"] == "allotment"),
+        "dividend_event_rows": sum(x["row_count"] for x in action_statuses if x["action_type"] == "dividend" and x["status"] == "ok_response"),
+        "allotment_event_rows": sum(x["row_count"] for x in action_statuses if x["action_type"] == "allotment" and x["status"] == "ok_response"),
+        "statuses": action_statuses,
+        "historical_pit_eligible": False,
+        "note": "Provider coverage reconnaissance only. Retrieval-time rows do not establish historical publication availability or a verified total-return ledger.",
+    }
+    if action_frames:
+        action_data = pd.concat(action_frames, ignore_index=True, sort=False)
+        action_path = OUT / "tencent_100_symbol_corporate_actions.csv"
+        action_data.to_csv(action_path, index=False)
+        report["corporate_action_audit"]["artifact_file"] = str(action_path)
+        report["corporate_action_audit"]["artifact_bytes"] = action_path.stat().st_size
+        report["corporate_action_audit"]["artifact_sha256"] = hashlib.sha256(action_path.read_bytes()).hexdigest()
     report["passed_symbols"] = sum(x["status"] == "OK" for x in items)
     report["failed_symbols"] = [x for x in items if x["status"] != "OK"]
     if frames:
@@ -199,18 +299,26 @@ def main():
         report["minimum_sessions"] = int(counts.min())
         report["maximum_sessions"] = int(counts.max())
         report["symbols_with_at_least_119_sessions"] = int((counts >= 119).sum())
-        path = OUT / "tencent_60_symbol_sample.csv"
+        path = OUT / "tencent_100_symbol_sample.csv"
         combined.to_csv(path, index=False)
         report["artifact_file"] = str(path)
         report["artifact_bytes"] = path.stat().st_size
         report["artifact_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
-    report["qualified"] = (
-        len(picks) >= 40
-        and report["passed_symbols"] >= int(len(picks) * 0.95)
-        and report.get("symbols_with_at_least_119_sessions", 0) >= int(len(picks) * 0.95)
+    report["corporate_action_audit"]["qualified_response_coverage"] = (
+        report["corporate_action_audit"]["dividend_symbols_ok"] >= 95
+        and report["corporate_action_audit"]["allotment_symbols_ok"] >= 95
     )
-    report["qualification_scope"] = "stratified sample only; full-market historical backfill not yet qualified"
-    (OUT / "tencent_60_symbol_probe.json").write_text(
+    report["qualified"] = (
+        len(picks) == 100
+        and report["passed_symbols"] >= 95
+        and report.get("symbols_with_at_least_119_sessions", 0) >= 95
+        and report["corporate_action_audit"]["qualified_response_coverage"]
+    )
+    report["qualification_scope"] = (
+        "100-symbol stratified provider qualification only; corporate-action response coverage is not a verified adjustment ledger; "
+        "full-market history and historical PIT remain unqualified"
+    )
+    (OUT / "tencent_100_symbol_probe.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)

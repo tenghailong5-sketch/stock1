@@ -30,7 +30,8 @@ jobs:
         with:
           name: tencent-multi-symbol-qualification
           path: |
-            output/tencent_60_symbol_probe.json
-            output/tencent_60_symbol_sample.csv
+            output/tencent_100_symbol_probe.json
+            output/tencent_100_symbol_sample.csv
+            output/tencent_100_symbol_corporate_actions.csv
           if-no-files-found: warn
           retention-days: 30
