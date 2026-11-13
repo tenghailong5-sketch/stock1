@@ -674,7 +674,7 @@ def test_collector_uses_baostock_when_eastmoney_and_sina_industry_coverage_are_p
     )
     assert report["source_status"]["industry_membership"] == (
         "ok: baostock.query_stock_industry; symbol_coverage=100.0%; "
-        "Eastmoney=33.3%; Sina=66.7%; Baostock=100.0%"
+        "Eastmoney_board=33.3%; Eastmoney_individual=not_available; individual_failures=0; Sina=66.7%; Baostock=100.0%"
     )
     rows = [
         json.loads(line)
