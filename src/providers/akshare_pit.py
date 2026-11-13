@@ -116,7 +116,7 @@ def normalize_index_history_snapshot(
     return out
 
 def fetch_current_industry_membership_snapshot(
-    ak_module, *, clock=None, pause_seconds: float = 0.15, sleep_fn=time.sleep
+    ak_module, *, clock=None, pause_seconds: float = 1.0, sleep_fn=time.sleep
 ) -> pd.DataFrame:
     """Capture current Eastmoney industry constituents as a dated snapshot only.
 
@@ -334,7 +334,7 @@ def json_dumps_stable(value: dict) -> str:
 
 
 def fetch_eastmoney_individual_industry_membership_snapshot(
-    ak_module, symbols, *, clock=None, pause_seconds: float = 0.15,
+    ak_module, symbols, *, clock=None, pause_seconds: float = 1.0,
     sleep_fn=time.sleep, industry_code_by_name=None, max_attempts: int = 2,
 ) -> pd.DataFrame:
     """Fill current industry gaps through Eastmoney's per-security profile API.

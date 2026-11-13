@@ -272,13 +272,14 @@ def test_industry_availability_clock_is_captured_before_throttle_sleep():
         events.append(("sleep", seconds))
 
     fetch_current_industry_membership_snapshot(
-        OrderedProvider(), clock=clock, pause_seconds=0.15, sleep_fn=sleep_fn
+        OrderedProvider(), clock=clock, sleep_fn=sleep_fn
     )
 
     assert [kind for kind, _ in events] == [
         "response", "clock", "sleep",
         "response", "clock", "sleep",
     ]
+    assert [value for kind, value in events if kind == "sleep"] == [1.0, 1.0]
 
 
 def test_collector_uses_tencent_index_fallback_after_push2_rate_limit(tmp_path):

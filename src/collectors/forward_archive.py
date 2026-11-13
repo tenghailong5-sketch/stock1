@@ -267,7 +267,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     eastmoney_error = None
     try:
         eastmoney_industry = fetch_current_industry_membership_snapshot(
-            ak_module, clock=industry_clock, pause_seconds=0.15
+            ak_module, clock=industry_clock, pause_seconds=1.0
         )
     except Exception as exc:
         eastmoney_error = exc
@@ -323,7 +323,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 )
                 individual_industry = fetch_eastmoney_individual_industry_membership_snapshot(
                     ak_module, missing_symbols, clock=industry_clock,
-                    pause_seconds=0.15, industry_code_by_name=industry_code_by_name,
+                    pause_seconds=1.0, industry_code_by_name=industry_code_by_name,
                 )
                 individual_coverage = (
                     len(set(individual_industry["symbol"].astype(str)) & expected_symbols)
