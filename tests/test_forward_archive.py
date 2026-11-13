@@ -955,19 +955,23 @@ def test_manual_industry_evidence_loader_accepts_only_reconciled_current_sources
             "record_status": "conflict_requires_taxonomy_reconciliation",
         },
     ]
-    path.write_text("\\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
+    path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
     result = _load_manual_industry_evidence(
         path, {"000001", "000975", "600000", "000002"},
         captured_at="2026-11-14T05:00:00Z",
     )
-    assert len(result) == 1
-    row = result.iloc[0]
-    assert row["symbol"] == "000001"
-    assert row["industry_code"] == "银行"
-    assert row["source_id"] == "sina.finance_f10_sw"
-    assert row["availability_basis"] == "retrieval_time_only"
-    assert bool(row["historical_pit_eligible"]) is False
-    assert row["snapshot_scope"] == "current_membership_observation_only"
+    assert len(result) == 2
+    sina_row = result[result["symbol"] == "000001"].iloc[0]
+    ths_row = result[result["symbol"] == "000975"].iloc[0]
+    assert sina_row["industry_code"] == "银行"
+    assert sina_row["source_id"] == "sina.finance_f10_sw"
+    assert sina_row["classification_system"].startswith("申万行业")
+    assert ths_row["source_id"] == "10jqka.f10_industry"
+    assert ths_row["classification_system"].startswith("同花顺行业")
+    assert ths_row["industry_name"] == "有色金属—贵金属—黄金"
+    assert sina_row["availability_basis"] == "retrieval_time_only"
+    assert bool(sina_row["historical_pit_eligible"]) is False
+    assert sina_row["snapshot_scope"] == "current_membership_observation_only"
     assert "valid_from" not in result.columns and "valid_to" not in result.columns
 
 
