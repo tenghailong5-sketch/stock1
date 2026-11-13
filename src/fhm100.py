@@ -9,7 +9,7 @@ import pandas as pd
 import requests
 from src.model.m4_factors import price_structure
 from src.model.m4_observation import rank_price_observations
-from src.model.pipeline import evaluate_candidates
+from src.model.pipeline import evaluate_candidates, factor_readiness_audit
 from src.model.m4_industry_observations import select_latest_observed_industry_snapshot
 from src.model.m3_assembler import assemble_m3_history
 from src.collectors.forward_archive import append_jsonl_atomic
@@ -711,6 +711,8 @@ def main():
     m5 = evaluate_candidates(m5_input, stage="close") if not m5_input.empty else pd.DataFrame(
         columns=["symbol","strategy","stage","score","eligible","candidate_band","minimum_score","reasons"])
     m5.to_csv(OUT/"m5_diagnostics.csv",index=False,encoding="utf-8-sig")
+    m5_readiness = factor_readiness_audit(m5_input, stage="close")
+    m5_readiness.to_csv(OUT/"m5_factor_readiness.csv", index=False, encoding="utf-8-sig")
     m5_blockers = summarize_m5_blockers(m5)
     m5_blockers.to_csv(OUT/"m5_blocker_summary.csv",index=False,encoding="utf-8-sig")
 
