@@ -10,12 +10,10 @@ time only; this is not a historical point-in-time publication feed.
 from __future__ import annotations
 
 import hashlib
-import os
 import ssl
 import tempfile
 import uuid
 from datetime import datetime, timezone
-from io import BytesIO
 
 import pandas as pd
 import requests
