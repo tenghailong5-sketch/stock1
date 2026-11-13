@@ -638,7 +638,7 @@ def main():
         if not w.empty:
             w, observation_audit = rank_price_observations(
                 w, expected_universe_size=len(history_universe),
-                scope_id="top_600_plus_quote_prefilter_supplement"
+                scope_id="research_pool_60_growth_focused"
             )
         else:
             observation_audit = pd.DataFrame()
