@@ -141,7 +141,7 @@ def _load_manual_industry_evidence(
         "expected_industry_count", "observed_at", "available_time",
         "availability_basis", "historical_pit_eligible", "source_id",
         "snapshot_scope", "source_revision", "classification_system",
-        "source_url", "evidence_status",
+        "source_url", "source_title", "source_refs", "evidence_status",
     ]
     if not path.exists():
         return pd.DataFrame(columns=columns)
