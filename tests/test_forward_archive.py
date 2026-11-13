@@ -435,3 +435,48 @@ def test_collection_report_records_each_index_provider_and_row_count(tmp_path):
             "ok: akshare.index_zh_a_hist; rows=1"
         )
     assert report["partial"] is False
+
+
+
+def test_sina_industry_snapshot_collapses_exact_duplicate_memberships():
+    class FakeSina:
+        def stock_sector_spot(self, indicator):
+            return pd.DataFrame([
+                {"label": f"IND-{i}", "板块": f"行业{i}"} for i in range(10)
+            ])
+
+        def stock_sector_detail(self, sector):
+            # Repeated rows within an industry are provider duplication;
+            # the same symbol in different industries remains valid.
+            return pd.DataFrame([
+                {"code": "000001", "name": "平安银行"},
+                {"code": "000001", "name": "平安银行"},
+                {"code": "600000", "name": "浦发银行"},
+            ])
+
+    result = fetch_sina_current_industry_membership_snapshot(
+        FakeSina(), clock=lambda: pd.Timestamp("2026-11-13T08:00:00Z")
+    )
+    assert len(result) == 20
+    assert not result.duplicated(["symbol", "industry_code"]).any()
+    assert result.groupby("symbol")["industry_code"].nunique().loc["000001"] == 10
+    assert result["historical_pit_eligible"].eq(False).all()
+
+
+def test_sina_industry_snapshot_rejects_conflicting_duplicate_names():
+    class FakeSina:
+        def stock_sector_spot(self, indicator):
+            return pd.DataFrame([
+                {"label": f"IND-{i}", "板块": f"行业{i}"} for i in range(10)
+            ])
+
+        def stock_sector_detail(self, sector):
+            return pd.DataFrame([
+                {"code": "000001", "name": "名称A"},
+                {"code": "000001", "name": "名称B"},
+            ])
+
+    with pytest.raises(ValueError, match="conflicting names"):
+        fetch_sina_current_industry_membership_snapshot(
+            FakeSina(), clock=lambda: pd.Timestamp("2026-11-13T08:00:00Z")
+        )

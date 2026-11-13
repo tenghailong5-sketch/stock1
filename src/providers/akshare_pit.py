@@ -218,6 +218,18 @@ def fetch_sina_current_industry_membership_snapshot(
         if members["symbol"].isna().any():
             raise ValueError("Sina constituent detail contains invalid stock codes: " + sector.industry_code)
         members["symbol"] = members["symbol"].astype(str).str.zfill(6)
+        # Some Sina detail responses repeat a constituent within the same
+        # industry. Exact duplicate memberships are redundant provider rows,
+        # not additional memberships; collapse them deterministically. If the
+        # same code has conflicting names, keep the batch fail-closed.
+        if members["symbol"].duplicated().any():
+            names_per_symbol = members.groupby("symbol")["name"].nunique(dropna=False)
+            if names_per_symbol.gt(1).any():
+                raise ValueError(
+                    "Sina constituent detail has conflicting names for duplicate stock codes: "
+                    + sector.industry_code
+                )
+            members = members.drop_duplicates(["symbol"], keep="first")
         members["industry_code"] = sector.industry_code
         members["industry_name"] = sector.industry_name
         members["observed_at"] = captured
