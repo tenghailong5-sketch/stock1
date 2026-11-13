@@ -637,16 +637,7 @@ jobs:
             echo "Cross-source reconciliation evidence is missing; validation cannot pass."
             exit 1
           fi
-          if ! grep -Eq '^(applied_or_checked_with_arbitration_evidence|completed_no_candidate_symbols; no_repair_needed; completeness_not_proven)
-      - name: Upload validation evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cnequity-demo-evidence
-          path: validation/cnequity-demo/
-          if-no-files-found: warn
-          retention-days: 14
- "$STATUS_FILE"; then
+          if ! grep -Eq '^(applied_or_checked_with_arbitration_evidence|completed_no_candidate_symbols; no_repair_needed; completeness_not_proven)$' "$STATUS_FILE"; then
             echo "Cross-source reconciliation did not reach a recognized evidence outcome."
             cat "$STATUS_FILE"
             exit 1
