@@ -272,6 +272,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     except Exception as exc:
         eastmoney_error = exc
 
+    # Coverage denominator is the full current quote universe; READY means exactly 100%.
     def _coverage(snapshot):
         if snapshot is None or snapshot.empty or not expected_symbols:
             return 0.0
