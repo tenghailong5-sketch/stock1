@@ -397,7 +397,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     # can retain independent observations and expose disagreements.
     if expected_symbols and sw_api_industry_fetcher is not None:
         try:
-            sw_api_industry = sw_api_industry_fetcher(clock=industry_clock) if False else sw_api_industry_fetcher()
+            sw_api_industry = sw_api_industry_fetcher(clock=industry_clock)
             sw_api_coverage = _coverage(sw_api_industry)
             if sw_api_industry is not None and not sw_api_industry.empty:
                 industry_source_snapshots.append(sw_api_industry.copy())
