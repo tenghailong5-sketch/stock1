@@ -366,18 +366,31 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 continue
             breadth_path = archive_root / "market_breadth" / f"{history_day}.jsonl"
             sentiment_path = archive_root / "market_sentiment" / f"{history_day}.jsonl"
-            need_breadth = not breadth_path.exists() or breadth_path.stat().st_size == 0
-            need_sentiment = not sentiment_path.exists() or sentiment_path.stat().st_size == 0
-            if not need_breadth and not need_sentiment:
+
+            def _has_kph_source(path):
+                if not path.exists() or path.stat().st_size == 0:
+                    return False
+                try:
+                    rows = [
+                        json.loads(line)
+                        for line in path.read_text(encoding="utf-8").splitlines()
+                        if line.strip()
+                    ]
+                except (OSError, json.JSONDecodeError):
+                    return False
+                return any(
+                    row.get("source_id") == "kaipanhong.market_emotion_kph"
+                    for row in rows
+                )
+
+            if _has_kph_source(breadth_path) and _has_kph_source(sentiment_path):
                 continue
             try:
                 historical_breadth, historical_sentiment = historical_market_fetcher(
                     history_day, expected_market_count=len(expected_symbols)
                 )
-                if need_breadth:
-                    historical_breadth_records.append(historical_breadth)
-                if need_sentiment:
-                    historical_sentiment_records.append(historical_sentiment)
+                historical_breadth_records.append(historical_breadth)
+                historical_sentiment_records.append(historical_sentiment)
             except Exception as exc:
                 historical_market_failures.append(
                     f"{history_day}:{type(exc).__name__}:{str(exc)[:140]}"
@@ -399,7 +412,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             )
     else:
         source_status["historical_market_context"] = (
-            "skipped: no historical fetcher or no verified current market universe"
+            "ok: historical backfill not requested or no verified current market universe"
         )
 
     if not write:
