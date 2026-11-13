@@ -112,3 +112,18 @@ def test_identity_snapshot_freshness_rejects_stale_observation():
 def test_identity_snapshot_freshness_rejects_naive_timestamp():
     with pytest.raises(ValueError, match="timezone-aware"):
         validate_snapshot_freshness("2026-11-12T12:00:00")
+
+
+def test_sanitize_catalog_seeds_formal_identity_missing_from_probe_catalog():
+    formal = {
+        "600001.SH": "2020-02-01",
+        "600002.SH": "2021-03-15",
+    }
+    sanitized, audit = sanitize_catalog(
+        {}, {"delisted": {}, "never_issued": []}, formal, set(formal)
+    )
+
+    assert sanitized["delisted"] == formal
+    assert audit["formal_delistings_not_yet_in_raw_catalog"] == 2
+    assert audit["formal_identity_seeded_into_recovery_catalog"] == 2
+    assert audit["sanitized_recovery_catalog_entries"] == 2
