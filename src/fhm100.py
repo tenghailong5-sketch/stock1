@@ -36,7 +36,9 @@ def archive_stock_history_snapshot(frame, symbol, *, captured_at, archive_root=P
     rows_added = append_jsonl_atomic(
         archive_root / "stock_daily" / f"{str(symbol).zfill(6)}.jsonl",
         records,
-        ("symbol", "trade_date", "source_revision"),
+        # Keep identical bars from different providers as separate observations;
+        # source_revision hashes row values, not the provider identity.
+        ("symbol", "trade_date", "source_id", "source_revision"),
     )
     revisions = sorted(normalized["source_revision"].astype(str).tolist())
     batch_revision = hashlib.sha256("|".join(revisions).encode("utf-8")).hexdigest()
