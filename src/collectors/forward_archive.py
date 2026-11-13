@@ -293,7 +293,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     # Fill missing symbols through the same Eastmoney provider family before
     # considering a different taxonomy. Never combine Sina/申万 labels with
     # Eastmoney board labels into one artificial industry ranking.
-    if expected_symbols and eastmoney_coverage < 0.999:
+    if expected_symbols and eastmoney_coverage < 1.0:
         try:
             board_members = (
                 set(eastmoney_industry["symbol"].astype(str).str.zfill(6))
@@ -332,7 +332,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
 
     # Independent Sina taxonomy is considered only as a complete alternative,
     # not merged into Eastmoney's industry labels.
-    if chosen_coverage < 0.95:
+    if chosen_coverage < 1.0:
         try:
             sina_industry = fetch_sina_current_industry_membership_snapshot(
                 ak_module, clock=industry_clock
@@ -347,13 +347,11 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
 
     # Baostock is an independent free source; use it only when it improves
     # coverage. Its updateDate is metadata, not a historical publication time.
-    if chosen_coverage < 0.95:
+    # Inject the provider from the production CLI; tests never contact its socket.
+    if chosen_coverage < 1.0 and baostock_module is not None:
         try:
-            provider = baostock_module
-            if provider is None:
-                import baostock as provider
             baostock_industry = fetch_baostock_industry_membership_snapshot(
-                provider, clock=industry_clock
+                baostock_module, clock=industry_clock
             )
             baostock_coverage = _coverage(baostock_industry)
             if baostock_coverage > chosen_coverage:
@@ -362,6 +360,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 chosen_coverage = baostock_coverage
         except Exception as exc:
             baostock_error = exc
+    elif chosen_coverage < 1.0:
+        baostock_error = RuntimeError("Baostock fallback was not injected into this collector run")
 
     if industry is None or industry.empty:
         source_status["industry_membership"] = (
@@ -375,12 +375,12 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             f"Baostock={type(baostock_error).__name__ if baostock_error else 'not_attempted'}: "
             f"{str(baostock_error)[:100] if baostock_error else 'no data'}"
         )
-    elif chosen_coverage >= 0.95 and chosen_source == "akshare.stock_sector_detail_sina":
+    elif chosen_coverage >= 1.0 and chosen_source == "akshare.stock_sector_detail_sina":
         source_status["industry_membership"] = (
             f"ok: {chosen_source}; symbol_coverage={chosen_coverage:.1%}"
         )
     else:
-        prefix = "ok" if chosen_coverage >= 0.95 else "partial"
+        prefix = "ok" if chosen_coverage >= 1.0 else "partial"
         source_status["industry_membership"] = (
             f"{prefix}: {chosen_source}; symbol_coverage={chosen_coverage:.1%}; "
             f"Eastmoney_board={eastmoney_coverage:.1%}; "
@@ -389,7 +389,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             f"Sina={f'{sina_coverage:.1%}' if sina_coverage is not None else 'not_available'}; "
             f"Baostock={f'{baostock_coverage:.1%}' if baostock_coverage is not None else 'not_available'}"
         )
-    if not allow_partial and chosen_coverage < 0.95:
+    if not allow_partial and chosen_coverage < 1.0:
         raise RuntimeError(source_status["industry_membership"])
 
     if industry is not None and not industry.empty:
@@ -555,10 +555,12 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="fetch and validate all sources without writing archive files")
     args = parser.parse_args()
     import akshare as ak
+    import baostock as bs
 
     counts = collect(
         ak, Path(args.output), write=not args.dry_run, allow_partial=True,
         historical_market_fetcher=fetch_historical_market_context,
+        baostock_module=bs,
     )
     print(json.dumps({"mode": "dry_run" if args.dry_run else "archive", "validated_rows": counts}, ensure_ascii=False, sort_keys=True))
 
