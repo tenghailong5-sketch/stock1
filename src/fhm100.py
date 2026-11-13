@@ -116,7 +116,7 @@ def universe():
         tencent = getattr(ak, "stock_zh_a_spot_tx", None)
         if callable(tencent):
             try:
-                d = _normalize_tencent_spot_snapshot(tencent(), minimum_rows=1000)
+                d = _normalize_tencent_spot_snapshot(tencent(), minimum_rows=4000  # coverage floor; not proof of a complete exchange-wide listing)
             except Exception as tencent_exc:
                 failures.append(f"Tencent: {type(tencent_exc).__name__}: {str(tencent_exc)[:160]}")
         else:
