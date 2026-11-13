@@ -176,7 +176,7 @@ def fetch_current_industry_membership_snapshot(
 
 
 def fetch_sina_current_industry_membership_snapshot(
-    ak_module, *, clock=None
+    ak_module, *, clock=None, indicator: str = "新浪行业", source_id: str | None = None
 ) -> pd.DataFrame:
     """Capture all current Sina industry constituents as a forward-only snapshot.
 
@@ -187,7 +187,9 @@ def fetch_sina_current_industry_membership_snapshot(
     mislabeled as complete membership.
     """
     now = clock or (lambda: datetime.now(timezone.utc))
-    sectors = ak_module.stock_sector_spot(indicator="新浪行业")
+    if indicator not in {"新浪行业", "行业"}:
+        raise ValueError("indicator must be 新浪行业 or 行业")
+    sectors = ak_module.stock_sector_spot(indicator=indicator)
     required = {"label", "板块"}
     if sectors is None or sectors.empty or required - set(sectors.columns):
         missing = sorted(required - set(sectors.columns)) if sectors is not None else sorted(required)
@@ -252,7 +254,10 @@ def fetch_sina_current_industry_membership_snapshot(
     source["expected_industry_count"] = expected_industry_count
     source["availability_basis"] = "retrieval_time_only"
     source["historical_pit_eligible"] = False
-    source["source_id"] = "akshare.stock_sector_detail_sina"
+    source["source_id"] = source_id or (
+        "akshare.stock_sector_detail_sina" if indicator == "新浪行业"
+        else "akshare.stock_sector_detail_sina_industry"
+    )
     source["snapshot_scope"] = "current_membership_observation_only"
     revisions = (
         source.groupby("industry_code", sort=True)[["symbol", "industry_code", "industry_name"]]
