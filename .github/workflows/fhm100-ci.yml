@@ -27,4 +27,4 @@ jobs:
         run: python -m pytest -q
       - name: Validate GitHub Actions workflow YAML
         run: |
-          ruby -e 'require "yaml"; Dir.glob(".github/workflows/*.{yml,yaml}").sort.each { |path| YAML.load_file(path); puts "valid YAML: #{path}" }'
+          ruby -e 'require "yaml"; Dir.glob(".github/workflows/*.{yml,yaml}").sort.each { |path| begin; YAML.load_file(path); puts "valid YAML: #{path}"; rescue Psych::SyntaxError => e; warn "INVALID YAML: #{path}: line=#{e.line} column=#{e.column} problem=#{e.problem.inspect} context=#{e.context.inspect}"; exit 1; end }'
