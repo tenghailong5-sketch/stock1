@@ -160,7 +160,7 @@ def select_history_universe(snapshot, *, max_symbols=600):
     for column in ("price", "amount", "pct_chg"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
     frame = frame[
-        frame["code"].str.fullmatch(r"\\d{6}", na=False)
+        frame["code"].str.fullmatch(r"\d{6}", na=False)
         & (frame["price"] > 0) & (frame["amount"] > 0)
     ].drop_duplicates("code")
     return frame.sort_values(["amount", "code"], ascending=[False, True]).head(max_symbols).reset_index(drop=True)
