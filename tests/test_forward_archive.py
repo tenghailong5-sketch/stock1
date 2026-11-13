@@ -363,6 +363,7 @@ def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tm
             return pd.DataFrame([
                 {"code": "000001", "name": "平安银行"},
                 {"code": f"6000{index:02d}", "name": f"样本股票{index}"},
+                {"code": "000002", "name": "样例三"},
             ])
 
     counts = collect(
@@ -371,7 +372,7 @@ def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tm
         captured_at="2026-11-12T08:30:00Z",
         allow_partial=True,
     )
-    assert counts["industry_membership"] == 20
+    assert counts["industry_membership"] == 30
     report = json.loads(
         (tmp_path / "collection_report" / "2026-11-12.json").read_text(encoding="utf-8")
     )
@@ -380,7 +381,7 @@ def test_collector_uses_sina_industry_fallback_when_eastmoney_is_rate_limited(tm
     )
     path = tmp_path / "industry_membership" / "2026-11-12.jsonl"
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-    assert len(rows) == 20
+    assert len(rows) == 30
     assert {row["source_id"] for row in rows} == {"akshare.stock_sector_detail_sina"}
     assert {row["expected_industry_count"] for row in rows} == {10}
     assert all(row["historical_pit_eligible"] is False for row in rows)
