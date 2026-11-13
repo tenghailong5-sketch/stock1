@@ -420,43 +420,50 @@ jobs:
           missing = sorted(set(keys + terms) - set(tdx.columns))
           if missing:
               raise RuntimeError(f"TDX corporate-action schema missing fields: {missing}")
-          # Work on Polars-native row dictionaries. Avoid to_pandas(), which
-          # requires optional PyArrow and is not part of the minimal pipeline.
-          def event_map(frame, source):
+          # Compare only event types represented by both adapters. TDX
+          # combines bonus + transfer into bonus_ratio; Baostock separates them.
+          # Normalize both to one total share-distribution ratio before matching.
+          def event_map(frame):
               mapped = {}
+              unsupported = 0
               for raw in frame.to_dicts():
+                  action_type = str(raw["action_type"])
+                  if action_type not in {"cash_dividend", "bonus", "transfer"}:
+                      unsupported += 1
+                      continue
                   ex_date = raw["ex_date"]
                   if hasattr(ex_date, "isoformat"):
                       ex_date = ex_date.isoformat()
-                  key = (str(raw["symbol"]), str(ex_date)[:10], str(raw["action_type"]))
-                  values = {}
-                  for field in terms:
-                      value = raw.get(field, 0.0)
-                      values[field] = float(value or 0.0)
-                  mapped[key] = values
-              return mapped
-          left = event_map(tdx, "tdx")
-          right = event_map(independent, "baostock")
+                  if action_type == "cash_dividend":
+                      kind = "cash_dividend"
+                      amount = float(raw.get("cash_dividend") or 0.0)
+                  else:
+                      kind = "share_distribution"
+                      amount = float(raw.get("bonus_ratio") or 0.0) + float(raw.get("transfer_ratio") or 0.0)
+                  key = (str(raw["symbol"]), str(ex_date)[:10], kind)
+                  mapped[key] = amount
+              return mapped, unsupported
+          left, tdx_unsupported = event_map(tdx)
+          right, baostock_unsupported = event_map(independent)
           matched_keys = set(left) & set(right)
           tdx_only = set(left) - set(right)
           baostock_only = set(right) - set(left)
           mismatches = []
           for key in sorted(matched_keys):
-              differences = {
-                  field: {"tdx": left[key][field], "baostock": right[key][field]}
-                  for field in terms
-                  if abs(left[key][field] - right[key][field]) > 1e-6
-              }
-              if differences:
-                  mismatches.append({"symbol": key[0], "ex_date": key[1],
-                                     "action_type": key[2], "differences": differences})
+              if abs(left[key] - right[key]) > 1e-6:
+                  mismatches.append({
+                      "symbol": key[0], "ex_date": key[1], "action_type": key[2],
+                      "tdx": left[key], "baostock": right[key]
+                  })
           report = {
               "window": {"start": start.isoformat(), "end": end.isoformat()},
               "queried_symbols": sorted(symbols),
               "answered_symbols": sorted(set(symbols) - set(failed)),
               "failed_symbols": sorted(failed),
-              "tdx_rows": int(len(left)),
-              "baostock_rows": int(len(right)),
+              "tdx_rows_comparable": len(left),
+              "baostock_rows_comparable": len(right),
+              "tdx_unsupported_event_rows": tdx_unsupported,
+              "baostock_unsupported_event_rows": baostock_unsupported,
               "matched_event_keys": len(matched_keys),
               "tdx_only_event_keys": len(tdx_only),
               "baostock_only_event_keys": len(baostock_only),
