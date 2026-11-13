@@ -5,11 +5,13 @@ on:
     paths:
       - "src/providers/sw_industry.py"
       - "src/providers/sw_api_industry.py"
+      - "src/providers/baostock_industry.py"
       - "src/providers/baidu_industry.py"
       - "src/collectors/forward_archive.py"
       - "tests/test_sw_industry.py"
       - "tests/test_baidu_industry.py"
       - "tests/test_sw_api_industry.py"
+      - "tests/test_baostock_industry.py"
       - "tests/test_forward_archive.py"
       - "docs/validated_FHM-100_V2.2-R2.1_完整模型.md"
       - ".github/workflows/sw-industry-ci.yml"
@@ -41,4 +43,4 @@ jobs:
       - name: Run industry provider tests
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: pytest -q tests/test_sw_industry.py tests/test_baidu_industry.py tests/test_sw_api_industry.py tests/test_forward_archive.py
+        run: pytest -q tests/test_sw_industry.py tests/test_baidu_industry.py tests/test_sw_api_industry.py tests/test_baostock_industry.py tests/test_forward_archive.py
