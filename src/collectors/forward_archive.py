@@ -27,6 +27,7 @@ from src.providers.akshare_pit import (
     normalize_market_breadth_snapshot,
 )
 from src.providers.kaipanhong_market import fetch_historical_market_context
+from src.providers.baostock_industry import fetch_baostock_industry_membership_snapshot
 
 def _call_with_network_retry(call, *args, attempts: int = 3, sleep_fn=time.sleep, **kwargs):
     """Retry transient transport failures only; never mask schema/data errors."""
@@ -148,7 +149,7 @@ def _tencent_breadth_frame(ak_module):
     return out
 
 
-def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None) -> dict[str, int]:
+def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None, baostock_module=None) -> dict[str, int]:
     ak_module = _RetryingProvider(ak_module, sleep_fn=retry_sleep)
     captured = pd.Timestamp(
         captured_at if captured_at is not None else datetime.now(ZoneInfo("Asia/Shanghai"))
@@ -278,56 +279,65 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
 
     industry = eastmoney_industry
     eastmoney_coverage = _coverage(eastmoney_industry)
-    # Trigger the independent Sina taxonomy whenever Eastmoney is unavailable
-    # or covers less than 95% of the current quote universe. Keep the better
-    # snapshot; never combine incompatible taxonomies into a fake unified map.
+    chosen_source = "akshare.stock_board_industry_cons_em"
+    chosen_coverage = eastmoney_coverage
+    sina_coverage = None
+    baostock_coverage = None
+    sina_error = None
+    baostock_error = None
+
+    # Keep the best single taxonomy; never merge incompatible classification systems.
     if eastmoney_industry is None or eastmoney_coverage < 0.95:
         try:
             sina_industry = fetch_sina_current_industry_membership_snapshot(
                 ak_module, clock=industry_clock
             )
             sina_coverage = _coverage(sina_industry)
-            if industry is None or sina_coverage > eastmoney_coverage:
+            if industry is None or sina_coverage > chosen_coverage:
                 industry = sina_industry
                 chosen_source = "akshare.stock_sector_detail_sina"
                 chosen_coverage = sina_coverage
-            else:
-                chosen_source = "akshare.stock_board_industry_cons_em"
-                chosen_coverage = eastmoney_coverage
-            if chosen_coverage >= 0.95:
-                source_status["industry_membership"] = (
-                    f"ok: {chosen_source}; symbol_coverage={chosen_coverage:.1%}"
-                )
-            else:
-                source_status["industry_membership"] = (
-                    f"partial: {chosen_source}; symbol_coverage={chosen_coverage:.1%}; "
-                    f"Eastmoney={eastmoney_coverage:.1%}; Sina={sina_coverage:.1%}; "
-                    f"Eastmoney_error={type(eastmoney_error).__name__ if eastmoney_error else 'none'}:"
-                    f"{str(eastmoney_error)[:180] if eastmoney_error else 'no error'}"
-                )
-                if not allow_partial:
-                    raise RuntimeError(source_status["industry_membership"])
-        except Exception as sina_exc:
-            if industry is None:
-                source_status["industry_membership"] = (
-                    "unavailable: Eastmoney "
-                    f"{type(eastmoney_error).__name__ if eastmoney_error else 'unknown'}: "
-                    f"{str(eastmoney_error)[:180] if eastmoney_error else 'no snapshot'} | "
-                    f"Sina {type(sina_exc).__name__}: {str(sina_exc)[:120]}"
-                )
-                if not allow_partial:
-                    raise RuntimeError(source_status["industry_membership"]) from sina_exc
-            else:
-                source_status["industry_membership"] = (
-                    f"partial: Eastmoney symbol_coverage={eastmoney_coverage:.1%}; "
-                    f"Sina fallback failed: {type(sina_exc).__name__}: {str(sina_exc)[:120]}"
-                )
-                if not allow_partial:
-                    raise RuntimeError(source_status["industry_membership"]) from sina_exc
-    else:
+        except Exception as exc:
+            sina_error = exc
+
+    # Baostock is an independent free provider. Its updateDate is preserved,
+    # but retrieval time remains the only asserted availability timestamp.
+    if industry is None or chosen_coverage < 0.95:
+        try:
+            provider = baostock_module
+            if provider is None:
+                import baostock as provider
+            baostock_industry = fetch_baostock_industry_membership_snapshot(
+                provider, clock=industry_clock
+            )
+            baostock_coverage = _coverage(baostock_industry)
+            if industry is None or baostock_coverage > chosen_coverage:
+                industry = baostock_industry
+                chosen_source = "baostock.query_stock_industry"
+                chosen_coverage = baostock_coverage
+        except Exception as exc:
+            baostock_error = exc
+
+    if industry is None:
         source_status["industry_membership"] = (
-            f"ok: akshare.stock_board_industry_cons_em; symbol_coverage={eastmoney_coverage:.1%}"
+            "unavailable: "
+            f"Eastmoney={type(eastmoney_error).__name__ if eastmoney_error else 'no_snapshot'}:"
+            f"{str(eastmoney_error)[:140] if eastmoney_error else 'no data'}; "
+            f"Sina={type(sina_error).__name__ if sina_error else 'not_attempted'}:"
+            f"{str(sina_error)[:120] if sina_error else 'no data'}; "
+            f"Baostock={type(baostock_error).__name__ if baostock_error else 'not_attempted'}:"
+            f"{str(baostock_error)[:120] if baostock_error else 'no data'}"
         )
+    else:
+        prefix = "ok" if chosen_coverage >= 0.95 else "partial"
+        source_status["industry_membership"] = (
+            f"{prefix}: {chosen_source}; symbol_coverage={chosen_coverage:.1%}; "
+            f"Eastmoney={eastmoney_coverage:.1%}; "
+            f"Sina={f'{sina_coverage:.1%}' if sina_coverage is not None else 'not_available'}; "
+            f"Baostock={f'{baostock_coverage:.1%}' if baostock_coverage is not None else 'not_available'}"
+        )
+    if not allow_partial and chosen_coverage < 0.95:
+        raise RuntimeError(source_status["industry_membership"])
 
     if industry is not None and not industry.empty:
         industry_records = _records(industry)
