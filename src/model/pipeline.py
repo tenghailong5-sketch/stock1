@@ -138,6 +138,75 @@ def _result_dict(symbol: str, strategy: str, result: StrategyResult,
     }
 
 
+
+def factor_readiness_audit(frame: pd.DataFrame, *, stage: str = "close") -> pd.DataFrame:
+    """Explain M5 input readiness per symbol/strategy without inventing values.
+
+    This is a coverage audit, not a scoring shortcut. It reports every weighted
+    factor and hard gate as available, missing, invalid, or stage-deferred.
+    """
+    from .r21_core import A_WEIGHTS, B_WEIGHTS, C_WEIGHTS
+
+    gate_keys = {
+        "A": ("industry_top_30pct", "stock_residual_top_20pct",
+              "amount_ma20_ge_100m", "breakout_or_confirmed_retest",
+              "no_high_volume_stall_or_repeated_rejection", "next_open_gap_pct"),
+        "B": ("event_subtype", "event_data_verified",
+              "liquidity_and_risk_pass", "announcement_risk_pass"),
+        "C": ("pre_pullback_residual_positive", "pullback_between_0_5_and_4pct",
+              "pullback_volume_le_80pct_prior5d", "stop_or_reversal_confirmed",
+              "industry_not_weak", "no_material_negative_event",
+              "liquidity_and_risk_pass"),
+    }
+    definitions = (("A", A_WEIGHTS), ("B", B_WEIGHTS), ("C", C_WEIGHTS))
+    records = []
+    for row in frame.to_dict(orient="records"):
+        symbol = str(row.get("symbol", "")).strip()
+        state_ok = row.get("market_state") in {"RISK_ON", "NEUTRAL", "RISK_OFF"}
+        for strategy, weights in definitions:
+            for key in weights:
+                value = row.get(key)
+                if key == "next_day_price_action" and stage != "next_day":
+                    status = "stage_deferred"
+                elif not state_ok and key == "market_environment":
+                    status = "missing_market_state"
+                elif key not in row or not _finite_factor(value):
+                    status = "missing"
+                else:
+                    try:
+                        status = "available" if 0.0 <= float(value) <= 100.0 else "invalid"
+                    except (TypeError, ValueError, OverflowError):
+                        status = "invalid"
+                records.append({
+                    "symbol": symbol, "strategy": strategy, "input_type": "factor",
+                    "input_name": key, "status": status,
+                })
+            for key in gate_keys[strategy]:
+                if strategy == "A" and key == "next_open_gap_pct":
+                    status = "optional_absent" if row.get(key) is None else (
+                        "available" if _finite_factor(row.get(key)) else "invalid"
+                    )
+                elif strategy == "B" and stage != "next_day":
+                    status = "stage_deferred"
+                elif key not in row or row.get(key) is None:
+                    status = "missing"
+                elif key in {"event_subtype"}:
+                    status = "available" if row.get(key) in {
+                        "hit_up_unsealed", "close_up_sealed",
+                        "hit_down_unsealed", "close_down_sealed",
+                    } else "invalid"
+                elif isinstance(row.get(key), bool):
+                    status = "available" if row[key] else "failed"
+                else:
+                    status = "invalid"
+                records.append({
+                    "symbol": symbol, "strategy": strategy, "input_type": "hard_gate",
+                    "input_name": key, "status": status,
+                })
+    return pd.DataFrame.from_records(records, columns=[
+        "symbol", "strategy", "input_type", "input_name", "status",
+    ])
+
 def evaluate_candidates(frame: pd.DataFrame, *, stage: str = "close") -> pd.DataFrame:
     """Evaluate rows without dropping rejected symbols or missing-data reasons."""
     if "symbol" not in frame.columns or "market_state" not in frame.columns:
