@@ -343,6 +343,7 @@ def test_partial_archive_uses_tencent_breadth_when_eastmoney_is_rate_limited(tmp
     )
     assert report["partial"] is True
     assert report["source_status"]["industry_membership"].startswith("unavailable:")
+    assert "Push2RateLimitError:Eastmoney cooldown" in report["source_status"]["industry_membership"]
     assert report["source_status"]["market_breadth"] == "ok: tencent.stock_zh_a_spot_tx"
 
 
