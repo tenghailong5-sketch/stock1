@@ -3,7 +3,7 @@ import json
 import pandas as pd
 import pytest
 
-from src.collectors.forward_archive import append_jsonl_atomic, collect, _call_with_network_retry
+from src.collectors.forward_archive import append_jsonl_atomic, collect, _call_with_network_retry, _load_manual_industry_evidence
 from types import SimpleNamespace
 
 from src.providers.baostock_industry import fetch_baostock_industry_membership_snapshot
@@ -921,3 +921,72 @@ def test_cninfo_adapter_keeps_latest_csrc_classification_and_audits_failures():
     assert result.iloc[0]["source_id"] == "cninfo.p_stock2110.csrc"
     assert bool(result.iloc[0]["historical_pit_eligible"]) is False
     assert result.attrs["failed_symbols"] == {"000002": "empty_response"}
+
+
+def test_manual_industry_evidence_loader_accepts_only_reconciled_current_sources(tmp_path):
+    path = tmp_path / "manual.jsonl"
+    rows = [
+        {
+            "symbol": "000001", "industry_name": "银行",
+            "classification_system": "申万行业（新浪财经F10当前页面口径）",
+            "source_id": "sina.finance_f10_sw",
+            "source_url": "https://money.finance.sina.com.cn/corp/go.php/vCI_CorpOtherInfo/stockid/000001.phtml",
+            "record_status": "source_url_reconciled_current_observation_candidate",
+        },
+        {
+            "symbol": "600000", "industry_name": "银行",
+            "classification_system": "申万行业",
+            "source_id": "sina.finance_f10_sw", "source_url": "",
+            "record_status": "source_url_reconciled_current_observation_candidate",
+        },
+        {
+            "symbol": "000002", "industry_name": "房地产",
+            "classification_system": "申万行业",
+            "source_id": "sina.finance_f10_sw",
+            "source_url": "https://money.finance.sina.com.cn/corp/go.php/vCI_CorpOtherInfo/stockid/000002.phtml",
+            "record_status": "conflict_requires_taxonomy_reconciliation",
+        },
+    ]
+    path.write_text("\\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\\n", encoding="utf-8")
+    result = _load_manual_industry_evidence(
+        path, {"000001", "600000", "000002"},
+        captured_at="2026-11-14T05:00:00Z",
+    )
+    assert len(result) == 1
+    row = result.iloc[0]
+    assert row["symbol"] == "000001"
+    assert row["industry_code"] == "银行"
+    assert row["source_id"] == "sina.finance_f10_sw"
+    assert row["availability_basis"] == "retrieval_time_only"
+    assert row["historical_pit_eligible"] is False
+    assert row["snapshot_scope"] == "current_membership_observation_only"
+    assert "valid_from" not in result.columns and "valid_to" not in result.columns
+
+
+def test_collector_adds_manual_evidence_to_multisource_archive_only(tmp_path):
+    manual_dir = tmp_path / "industry_manual_verified"
+    manual_dir.mkdir(parents=True)
+    manual_path = manual_dir / "2026-11-11.jsonl"
+    manual_path.write_text(json.dumps({
+        "symbol": "000001", "industry_name": "银行",
+        "classification_system": "申万行业（新浪财经F10当前页面口径）",
+        "source_id": "sina.finance_f10_sw",
+        "source_url": "https://money.finance.sina.com.cn/corp/go.php/vCI_CorpOtherInfo/stockid/000001.phtml",
+        "record_status": "source_url_reconciled_current_observation_candidate",
+    }, ensure_ascii=False) + "\\n", encoding="utf-8")
+    counts = collect(
+        FakeArchiveAkshare(), tmp_path,
+        captured_at="2026-11-11T16:30:00+08:00",
+        allow_partial=True,
+    )
+    source_path = tmp_path / "industry_membership_sources" / "2026-11-11.jsonl"
+    source_rows = [json.loads(line) for line in source_path.read_text(encoding="utf-8").splitlines()]
+    manual_rows = [row for row in source_rows if row.get("source_id") == "sina.finance_f10_sw"]
+    assert len(manual_rows) == 1
+    assert manual_rows[0]["symbol"] == "000001"
+    assert manual_rows[0]["historical_pit_eligible"] is False
+    assert manual_rows[0]["snapshot_scope"] == "current_membership_observation_only"
+    selected_path = tmp_path / "industry_membership" / "2026-11-11.jsonl"
+    selected_rows = [json.loads(line) for line in selected_path.read_text(encoding="utf-8").splitlines()]
+    assert all(row.get("source_id") != "sina.finance_f10_sw" for row in selected_rows)
+    assert counts["industry_membership_sources"] == 7
