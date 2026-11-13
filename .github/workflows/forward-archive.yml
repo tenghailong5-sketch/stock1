@@ -22,7 +22,8 @@ permissions:
 
 concurrency:
   group: fhm100-forward-archive
-  cancel-in-progress: false
+  # Newer archive runs supersede stale long-running provider backfills.
+  cancel-in-progress: true
 
 jobs:
   archive:
