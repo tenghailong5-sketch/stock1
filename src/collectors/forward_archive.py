@@ -453,7 +453,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         except Exception as exc:
             baidu_error = exc
     elif baidu_requested_symbols:
-        baidu_error = RuntimeError("Baidu provider was not injected into this collector run")
+        baidu_error = RuntimeError("quarantined: Baidu PAE getrelatedblock disabled pending live endpoint validation")
 
     source_coverage = {
         "eastmoney_board": eastmoney_coverage,
@@ -707,6 +707,10 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 "shenwan_api_failed_industry_count": (
                     len(getattr(sw_api_industry, "attrs", {}).get("failed_industry_codes", []))
                     if "sw_api_industry" in locals() and sw_api_industry is not None else None
+                ),
+                "shenwan_api_failed_industry_codes": (
+                    getattr(sw_api_industry, "attrs", {}).get("failed_industry_codes", [])
+                    if "sw_api_industry" in locals() and sw_api_industry is not None else []
                 ),
                 "baidu_coverage": baidu_coverage,
                 "baidu_error": _error_detail(baidu_error),
