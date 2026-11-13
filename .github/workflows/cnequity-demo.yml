@@ -413,10 +413,6 @@ jobs:
               symbols, start, end, config=config
           )
           tdx = load("corporate_actions", symbols=symbols, start=start.isoformat(), end=end.isoformat())
-          if hasattr(tdx, "to_pandas"):
-              tdx = tdx.to_pandas()
-          if hasattr(independent, "to_pandas"):
-              independent = independent.to_pandas()
           keys = ["symbol", "ex_date", "action_type"]
           terms = ["cash_dividend", "bonus_ratio", "transfer_ratio"]
           if tdx is None:
@@ -424,26 +420,36 @@ jobs:
           missing = sorted(set(keys + terms) - set(tdx.columns))
           if missing:
               raise RuntimeError(f"TDX corporate-action schema missing fields: {missing}")
-          for frame in (tdx, independent):
-              for col in terms:
-                  if col not in frame.columns:
-                      frame[col] = 0.0
-                  frame[col] = __import__("pandas").to_numeric(frame[col], errors="coerce").fillna(0.0)
-              frame["ex_date"] = __import__("pandas").to_datetime(frame["ex_date"]).dt.strftime("%Y-%m-%d")
-          left = tdx[keys + terms].drop_duplicates(keys)
-          right = independent[keys + terms].drop_duplicates(keys)
-          joined = left.merge(right, on=keys, how="outer", suffixes=("_tdx", "_baostock"), indicator=True)
-          overlap = joined[joined["_merge"] == "both"]
+          # Work on Polars-native row dictionaries. Avoid to_pandas(), which
+          # requires optional PyArrow and is not part of the minimal pipeline.
+          def event_map(frame, source):
+              mapped = {}
+              for raw in frame.to_dicts():
+                  ex_date = raw["ex_date"]
+                  if hasattr(ex_date, "isoformat"):
+                      ex_date = ex_date.isoformat()
+                  key = (str(raw["symbol"]), str(ex_date)[:10], str(raw["action_type"]))
+                  values = {}
+                  for field in terms:
+                      value = raw.get(field, 0.0)
+                      values[field] = float(value or 0.0)
+                  mapped[key] = values
+              return mapped
+          left = event_map(tdx, "tdx")
+          right = event_map(independent, "baostock")
+          matched_keys = set(left) & set(right)
+          tdx_only = set(left) - set(right)
+          baostock_only = set(right) - set(left)
           mismatches = []
-          for _, row in overlap.iterrows():
+          for key in sorted(matched_keys):
               differences = {
-                  field: {"tdx": float(row[f"{field}_tdx"]), "baostock": float(row[f"{field}_baostock"])}
+                  field: {"tdx": left[key][field], "baostock": right[key][field]}
                   for field in terms
-                  if abs(float(row[f"{field}_tdx"]) - float(row[f"{field}_baostock"])) > 1e-6
+                  if abs(left[key][field] - right[key][field]) > 1e-6
               }
               if differences:
-                  mismatches.append({"symbol": row["symbol"], "ex_date": row["ex_date"],
-                                     "action_type": row["action_type"], "differences": differences})
+                  mismatches.append({"symbol": key[0], "ex_date": key[1],
+                                     "action_type": key[2], "differences": differences})
           report = {
               "window": {"start": start.isoformat(), "end": end.isoformat()},
               "queried_symbols": sorted(symbols),
@@ -451,9 +457,9 @@ jobs:
               "failed_symbols": sorted(failed),
               "tdx_rows": int(len(left)),
               "baostock_rows": int(len(right)),
-              "matched_event_keys": int(len(overlap)),
-              "tdx_only_event_keys": int((joined["_merge"] == "left_only").sum()),
-              "baostock_only_event_keys": int((joined["_merge"] == "right_only").sum()),
+              "matched_event_keys": len(matched_keys),
+              "tdx_only_event_keys": len(tdx_only),
+              "baostock_only_event_keys": len(baostock_only),
               "term_mismatch_count": len(mismatches),
               "term_mismatch_examples": mismatches[:50],
               "source": "baostock_independent_query",
