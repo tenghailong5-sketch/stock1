@@ -1,4 +1,5 @@
 name: FHM-100 Full-Market Daily Data Backfill
+# Trigger validated one-time full-market backfill after parser fix; no schedule.
 
 on:
   workflow_dispatch:
