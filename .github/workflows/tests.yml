@@ -43,3 +43,20 @@ jobs:
           assert not frame.empty
           assert frame["historical_pit_eligible"].eq(False).all()
           PY
+      - name: Live CNI 399317 historical adjustment smoke test
+        run: |
+          python - <<'PY'
+          import akshare as ak
+          frame = ak.index_detail_hist_adjust_cni(symbol="399317")
+          print({
+              "index": "399317",
+              "adjustment_rows": len(frame),
+              "columns": list(frame.columns),
+              "start_dates": int(frame["开始日期"].nunique()) if not frame.empty else 0,
+              "end_dates": int(frame["结束日期"].nunique()) if not frame.empty else 0,
+              "adjustment_types": sorted(frame["调整类型"].dropna().astype(str).unique().tolist()) if not frame.empty else [],
+              "symbols": int(frame["样本代码"].nunique()) if not frame.empty else 0,
+          })
+          assert not frame.empty
+          assert {"开始日期", "结束日期", "样本代码", "所属行业", "调整类型"}.issubset(frame.columns)
+          PY
