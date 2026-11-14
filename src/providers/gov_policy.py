@@ -82,9 +82,11 @@ def _canonical_source_url(raw_url: str) -> str | None:
     url = urljoin("https://www.gov.cn", value)
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
-    if parsed.scheme != "https" or not (host == "gov.cn" or host.endswith(".gov.cn")):
+    if host != "gov.cn" and not host.endswith(".gov.cn"):
         return None
-    return url
+    # The official search index still emits legacy http:// links. Upgrade only
+    # verified government hosts; never forward plaintext HTTP source URLs.
+    return parsed._replace(scheme="https").geturl()
 
 
 def _candidate(row: dict, *, keyword: str, first_seen_at: str) -> dict | None:

@@ -47,6 +47,10 @@ def test_discovery_normalizes_official_policy_candidates_without_guessing():
                             "url": "https://www.miit.gov.cn/zwgk/test.html",
                         },
                         {
+                            "title": "Legacy HTTP official link",
+                            "url": "http://www.gov.cn/zhengce/legacy.html",
+                        },
+                        {
                             "title": "Reject external URL",
                             "url": "https://example.com/policy",
                         },
@@ -63,7 +67,7 @@ def test_discovery_normalizes_official_policy_candidates_without_guessing():
     )
 
     assert audit["status"] == "READY_CANDIDATES_ONLY"
-    assert audit["candidate_count"] == 2
+    assert audit["candidate_count"] == 3
     assert len(session.calls) == 1
     assert session.calls[0]["params"]["q"] == "人工智能"
     assert all(item["review_status"] == "PENDING_REVIEW" for item in candidates)
@@ -73,6 +77,8 @@ def test_discovery_normalizes_official_policy_candidates_without_guessing():
     no_date = next(item for item in candidates if item["title"] == "无发布时间文件")
     assert no_date["published_at"] is None
     assert no_date["source_url"].startswith("https://www.miit.gov.cn/")
+    legacy = next(item for item in candidates if item["title"] == "Legacy HTTP official link")
+    assert legacy["source_url"] == "https://www.gov.cn/zhengce/legacy.html"
 
 
 def test_candidate_archive_is_deduplicated(tmp_path):
