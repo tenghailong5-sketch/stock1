@@ -10,6 +10,7 @@ import pandas as pd
 import requests
 
 from src.model.mainline_flows import classify_mainlines
+from src.model.mainline_validation import evaluate_mainline_transitions
 from src.model.market_cycle import classify_market_cycle
 from src.model.m3_assembler import (
     assemble_m3_history, assemble_market_emotion_history,
@@ -65,14 +66,16 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     market["close"] = pd.to_numeric(market["close"], errors="coerce")
     market = market.dropna(subset=["trade_date", "close"]).sort_values("trade_date")
     market["market_return_5d"] = market["close"].div(market["close"].shift(5)).sub(1)
+    market = market.rename(columns={"close": "market_close"})
 
     panel["trade_date"] = pd.to_datetime(panel["trade_date"], errors="coerce").dt.normalize()
     panel["industry_return_5d"] = pd.to_numeric(panel["return_5"], errors="coerce")
+    panel["industry_close"] = pd.to_numeric(panel["close"], errors="coerce")
     panel["turnover"] = pd.to_numeric(panel["amount"], errors="coerce")
     daily_total = panel.groupby("trade_date")["turnover"].sum().rename("market_turnover")
     panel = panel.merge(daily_total, on="trade_date", how="left", validate="many_to_one")
     panel = panel.merge(
-        market[["trade_date", "market_return_5d"]],
+        market[["trade_date", "market_return_5d", "market_close"]],
         on="trade_date", how="left", validate="many_to_one",
     )
     panel = panel.dropna(subset=["industry_return_5d", "market_return_5d", "turnover", "market_turnover"])
@@ -86,6 +89,18 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "turnover", "market_turnover", "expected_industry_count",
         "industry_name", "available_time", "source_id", "source_revision",
     ]])
+    validation_input = panel[[
+        "trade_date", "industry_code", "industry_close", "market_close",
+    ]].merge(
+        phases[["trade_date", "industry_code", "mainline_phase", "phase_transition"]],
+        on=["trade_date", "industry_code"], how="inner", validate="one_to_one",
+    )
+    validation_events, validation_summary = evaluate_mainline_transitions(
+        validation_input, horizons=(5, 10, 20)
+    )
+    validation_path = output_dir / "sw_mainline_transition_validation.csv"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    validation_events.to_csv(validation_path, index=False)
     market_decision_time = pd.Timestamp.now(tz="Asia/Shanghai")
     m3_result = assemble_m3_history(
         Path("data/forward_archive"), index_symbol="000001",
@@ -219,6 +234,9 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "visible_policy_events": int(len(visible_events)),
         "policy_event_industry_pairs": int(len(alignment)),
         "policy_ignition_alignment_counts": {str(k): int(v) for k, v in alignment_counts.items()},
+        "outcome_validation": validation_summary,
+        "outcome_validation_events": int(len(validation_events)),
+        "outcome_validation_output": str(validation_path),
         "market_m3_status": m3_result.get("status"),
         "market_emotion_archive_status": emotion_result.get("status"),
         "market_emotion_archive_sessions": int(emotion_result.get("valid_sessions", 0)),
