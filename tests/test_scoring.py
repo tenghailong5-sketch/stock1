@@ -191,3 +191,49 @@ def test_factor_readiness_audit_defers_b_strategy_until_next_day():
         & (audit.input_name == "next_day_price_action")
     ]
     assert b_next_day.status.tolist() == ["stage_deferred"]
+
+def test_audited_factor_bundle_blocks_partial_peer_universe_and_returns_audit():
+    import pandas as pd
+    from src.model.scoring import score_factor_bundle_audited
+
+    frame = pd.DataFrame({
+        "trade_date": ["2026-11-13"] * 2,
+        "symbol": ["000001", "000002"],
+        "raw_strength": [1.0, 2.0],
+    })
+    ranked, audit = score_factor_bundle_audited(
+        frame,
+        {"industry_relative_strength": ("raw_strength", True)},
+        {"industry_relative_strength": {
+            "scope_id": "all_a_shares",
+            "expected_universe_size": 3,
+            "min_coverage": 0.5,
+        }},
+    )
+    assert ranked["industry_relative_strength"].isna().all()
+    assert audit.iloc[0]["status"] == "universe_size_mismatch"
+    assert audit.iloc[0]["observed_universe_size"] == 2
+    assert audit.iloc[0]["expected_universe_size"] == 3
+
+
+def test_audited_factor_bundle_ranks_only_after_universe_and_coverage_pass():
+    import pandas as pd
+    from src.model.scoring import score_factor_bundle_audited
+
+    frame = pd.DataFrame({
+        "trade_date": ["2026-11-13"] * 3,
+        "symbol": ["000001", "000002", "000003"],
+        "raw_strength": [1.0, 2.0, None],
+    })
+    ranked, audit = score_factor_bundle_audited(
+        frame,
+        {"industry_relative_strength": ("raw_strength", True)},
+        {"industry_relative_strength": {
+            "scope_id": "all_a_shares",
+            "expected_universe_size": 3,
+            "min_coverage": 0.66,
+        }},
+    )
+    assert audit.iloc[0]["status"] == "ranked"
+    assert ranked.loc[0, "industry_relative_strength"] < ranked.loc[1, "industry_relative_strength"]
+    assert pd.isna(ranked.loc[2, "industry_relative_strength"])
