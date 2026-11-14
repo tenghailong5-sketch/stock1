@@ -1,10 +1,8 @@
 name: Tencent Resumable Currently-Listed A-Share History Backfill
 
 on:
-  # Continue one bounded batch every four hours; checkpoint and release artifacts
-  # make each run resumable without committing the large market-data payload.
-  schedule:
-    - cron: '17 */4 * * *'
+  # Run only when explicitly requested; checkpoint and release artifacts keep
+  # each manually started batch resumable.
   workflow_dispatch:
     inputs:
       batch_size:
