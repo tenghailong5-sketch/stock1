@@ -1,11 +1,7 @@
 name: Tencent Multi-Symbol Data Qualification
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/probe_tencent_universe.py"
-      - ".github/workflows/tencent-universe-probe.yml"
+
 permissions:
   contents: read
 concurrency:
