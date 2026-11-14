@@ -142,6 +142,7 @@ def test_official_policy_archive_obeys_publisher_availability_dates():
         "cn_policy_pharma_industry_plan_20260918",
     }.issubset(set(after_all.event_id))
     assert after_all.confidence.between(0, 1).all()
+    assert after_all.availability_basis.eq("publisher_timestamp").all()
     assert after_all.industry_codes.map(lambda values: len(values) > 0).all()
 
 def test_raw_market_emotion_assembler_preserves_full_archive_history():
