@@ -17,7 +17,7 @@ def _package(ymd="20261113", counts=(2, 2, 2)):
             codes = bytearray()
             quotes = bytearray()
             for index in range(count):
-                code = f"{index + 1:06d}".encode("ascii")
+                code = (("600001", "600002")[index] if market == "sh" else ("000001", "000002")[index] if market == "sz" else ("830001", "830002")[index]).encode("ascii")
                 record = bytearray(150)
                 record[:6] = code
                 struct.pack_into("<H", record, 32, index)
