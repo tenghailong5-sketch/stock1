@@ -133,6 +133,18 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     segments["historical_pit_eligible"] = False
     segments_path = output_dir / "sw_mainline_phase_segments.csv"
     segments.to_csv(segments_path, index=False)
+    complete_lifecycle_industries = []
+    for (code, name), group in segments.sort_values("segment_start").groupby(
+        ["industry_code", "industry_name"]
+    ):
+        phases_for_industry = group.mainline_phase.tolist()
+        if any(
+            phases_for_industry[i:i + 3] == ["IGNITION", "PEAK", "DECAY"]
+            for i in range(len(phases_for_industry) - 2)
+        ):
+            complete_lifecycle_industries.append({
+                "industry_code": str(code), "industry_name": str(name)
+            })
 
     policy_path = Path("data/policy_catalysts/official_policy_events.jsonl")
     if not policy_path.exists():
@@ -203,6 +215,7 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "rows": int(len(phases)),
         "phase_counts": {str(k): int(v) for k, v in counts.items()},
         "phase_segments": int(len(segments)),
+        "industries_with_ignition_peak_decay_sequence": complete_lifecycle_industries,
         "visible_policy_events": int(len(visible_events)),
         "policy_event_industry_pairs": int(len(alignment)),
         "policy_ignition_alignment_counts": {str(k): int(v) for k, v in alignment_counts.items()},
