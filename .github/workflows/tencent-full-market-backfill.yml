@@ -4,7 +4,7 @@ on:
   # Continue one bounded batch every four hours; checkpoint and release artifacts
   # make each run resumable without committing the large market-data payload.
   schedule:
-    - cron: '17 */4 * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
       batch_size:
