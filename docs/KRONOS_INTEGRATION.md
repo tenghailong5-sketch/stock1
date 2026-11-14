@@ -55,3 +55,20 @@ that directory to the import path only at model-load time. The default weights
 are downloaded from Hugging Face on first load, so keep model installation and
 weight download out of the normal daily scan until resource use and
 reproducibility have been measured.
+
+## Optional FHM runtime research sidecar
+
+The FHM runner now retains the exact daily histories fetched during its normal
+bounded research scan and can pass the top 20 quick-screen observations to the
+Kronos batch adapter. This is disabled by default. Set
+`FHM_KRONOS_ENABLED=1` to opt in. The runner obtains future sessions from
+AkShare's Sina trading calendar, filters them strictly after the China-market
+decision date, and writes `output/kronos_audit.json` plus
+`output/kronos_forecasts.csv`.
+
+The sidecar is observational only: it does not reorder the watchlist, change
+M5, feed M2/M3/M5/M8, or authorize trades. If the calendar, optional Kronos
+runtime, model weights, or an individual symbol is unavailable, the failure is
+recorded and the existing scan continues. Runtime use of current retrieval-time
+history is not historical PIT eligibility and cannot support historical
+backtesting.
