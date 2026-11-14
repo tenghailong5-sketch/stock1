@@ -204,7 +204,7 @@ def audit_tdx_snapshot(frame: pd.DataFrame) -> dict:
         "trade_date": str(frame.trade_date.iloc[0]),
         "available_time": _capture_time(frame.available_time.iloc[0]).isoformat(),
         "total_priced_rows": int(len(frame)),
-        "unique_symbols": int(frame.symbol.nunique()),
+        "unique_symbols": int(frame[["market", "symbol"]].drop_duplicates().shape[0]),
         "markets": markets,
         "source_id": "tdx.official_daily_package",
         "historical_pit_eligible": False,
