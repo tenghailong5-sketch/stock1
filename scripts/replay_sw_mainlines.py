@@ -115,14 +115,19 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         phases[["trade_date", "industry_code", "mainline_phase", "phase_transition"]],
         on=["trade_date", "industry_code"], how="inner", validate="one_to_one",
     )
-    threshold_grid, threshold_summary = compare_ignition_thresholds(
+    threshold_grid_5d, threshold_summary_5d = compare_ignition_thresholds(
+        threshold_input, horizon=5, train_fraction=0.60,
+    )
+    threshold_grid_10d, threshold_summary_10d = compare_ignition_thresholds(
         threshold_input, horizon=10, train_fraction=0.60,
     )
     validation_path = output_dir / "sw_mainline_transition_validation.csv"
-    threshold_path = output_dir / "sw_mainline_ignition_threshold_grid.csv"
+    threshold_path_5d = output_dir / "sw_mainline_ignition_threshold_grid_5d.csv"
+    threshold_path_10d = output_dir / "sw_mainline_ignition_threshold_grid_10d.csv"
     output_dir.mkdir(parents=True, exist_ok=True)
     validation_events.to_csv(validation_path, index=False)
-    threshold_grid.to_csv(threshold_path, index=False)
+    threshold_grid_5d.to_csv(threshold_path_5d, index=False)
+    threshold_grid_10d.to_csv(threshold_path_10d, index=False)
     market_decision_time = pd.Timestamp.now(tz="Asia/Shanghai")
     m3_result = assemble_m3_history(
         Path("data/forward_archive"), index_symbol="000001",
@@ -274,8 +279,12 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "outcome_validation": validation_summary,
         "outcome_validation_events": int(len(validation_events)),
         "outcome_validation_output": str(validation_path),
-        "ignition_threshold_research": threshold_summary,
-        "ignition_threshold_grid_output": str(threshold_path),
+        "ignition_threshold_research": {
+            "5d": threshold_summary_5d,
+            "10d": threshold_summary_10d,
+        },
+        "ignition_threshold_grid_5d_output": str(threshold_path_5d),
+        "ignition_threshold_grid_10d_output": str(threshold_path_10d),
         "market_m3_status": m3_result.get("status"),
         "market_emotion_archive_status": emotion_result.get("status"),
         "market_emotion_archive_sessions": int(emotion_result.get("valid_sessions", 0)),
