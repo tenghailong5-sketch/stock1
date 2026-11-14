@@ -1,8 +1,8 @@
 """Forward-only current SW industry membership via the official SW index API.
 
 TLS verification stays enabled. If the SW host omits its intermediate CA, the
-adapter downloads the published DigiCert intermediate, checks its pinned SHA-1
-fingerprint, and adds it to a temporary copy of the normal trust bundle.
+adapter downloads pinned DigiCert/GeoTrust intermediates and adds verified
+certificates to a temporary copy of the normal trust bundle.
 """
 from __future__ import annotations
 
@@ -28,6 +28,11 @@ INTERMEDIATE_URL = (
 )
 # Published SHA-1 certificate thumbprint from DigiCert/Microsoft CA-chain records.
 INTERMEDIATE_SHA1 = "60707270F2100EE2B771FEC9EFFAD8C9BFFE3358"
+GEOTRUST_INTERMEDIATE_URL = (
+    "http://cacerts.digicert.cn/"
+    "GeoTrustG2TLSCNRSA4096SHA2562022CA1.crt"
+)
+GEOTRUST_INTERMEDIATE_SHA256 = "05DC9EDC0FDDF A975A1432EF806EC780078B5362AD45AF76DB15C907630DB25D".replace(" ", "")
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -39,30 +44,41 @@ HEADERS = {
 
 
 def _trusted_intermediate_bundle(*, timeout: int = 15) -> str:
-    """Build a temporary CA bundle; never disable certificate verification."""
-    response = requests.get(INTERMEDIATE_URL, timeout=timeout)
-    response.raise_for_status()
-    payload = response.content
-    if payload.startswith(b"-----BEGIN CERTIFICATE-----"):
-        pem = payload
-        der = ssl.PEM_cert_to_DER_cert(payload.decode("ascii"))
-    else:
-        der = payload
-        pem = ssl.DER_cert_to_PEM_cert(payload).encode("ascii")
-    fingerprint = hashlib.sha1(der).hexdigest().upper()
-    if fingerprint != INTERMEDIATE_SHA1:
-        raise RuntimeError(
-            "DigiCert intermediate certificate fingerprint mismatch: " + fingerprint
-        )
-
+    """Build a certifi bundle with pinned SW-host intermediates; never disable TLS."""
     base_bundle = Path(requests.certs.where()).read_bytes()
+    pinned = [
+        (INTERMEDIATE_URL, "sha1", INTERMEDIATE_SHA1),
+        (GEOTRUST_INTERMEDIATE_URL, "sha256", GEOTRUST_INTERMEDIATE_SHA256),
+    ]
+    certificates = []
+    failures = []
+    for url, algorithm, expected in pinned:
+        try:
+            response = requests.get(url, timeout=timeout)
+            response.raise_for_status()
+            payload = response.content
+            if payload.startswith(b"-----BEGIN CERTIFICATE-----"):
+                pem = payload
+                der = ssl.PEM_cert_to_DER_cert(payload.decode("ascii"))
+            else:
+                der = payload
+                pem = ssl.DER_cert_to_PEM_cert(payload).encode("ascii")
+            actual = hashlib.sha1(der).hexdigest().upper() if algorithm == "sha1" else hashlib.sha256(der).hexdigest().upper()
+            if actual != expected:
+                raise RuntimeError("pinned SW intermediate certificate fingerprint mismatch: " + actual)
+            certificates.append(pem)
+        except Exception as exc:
+            failures.append(f"{url}: {type(exc).__name__}: {exc}")
+    if not certificates:
+        raise RuntimeError("unable to retrieve any pinned SW intermediate: " + " | ".join(failures))
     handle = tempfile.NamedTemporaryFile(
         prefix="fhm-sw-ca-", suffix=".pem", delete=False
     )
     try:
         handle.write(base_bundle)
-        handle.write(b"\n")
-        handle.write(pem)
+        for pem in certificates:
+            handle.write(b"\n")
+            handle.write(pem)
         handle.flush()
         return handle.name
     finally:
@@ -207,3 +223,120 @@ def fetch_sw_api_industry_membership_snapshot(
     frame.attrs["failed_industry_codes"] = sorted(set(failures))
     frame.attrs["industry_level"] = industry_level
     return frame
+
+
+TREND_URL = "https://www.swsresearch.com/institute-sw/api/index_publish/trend/"
+
+
+def _get_json_payload(session, url: str, *, params: dict, timeout: int):
+    """GET a SW API JSON payload while preserving TLS verification."""
+    try:
+        response = session.get(url, params=params, headers=HEADERS, timeout=timeout)
+    except requests.exceptions.SSLError:
+        bundle = getattr(session, "_fhm_sw_ca_bundle", None)
+        if bundle is None:
+            bundle = _trusted_intermediate_bundle(timeout=timeout)
+            session._fhm_sw_ca_bundle = bundle
+            session.verify = bundle
+        response = session.get(url, params=params, headers=HEADERS, timeout=timeout)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict) or "data" not in payload:
+        raise ValueError("SW API response missing data payload")
+    return payload["data"]
+
+
+def fetch_sw_api_first_level_index_list(*, session=None, timeout: int = 25) -> pd.DataFrame:
+    """Fetch the current SW first-level index-code list from the official API."""
+    client = session or requests.Session()
+    rows = _paged_results(
+        client, INDEX_URL,
+        params={"page_size": 50, "indextype": "一级行业"},
+        timeout=timeout,
+    )
+    clean = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("swindexcode") or "").strip()
+        name = str(row.get("swindexname") or "").strip()
+        if len(code) == 6 and code.isdigit() and name:
+            clean.append({"industry_code": code, "industry_name": name})
+    frame = pd.DataFrame(clean).drop_duplicates("industry_code")
+    if len(frame) < 20:
+        raise RuntimeError(f"SW first-level index list unexpectedly small: {len(frame)}")
+    return frame.sort_values("industry_code").reset_index(drop=True)
+
+
+def fetch_sw_api_industry_index_history(
+    symbol: str, *, start_date: str, end_date: str,
+    session=None, clock=None, timeout: int = 25,
+) -> pd.DataFrame:
+    """Fetch official SW daily industry-index history using verified TLS.
+
+    The API supplies historical index dates but not original historical
+    publication/availability times. Every row is therefore retrieval-time-only
+    and explicitly excluded from historical PIT scoring.
+    """
+    code = str(symbol).strip()
+    if len(code) != 6 or not code.isdigit():
+        raise ValueError("SW industry index symbol must be a six-digit code")
+    for value, label in ((start_date, "start_date"), (end_date, "end_date")):
+        parsed = pd.to_datetime(value, format="%Y%m%d", errors="coerce")
+        if pd.isna(parsed) or parsed.strftime("%Y%m%d") != value:
+            raise ValueError(label + " must use YYYYMMDD")
+    if start_date > end_date:
+        raise ValueError("start_date cannot be after end_date")
+    client = session or requests.Session()
+    payload = _get_json_payload(
+        client, TREND_URL,
+        params={"swindexcode": code, "period": "DAY"},
+        timeout=timeout,
+    )
+    if not isinstance(payload, list) or not payload:
+        raise ValueError("SW industry index history payload is empty or invalid")
+    frame = pd.DataFrame(payload).rename(columns={
+        "bargaindate": "trade_date",
+        "openindex": "open",
+        "maxindex": "high",
+        "minindex": "low",
+        "closeindex": "close",
+        "bargainamount": "volume",
+        "bargainsum": "amount",
+    })
+    required = {"trade_date", "close", "amount"}
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError("SW index history missing fields: " + ",".join(sorted(missing)))
+    frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce").dt.normalize()
+    for column in ("open", "high", "low", "close", "volume", "amount"):
+        if column in frame.columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame = frame.dropna(subset=["trade_date", "close", "amount"]).sort_values("trade_date")
+    frame = frame.loc[
+        frame.trade_date.between(pd.Timestamp(start_date), pd.Timestamp(end_date))
+    ].copy()
+    if frame.empty or frame["trade_date"].duplicated().any():
+        raise ValueError("SW industry index history has no valid rows or duplicate dates")
+    if (frame["close"] <= 0).any() or (frame["amount"] < 0).any():
+        raise ValueError("SW industry index history contains invalid close or amount")
+    captured = pd.Timestamp(clock() if clock else datetime.now(timezone.utc))
+    if captured.tzinfo is None:
+        raise ValueError("SW industry index retrieval clock must be timezone-aware")
+    captured = captured.tz_convert("UTC")
+    frame["industry_code"] = code
+    frame["daily_return"] = frame["close"].pct_change()
+    frame["return_5"] = frame["close"].div(frame["close"].shift(5)).sub(1)
+    frame["return_20"] = frame["close"].div(frame["close"].shift(20)).sub(1)
+    frame["available_time"] = captured
+    frame["observed_at"] = captured
+    frame["availability_basis"] = "retrieval_time_only"
+    frame["historical_pit_eligible"] = False
+    frame["source_id"] = "swsresearch.index_publish.trend"
+    frame["source_revision"] = frame.apply(
+        lambda row: hashlib.sha256(
+            f"{code}|{row['trade_date']}|{row['close']}|{row['amount']}".encode("utf-8")
+        ).hexdigest(), axis=1,
+    )
+    frame["snapshot_scope"] = "historical_index_series_retrieved_at_current_time"
+    return frame.reset_index(drop=True)

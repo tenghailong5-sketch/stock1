@@ -1,0 +1,46 @@
+name: SW Industry Mainline Historical Replay
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/policy-sentiment-mainline-architecture
+    paths:
+      - "scripts/replay_sw_mainlines.py"
+      - "src/providers/sw_industry.py"
+      - "src/providers/sw_api_industry.py"
+      - "src/model/mainline_flows.py"
+      - "src/model/market_cycle.py"
+      - "src/model/m3_assembler.py"
+      - "src/model/policy_catalysts.py"
+      - "data/policy_catalysts/official_policy_events.jsonl"
+      - ".github/workflows/sw-industry-mainline-replay.yml"
+concurrency:
+  group: sw-mainline-replay-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Fetch all SW first-level industry histories and replay phases
+        run: python scripts/replay_sw_mainlines.py --start-date 20260522 --end-date 20261113
+      - name: Upload replay output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sw-mainline-phase-replay
+          path: output/sw_mainline_*
+          if-no-files-found: warn

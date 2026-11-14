@@ -129,6 +129,8 @@ def assemble_m3_history(
     merged["amount"] = np.nan
     merged["limit_up_cnt"] = np.nan
     merged["limit_down_cnt"] = np.nan
+    merged["board_failure_rate"] = np.nan
+    merged["promotion_rate"] = np.nan
     merged["snapshot_available_time"] = pd.Series(
         pd.NaT, index=merged.index, dtype="datetime64[ns, UTC]"
     )
@@ -173,6 +175,12 @@ def assemble_m3_history(
         merged.at[i, "amount"] = float(amount)
         merged.at[i, "limit_up_cnt"] = float(up)
         merged.at[i, "limit_down_cnt"] = float(down)
+        board_failure = pd.to_numeric(sentiment.get("board_failure_rate"), errors="coerce")
+        promotion = pd.to_numeric(sentiment.get("promotion_rate"), errors="coerce")
+        if pd.notna(board_failure) and 0 <= board_failure <= 1:
+            merged.at[i, "board_failure_rate"] = float(board_failure)
+        if pd.notna(promotion) and 0 <= promotion <= 1:
+            merged.at[i, "promotion_rate"] = float(promotion)
         merged.at[i, "snapshot_available_time"] = max(
             breadth_available_time, sentiment_available_time
         )
@@ -241,4 +249,143 @@ def assemble_m3_history(
         "history": scored,
         "historical_backtest_eligible": False,
         "quality_warnings": reasons[-10:],
+    }
+
+
+def assemble_market_emotion_history(
+    archive_root: str | Path, *, decision_time,
+    min_breadth_coverage: float = 0.95, min_sessions: int = 60,
+) -> dict:
+    """Assemble raw daily breadth/limit-pool history without M3's MA60 warm-up.
+
+    This feed is sufficient for the emotion-cycle engine. It deliberately does
+    not require index moving averages or 60 scored M3 feature observations.
+    """
+    cutoff = _utc(decision_time, "decision_time")
+    if not 0 < min_breadth_coverage <= 1:
+        raise ValueError("min_breadth_coverage must be in (0, 1]")
+    if min_sessions < 1:
+        raise ValueError("min_sessions must be positive")
+    root = Path(archive_root)
+
+    breadth_by_date = {}
+    for path in sorted((root / "market_breadth").glob("*.jsonl")):
+        day = path.stem
+        eligible = []
+        for row in _read_jsonl(path):
+            captured = _utc(row.get("snapshot_time"), "breadth snapshot_time")
+            available = _utc(
+                row.get("available_time", row.get("snapshot_time")),
+                "breadth available_time",
+            )
+            local = captured.tz_convert("Asia/Shanghai")
+            if (
+                local.strftime("%Y-%m-%d") == day
+                and local.strftime("%H:%M") >= "15:30"
+                and captured <= cutoff and available <= cutoff
+            ):
+                eligible.append((captured, row))
+        if eligible:
+            preferred = [
+                item for item in eligible
+                if item[1].get("source_id") == "kaipanhong.market_emotion_kph"
+            ]
+            breadth_by_date[day] = max(preferred or eligible, key=lambda item: item[0])[1]
+
+    sentiment_by_date = {}
+    for path in sorted((root / "market_sentiment").glob("*.jsonl")):
+        for row in _read_jsonl(path):
+            day = str(row.get("trade_date", ""))
+            captured = _utc(row.get("capture_time"), "sentiment capture_time")
+            available = _utc(
+                row.get("available_time", row.get("capture_time")),
+                "sentiment available_time",
+            )
+            local = captured.tz_convert("Asia/Shanghai")
+            if (
+                local.strftime("%Y-%m-%d") == day
+                and local.strftime("%H:%M") >= "15:30"
+                and captured <= cutoff and available <= cutoff
+            ):
+                old = sentiment_by_date.get(day)
+                preferred = row.get("source_id") == "kaipanhong.market_emotion_kph"
+                old_preferred = (
+                    old is not None
+                    and old[1].get("source_id") == "kaipanhong.market_emotion_kph"
+                )
+                if (
+                    old is None
+                    or (preferred and not old_preferred)
+                    or (preferred == old_preferred and captured > old[0])
+                ):
+                    sentiment_by_date[day] = (captured, row)
+
+    rows, warnings = [], []
+    for day in sorted(set(breadth_by_date) & set(sentiment_by_date)):
+        breadth = breadth_by_date[day]
+        sentiment_captured, sentiment = sentiment_by_date[day]
+        coverage = pd.to_numeric(breadth.get("breadth_coverage"), errors="coerce")
+        amount = pd.to_numeric(breadth.get("total_amount"), errors="coerce")
+        breadth_ratio = pd.to_numeric(breadth.get("breadth"), errors="coerce")
+        limit_up = pd.to_numeric(sentiment.get("limit_up_count"), errors="coerce")
+        limit_down = pd.to_numeric(sentiment.get("limit_down_count"), errors="coerce")
+        if pd.isna(coverage) or coverage < min_breadth_coverage:
+            warnings.append(f"{day}:breadth_coverage_below_minimum")
+            continue
+        if (
+            breadth.get("total_amount_status") not in {
+                "complete_provider_snapshot_sum", "complete_provider_market_aggregate"
+            } or pd.isna(amount) or amount < 0
+        ):
+            warnings.append(f"{day}:turnover_incomplete")
+            continue
+        if pd.isna(breadth_ratio) or not 0 <= breadth_ratio <= 1:
+            warnings.append(f"{day}:breadth_invalid")
+            continue
+        if (
+            pd.isna(limit_up) or pd.isna(limit_down)
+            or limit_up < 0 or limit_down < 0
+        ):
+            warnings.append(f"{day}:limit_pool_counts_missing")
+            continue
+        breadth_captured = _utc(breadth["snapshot_time"], "breadth snapshot_time")
+        breadth_available = _utc(
+            breadth.get("available_time", breadth.get("snapshot_time")),
+            "breadth available_time",
+        )
+        sentiment_available = _utc(
+            sentiment.get("available_time", sentiment.get("capture_time")),
+            "sentiment available_time",
+        )
+        board_failure = pd.to_numeric(sentiment.get("board_failure_rate"), errors="coerce")
+        promotion = pd.to_numeric(sentiment.get("promotion_rate"), errors="coerce")
+        rows.append({
+            "trade_date": pd.Timestamp(day),
+            "breadth": float(breadth_ratio),
+            "limit_up_count": float(limit_up),
+            "limit_down_count": float(limit_down),
+            "board_failure_rate": (
+                float(board_failure) if pd.notna(board_failure) and 0 <= board_failure <= 1 else np.nan
+            ),
+            "promotion_rate": (
+                float(promotion) if pd.notna(promotion) and 0 <= promotion <= 1 else np.nan
+            ),
+            "total_amount": float(amount),
+            "breadth_coverage": float(coverage),
+            "available_time": max(breadth_available, sentiment_available),
+            "breadth_source_id": breadth.get("source_id"),
+            "sentiment_source_id": sentiment.get("source_id"),
+            "historical_pit_eligible": False,
+        })
+    history = pd.DataFrame(rows)
+    if not history.empty:
+        history = history.sort_values("trade_date").reset_index(drop=True)
+    status = "READY" if len(history) >= min_sessions else "INSUFFICIENT_DATA"
+    return {
+        "status": status,
+        "valid_sessions": int(len(history)),
+        "required_sessions": int(min_sessions),
+        "history": history,
+        "historical_pit_eligible": False,
+        "quality_warnings": warnings[-20:],
     }
