@@ -303,21 +303,36 @@ def fetch_sw_industry_valid_time_ledger(
 def fetch_sw_industry_unmapped_history_audit(
     *, session=None, timeout: int = 60, current_symbols=None
 ) -> pd.DataFrame:
-    """Audit valid historical stock rows whose industry codes are absent from SW2021.
+    """Audit historical codes absent from SW2021 without fabricating leaf mappings.
 
-    These rows are preserved as an audit output, not force-mapped into the
-    SW2021 taxonomy and not included in the SW2021 valid-time ledger.
+    Unique two-/four-digit prefixes may be exposed as explicitly unverified
+    level-1/level-2 candidates. They are never promoted into the SW2021 ledger.
     """
     client = session or requests
     stock_content = _download_xls(client, STOCK_URL, timeout)
     code_content = _download_xls(client, CODE_URL, timeout)
     code_headers, code_rows = _sheet_rows(code_content)
     code_idx = _column(code_headers, "行业代码")
-    known_codes = {
-        _text(row[code_idx]).zfill(6)
-        for row in code_rows
-        if _text(row[code_idx])
-    }
+    l1_idx = _column(code_headers, "一级行业名称")
+    l2_idx = _column(code_headers, "二级行业名称")
+    l3_idx = _column(code_headers, "三级行业名称")
+
+    known_codes = set()
+    prefix_l1: dict[str, set[str]] = {}
+    prefix_l2: dict[str, set[str]] = {}
+    for row in code_rows:
+        code = _text(row[code_idx]).zfill(6)
+        if not code:
+            continue
+        known_codes.add(code)
+        level1, level2, level3 = (
+            _text(row[l1_idx]), _text(row[l2_idx]), _text(row[l3_idx])
+        )
+        if len(code) == 6 and code.isdigit():
+            if level1:
+                prefix_l1.setdefault(code[:2], set()).add(level1)
+            if level1 and level2:
+                prefix_l2.setdefault(code[:4], set()).add((level1, level2))
 
     headers, rows = _sheet_rows(stock_content)
     symbol_idx = _column(headers, "股票代码")
@@ -338,8 +353,10 @@ def fetch_sw_industry_unmapped_history_audit(
         code = _text(row[industry_idx]).zfill(6)
         if not code or code in known_codes:
             continue
-        item = counts.setdefault(code, {"industry_code": code, "row_count": 0, "symbols": set(),
-                                         "valid_from_min": pd.NaT, "valid_from_max": pd.NaT})
+        item = counts.setdefault(code, {
+            "industry_code": code, "row_count": 0, "symbols": set(),
+            "valid_from_min": pd.NaT, "valid_from_max": pd.NaT,
+        })
         item["row_count"] += 1
         item["symbols"].add(symbol)
         date = pd.Timestamp(valid_from).normalize()
@@ -349,25 +366,45 @@ def fetch_sw_industry_unmapped_history_audit(
             item["valid_from_max"] = date
 
     result = []
+    current_set = set(current_symbols) if current_symbols is not None else None
     for code, item in sorted(counts.items()):
+        l1_values = prefix_l1.get(code[:2], set()) if len(code) == 6 else set()
+        l2_values = prefix_l2.get(code[:4], set()) if len(code) == 6 else set()
+        level1_candidate = next(iter(l1_values)) if len(l1_values) == 1 else ""
+        level2_candidate = ""
+        if len(l2_values) == 1:
+            pair = next(iter(l2_values))
+            if not level1_candidate or pair[0] == level1_candidate:
+                level1_candidate, level2_candidate = pair
+        if level2_candidate:
+            precision = "level2_prefix_candidate_unverified"
+        elif level1_candidate:
+            precision = "level1_prefix_candidate_unverified"
+        else:
+            precision = "unresolved_no_unique_sw2021_prefix"
+        symbols = item["symbols"]
         result.append({
             "industry_code": code,
             "row_count": item["row_count"],
-            "symbol_count": len(item["symbols"]),
+            "symbol_count": len(symbols),
             "current_member_symbol_count": (
-                len(item["symbols"] & set(current_symbols))
-                if current_symbols is not None else pd.NA
+                len(symbols & current_set) if current_set is not None else pd.NA
             ),
             "not_current_member_symbol_count": (
-                len(item["symbols"] - set(current_symbols))
-                if current_symbols is not None else pd.NA
+                len(symbols - current_set) if current_set is not None else pd.NA
             ),
             "valid_from_min": item["valid_from_min"],
             "valid_from_max": item["valid_from_max"],
+            "industry_level1_candidate": level1_candidate,
+            "industry_level2_candidate": level2_candidate,
+            "industry_level3_candidate": "",
+            "mapping_precision": precision,
             "mapping_status": "unmapped_outside_sw2021_dictionary",
         })
     return pd.DataFrame(result, columns=[
         "industry_code", "row_count", "symbol_count",
         "current_member_symbol_count", "not_current_member_symbol_count",
-        "valid_from_min", "valid_from_max", "mapping_status",
+        "valid_from_min", "valid_from_max",
+        "industry_level1_candidate", "industry_level2_candidate",
+        "industry_level3_candidate", "mapping_precision", "mapping_status",
     ])
