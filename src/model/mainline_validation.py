@@ -70,3 +70,118 @@ def evaluate_mainline_transitions(frame: pd.DataFrame, *, horizons=(5, 10, 20)) 
     )
     summary["historical_pit_eligible"] = False
     return events.reset_index(drop=True), summary
+
+
+def compare_ignition_thresholds(
+    frame: pd.DataFrame, *,
+    candidates=((0.55, 0.50), (0.60, 0.50), (0.65, 0.50),
+                (0.65, 0.60), (0.70, 0.50), (0.70, 0.65),
+                (0.75, 0.60), (0.80, 0.65)),
+    horizon: int = 10,
+    train_fraction: float = 0.60,
+) -> tuple[pd.DataFrame, dict]:
+    """Compare ignition thresholds with a chronological train/test split.
+
+    The training labels stop one full forward horizon before the split. The
+    test period is never used to select thresholds. Forward returns are used
+    only as outcome labels and never enter the classifier inputs.
+    """
+    from src.model.mainline_flows import classify_mainlines
+
+    required = REQUIRED | {
+        "industry_return_5d", "market_return_5d", "turnover",
+        "market_turnover", "expected_industry_count",
+    }
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError("missing threshold research fields: " + ",".join(sorted(missing)))
+    if not isinstance(horizon, int) or horizon < 1:
+        raise ValueError("horizon must be a positive integer")
+    if not 0.5 <= train_fraction <= 0.8:
+        raise ValueError("train_fraction must be within [0.5,0.8]")
+    base = frame.copy()
+    base["trade_date"] = pd.to_datetime(base.trade_date, errors="coerce")
+    if base.trade_date.isna().any():
+        raise ValueError("threshold research contains invalid trade dates")
+    dates = sorted(base.trade_date.unique())
+    if len(dates) < max(40, horizon * 3):
+        raise ValueError("insufficient dates for chronological threshold research")
+    split_pos = int(len(dates) * train_fraction)
+    if split_pos <= horizon:
+        raise ValueError("training window is too short for the forward horizon")
+    split_date = pd.Timestamp(dates[split_pos])
+    train_label_end = pd.Timestamp(dates[split_pos - horizon - 1])
+    date_positions = {pd.Timestamp(day): i for i, day in enumerate(dates)}
+    rows = []
+    for strength_min, turnover_min in candidates:
+        classified = classify_mainlines(
+            base, ignition_strength_min=float(strength_min),
+            ignition_turnover_min=float(turnover_min),
+        )
+        classified = classified.sort_values(
+            ["industry_code", "trade_date"]
+        ).reset_index(drop=True)
+        classified["excess_forward_return"] = (
+            classified.groupby("industry_code").industry_close.shift(-horizon)
+            .div(classified.industry_close).sub(1)
+            - (
+                classified.groupby("industry_code").market_close.shift(-horizon)
+                .div(classified.market_close).sub(1)
+            )
+        )
+        events = classified[
+            classified.mainline_phase.eq("IGNITION") & classified.phase_transition
+        ].copy()
+        train = events[
+            (events.trade_date <= train_label_end)
+            & events.excess_forward_return.notna()
+        ]
+        test = events[
+            (events.trade_date >= split_date)
+            & events.excess_forward_return.notna()
+        ]
+        result = {
+            "ignition_strength_min": float(strength_min),
+            "ignition_turnover_min": float(turnover_min),
+            "split_date": split_date.date().isoformat(),
+            "train_label_end": train_label_end.date().isoformat(),
+            "train_events": int(len(train)),
+            "train_mean_excess": (
+                float(train.excess_forward_return.mean()) if len(train) else None
+            ),
+            "train_hit_rate": (
+                float(train.excess_forward_return.gt(0).mean()) if len(train) else None
+            ),
+            "test_events": int(len(test)),
+            "test_mean_excess": (
+                float(test.excess_forward_return.mean()) if len(test) else None
+            ),
+            "test_hit_rate": (
+                float(test.excess_forward_return.gt(0).mean()) if len(test) else None
+            ),
+        }
+        rows.append(result)
+    results = pd.DataFrame(rows)
+    eligible = results[results.train_events.ge(5)].copy()
+    if eligible.empty:
+        selected = None
+    else:
+        selected_row = eligible.sort_values(
+            ["train_mean_excess", "train_hit_rate", "train_events"],
+            ascending=[False, False, False],
+        ).iloc[0]
+        selected = {
+            "ignition_strength_min": float(selected_row.ignition_strength_min),
+            "ignition_turnover_min": float(selected_row.ignition_turnover_min),
+        }
+    summary = {
+        "horizon_sessions": horizon,
+        "train_fraction": train_fraction,
+        "split_date": split_date.date().isoformat(),
+        "train_label_end": train_label_end.date().isoformat(),
+        "selected_on_training_only": selected,
+        "selection_rule": "highest training mean excess return among configurations with at least five training events",
+        "test_set_used_for_selection": False,
+        "historical_pit_eligible": False,
+    }
+    return results, summary
