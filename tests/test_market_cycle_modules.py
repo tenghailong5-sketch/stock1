@@ -41,13 +41,13 @@ def test_policy_events_exclude_not_yet_available_events():
 
 
 def test_mainline_detects_ignition_peak_and_decay():
-    dates = pd.date_range("2026-01-01", periods=8)
+    dates = pd.date_range("2026-01-01", periods=11)
     rows = []
     # Five peer industries create a valid cross-sectional percentile each day.
     for i, day in enumerate(dates):
         for j in range(5):
-            strength = [0, 1, 2, 4, 5, 5, 4, -4][i] if j == 0 else -j
-            share = [0.02, 0.03, 0.04, 0.08, 0.08, 0.08, 0.08, 0.02][i] if j == 0 else 0.02
+            strength = [0, 1, 2, 4, 5, 5, 5, 4, 3, -4, -5][i] if j == 0 else -j
+            share = [0.02, 0.03, 0.04, 0.08, 0.09, 0.09, 0.08, 0.07, 0.06, 0.02, 0.01][i] if j == 0 else 0.02
             rows.append({
                 "trade_date": day, "industry_code": f"I{j}",
                 "industry_return_5d": strength, "market_return_5d": 0,
@@ -56,9 +56,11 @@ def test_mainline_detects_ignition_peak_and_decay():
             })
     out = classify_mainlines(pd.DataFrame(rows))
     focus = out[out.industry_code == "I0"].reset_index(drop=True)
-    assert focus.mainline_phase.iloc[3] == "IGNITION"
-    assert focus.mainline_phase.iloc[6] == "PEAK"
-    assert focus.mainline_phase.iloc[7] == "DECAY"
+    assert focus.mainline_phase.iloc[3] == "TRANSITION"
+    assert focus.mainline_phase.iloc[4] == "IGNITION"
+    assert focus.mainline_phase.iloc[8] == "PEAK"
+    assert focus.mainline_phase.iloc[10] == "DECAY"
+    assert focus.phase_transition.iloc[[4, 8, 10]].all()
 
 
 def test_mainline_rejects_missing_values():
