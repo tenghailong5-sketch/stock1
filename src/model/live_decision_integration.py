@@ -249,11 +249,18 @@ def aggregate_archived_stock_turnover(
         }
     stock_bars = pd.concat(stock_rows, ignore_index=True, sort=False)
     membership = pd.concat(membership_rows, ignore_index=True, sort=False)
+    scopes = membership.get("snapshot_scope", pd.Series(dtype=object)).dropna().astype(str).str.strip().unique()
+    if len(scopes) != 1 or not scopes[0]:
+        return empty, {
+            "status": "ambiguous_membership_scope",
+            "snapshot_scopes": sorted(scopes.tolist()),
+            "historical_pit_eligible": False,
+        }
     try:
         result, audit = aggregate_pit_industry_turnover(
             stock_bars, membership, expected_symbols,
             trade_date=trade_date, decision_time=decision_time,
-            scope_id="live_full_market_universe",
+            scope_id=str(scopes[0]),
         )
     except Exception as exc:
         return empty, {
