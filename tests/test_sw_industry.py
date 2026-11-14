@@ -161,8 +161,12 @@ def test_sw_history_unmapped_codes_are_audited_not_mapped(monkeypatch):
                 iter([["000001", 45000, "110101"], ["000001", 43000, "990001"],
                       ["600001", 44000, "990001"], ["000002", "", "990002"]]))
     monkeypatch.setattr(sw_industry, "_sheet_rows", fake_sheet_rows)
-    result = sw_industry.fetch_sw_industry_unmapped_history_audit(session=Session())
+    result = sw_industry.fetch_sw_industry_unmapped_history_audit(
+        session=Session(), current_symbols={"000001"}
+    )
     assert result["industry_code"].tolist() == ["990001"]
     assert result.iloc[0]["row_count"] == 2
     assert result.iloc[0]["symbol_count"] == 2
+    assert result.iloc[0]["current_member_symbol_count"] == 1
+    assert result.iloc[0]["not_current_member_symbol_count"] == 1
     assert result.iloc[0]["mapping_status"] == "unmapped_outside_sw2021_dictionary"
