@@ -83,3 +83,19 @@ def test_same_session_but_over_age_15m_bar_is_rejected():
     assert result["entry_ready"] is False
     assert result["status"] == "STALE_15M_CONFIRMATION"
 
+def test_after_close_breakout_cannot_authorize_next_session_entry():
+    raw = sample()
+    raw["时间"] = [
+        "2026-11-13 13:45:00",
+        "2026-11-13 14:00:00",
+        "2026-11-13 14:15:00",
+        "2026-11-13 14:30:00",
+        "2026-11-13 14:45:00",
+    ]
+    bars = normalize_15m_bars(
+        raw, symbol="600000", captured_at="2026-11-13T07:20:00Z"
+    )
+    result = confirm_15m_breakout(bars)
+    assert result["entry_ready"] is False
+    assert result["status"] == "OUTSIDE_15M_ENTRY_WINDOW"
+
