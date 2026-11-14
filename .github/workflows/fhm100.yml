@@ -1,25 +1,7 @@
 name: FHM-100 Daily Research
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "src/**"
-      - "requirements.txt"
-      - ".github/workflows/fhm100.yml"
-      # Run after the forward archive commits new market context. Exclude
-      # stock_daily/stock_daily_manifest to avoid a scan -> archive -> scan loop.
-      - "data/forward_archive/index_daily/**"
-      - "data/forward_archive/market_breadth/**"
-      - "data/forward_archive/market_sentiment/**"
-      - "data/forward_archive/industry_membership/**"
-      - "data/forward_archive/limit_pools/**"
-  schedule:
-    - cron: "0 9 * * 1-5" # 17:00 Beijing time; run after the 16:30 forward archive
-  workflow_run:
-    workflows: ["FHM-100 Forward Data Archive"]
-    types: [completed]
-    branches: [main]
+
 permissions:
   contents: write
 concurrency:
