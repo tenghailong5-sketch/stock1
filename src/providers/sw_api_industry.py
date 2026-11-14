@@ -86,24 +86,38 @@ def _trusted_intermediate_bundle(*, timeout: int = 15) -> str:
 
 
 def _get_json(session, url: str, *, params: dict, timeout: int):
-    try:
-        response = session.get(
-            url, params=params, headers=HEADERS, timeout=timeout
-        )
-    except requests.exceptions.SSLError:
-        bundle = getattr(session, "_fhm_sw_ca_bundle", None)
-        if bundle is None:
-            bundle = _trusted_intermediate_bundle(timeout=timeout)
-            session._fhm_sw_ca_bundle = bundle
-            session.verify = bundle
-        response = session.get(
-            url, params=params, headers=HEADERS, timeout=timeout
-        )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
-        raise ValueError("SW API response missing data object")
-    return payload["data"]
+    """Fetch one SW API page with bounded retries for transient transport errors."""
+    retryable_statuses = {429, 500, 502, 503, 504}
+    for attempt in range(3):
+        try:
+            response = session.get(
+                url, params=params, headers=HEADERS, timeout=timeout
+            )
+            try:
+                response.raise_for_status()
+            except requests.exceptions.HTTPError:
+                status = getattr(response, "status_code", None)
+                if status not in retryable_statuses or attempt == 2:
+                    raise
+                time.sleep(float(attempt + 1))
+                continue
+            payload = response.json()
+            if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
+                raise ValueError("SW API response missing data object")
+            return payload["data"]
+        except requests.exceptions.SSLError:
+            bundle = getattr(session, "_fhm_sw_ca_bundle", None)
+            if bundle is None:
+                bundle = _trusted_intermediate_bundle(timeout=timeout)
+                session._fhm_sw_ca_bundle = bundle
+                session.verify = bundle
+            if attempt == 2:
+                raise
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+            if attempt == 2:
+                raise
+            time.sleep(float(attempt + 1))
+    raise RuntimeError("SW API request exhausted retry attempts")
 
 
 def _paged_results(session, url: str, *, params: dict, timeout: int) -> list[dict]:
