@@ -142,5 +142,5 @@ jobs:
           path: |
             sw2021-live-snapshot.csv
             sw2021-historical-valid-time-ledger.csv
-            sw-history-unmapped-code-audit.csv\n            sw-history-unmapped-code-audit.csv
+            sw-history-unmapped-code-audit.csv
           retention-days: 7
