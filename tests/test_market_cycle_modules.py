@@ -119,6 +119,10 @@ def test_official_policy_archive_obeys_publisher_availability_dates():
         "cn_policy_new_quality_productivity_20261014",
         "cn_policy_smart_factory_20260717",
         "cn_policy_new_battery_20260928",
+        "cn_policy_smart_connected_ev_20260910",
+        "cn_policy_ai_software_20260911",
+        "cn_policy_electronic_info_plan_20260915",
+        "cn_policy_pharma_industry_plan_20260918",
     }
     after_mofcom_page = visible_policy_events(
         events, decision_time="2026-10-20T23:59:59+08:00"
@@ -128,10 +132,14 @@ def test_official_policy_archive_obeys_publisher_availability_dates():
     after_all = visible_policy_events(
         events, decision_time="2026-10-22T23:59:59+08:00"
     )[0]
-    assert len(after_all) == 6
+    assert len(after_all) == 10
     assert {
         "cn_policy_smart_factory_20260717",
         "cn_policy_new_battery_20260928",
+        "cn_policy_smart_connected_ev_20260910",
+        "cn_policy_ai_software_20260911",
+        "cn_policy_electronic_info_plan_20260915",
+        "cn_policy_pharma_industry_plan_20260918",
     }.issubset(set(after_all.event_id))
     assert after_all.confidence.between(0, 1).all()
     assert after_all.industry_codes.map(lambda values: len(values) > 0).all()
