@@ -183,3 +183,19 @@ def evaluate_peak_and_decay_independently(frame: pd.DataFrame) -> pd.DataFrame:
     )
     out["lifecycle_data_complete"] = known
     return out
+
+
+def gate_ignition_labels(frame: pd.DataFrame) -> pd.DataFrame:
+    """Demote unverified ignition candidates; only three known-positive gates confirm."""
+    required = {"mainline_phase", "startup_evidence_status"}
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError("missing ignition gate fields: " + ",".join(sorted(missing)))
+    out = frame.copy()
+    out["mainline_phase_candidate"] = out["mainline_phase"]
+    out["mainline_phase_gated"] = out["mainline_phase_candidate"]
+    candidate = out["mainline_phase_candidate"].eq("IGNITION")
+    confirmed = out["startup_evidence_status"].eq("CONFIRMED").fillna(False)
+    out.loc[candidate & ~confirmed, "mainline_phase_gated"] = "IGNITION_UNCONFIRMED"
+    out["startup_live_eligible"] = False
+    return out
