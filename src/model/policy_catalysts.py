@@ -6,7 +6,7 @@ import pandas as pd
 
 REQUIRED = {"event_id", "published_at", "available_at", "source_url",
             "source_id", "title", "catalyst_type", "industry_codes",
-            "impact_direction", "confidence", "confidence_basis"}
+            "impact_direction", "confidence", "confidence_basis", "availability_basis"}
 
 
 def visible_policy_events(events: pd.DataFrame, *, decision_time) -> tuple[pd.DataFrame, dict]:
@@ -34,6 +34,11 @@ def visible_policy_events(events: pd.DataFrame, *, decision_time) -> tuple[pd.Da
         raise ValueError("confidence must be a numeric value within [0,1]")
     if out.confidence_basis.astype(str).str.strip().eq("").any():
         raise ValueError("confidence_basis is required for auditability")
+    if not out.availability_basis.isin({
+        "publisher_timestamp", "publisher_date_eod_conservative",
+        "document_date_plus_publication_date",
+    }).all():
+        raise ValueError("availability_basis must describe the source timestamp precision")
     out["confidence"] = confidence
     cutoff = cutoff.tz_convert("UTC")
     visible = out.loc[(out.published_at <= cutoff) & (out.available_at <= cutoff)].copy()
