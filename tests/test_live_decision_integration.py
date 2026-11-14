@@ -36,7 +36,7 @@ def test_all_four_gates_can_authorize_only_with_complete_inputs():
         watchlist, m5, market, mainline, membership,
         decision_time="2026-11-14T09:00:00+08:00",
         risk_context_by_symbol=risk,
-        minute_confirmation_fetcher=lambda symbol: {
+        minute_confirmation_fetcher=lambda symbol, captured_at=None: {
             "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
             "reason": "all_15m_checks_passed",
         },
