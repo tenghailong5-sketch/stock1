@@ -123,7 +123,11 @@ def test_official_policy_archive_obeys_publisher_availability_dates():
     after_all = visible_policy_events(
         events, decision_time="2026-10-22T23:59:59+08:00"
     )[0]
-    assert len(after_all) == 4
+    assert len(after_all) == 6
+    assert {
+        "cn_policy_smart_factory_20260717",
+        "cn_policy_new_battery_20260928",
+    }.issubset(set(after_all.event_id))
     assert after_all.confidence.between(0, 1).all()
     assert after_all.industry_codes.map(lambda values: len(values) > 0).all()
 
