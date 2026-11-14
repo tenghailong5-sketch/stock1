@@ -1,5 +1,5 @@
 name: FHM-100 Full-Market Daily Data Backfill
-# Trigger validated one-time full-market backfill after parser fix; no schedule.
+# Trigger a one-time live TDX rerun after adding raw OHLC diagnostics; no schedule.
 
 on:
   workflow_dispatch:
