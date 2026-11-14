@@ -216,3 +216,17 @@ def test_emotion_assembler_merges_supplemental_fields_without_replacing_primary_
     assert row.sentiment_source_id == "kaipanhong.market_emotion_kph"
     assert row.sentiment_context_source_id == "secondary.limit_pool"
     assert pd.Timestamp(row.available_time) == pd.Timestamp("2026-01-05T09:00:00Z")
+
+
+def test_market_cycle_uses_validated_board_failure_and_promotion_rates():
+    frame = pd.DataFrame({
+        "trade_date": pd.date_range("2026-01-01", periods=4),
+        "breadth": [0.55, 0.56, 0.57, 0.58],
+        "limit_up_count": [20, 21, 22, 23],
+        "limit_down_count": [5, 5, 4, 4],
+        "board_failure_rate": [None, None, None, 0.50],
+        "promotion_rate": [None, None, None, 0.60],
+    })
+    result = classify_market_cycle(frame)
+    assert result.iloc[-1].market_cycle == "EXHAUSTION"
+    assert result.iloc[-1].cycle_reason == "board_failure_or_promotion_collapse"
