@@ -43,9 +43,12 @@ def _load_recent_sw_universe(path: Path, *, max_age_days: int = 7) -> pd.DataFra
     age = pd.Timestamp.now(tz="UTC") - observed.iloc[0]
     if age < pd.Timedelta(0) or age > pd.Timedelta(days=max_age_days):
         raise RuntimeError("cached SW universe snapshot is stale")
-    if cached.industry_code.duplicated().any() or (
-        ~cached.industry_code.str.fullmatch(r"\\d{6}")
-    ).any() or cached.industry_name.str.strip().eq("").any():
+    if (
+        cached.industry_code.duplicated().any()
+        or (~cached.industry_code.str.fullmatch(r"\d{6}")).any()
+        or cached.industry_name.str.strip().eq("").any()
+        or not cached.source_id.eq("swsresearch.index_publish.current").all()
+    ):
         raise RuntimeError("cached SW universe contains invalid or duplicate industries")
     result = cached[["industry_code", "industry_name"]].copy()
     if len(result) < 20:
