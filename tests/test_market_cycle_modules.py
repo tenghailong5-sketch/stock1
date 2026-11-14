@@ -1,4 +1,5 @@
-from pathlib import Path\nimport pandas as pd
+from pathlib import Path
+import pandas as pd
 import pytest
 
 from src.model.market_cycle import classify_market_cycle
