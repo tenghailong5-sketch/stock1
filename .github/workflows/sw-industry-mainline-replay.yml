@@ -7,14 +7,17 @@ on:
       - feat/policy-sentiment-mainline-architecture
     paths:
       - "scripts/replay_sw_mainlines.py"
+      - "scripts/audit_mainline_signal_gates.py"
       - "tests/test_mainline_validation.py"
       - "tests/test_mainline_threshold_research.py"
+      - "tests/test_mainline_signal_gates.py"
       - "src/providers/sw_industry.py"
       - "src/providers/sw_api_industry.py"
       - "src/providers/eastmoney_market_emotion.py"
       - "tests/test_eastmoney_market_emotion.py"
       - "src/model/mainline_flows.py"
       - "src/model/mainline_validation.py"
+      - "src/model/mainline_signal_gates.py"
       - "src/model/market_cycle.py"
       - "src/model/m3_assembler.py"
       - "src/model/policy_catalysts.py"
@@ -40,9 +43,13 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Run focused signal gate tests
+        run: pytest -q tests/test_mainline_signal_gates.py
       - name: Fetch all SW first-level industry histories and replay phases
         run: python scripts/replay_sw_mainlines.py --start-date 20260522 --end-date 20261113
-      - name: Upload replay output
+      - name: Audit independent startup, peak and decay evidence
+        run: python scripts/audit_mainline_signal_gates.py
+      - name: Upload replay and evidence audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
