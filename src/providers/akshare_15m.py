@@ -72,12 +72,15 @@ def normalize_15m_bars(raw: pd.DataFrame, *, symbol: str, captured_at=None) -> p
 def confirm_15m_breakout(
     bars: pd.DataFrame, *, lookback_bars: int = 4,
     minimum_volume_multiple: float = 1.0,
+    max_bar_age_minutes: float = 30.0,
 ) -> dict:
     """Confirm a completed 15m breakout; thresholds are explicit research config."""
     if isinstance(lookback_bars, bool) or not isinstance(lookback_bars, int) or lookback_bars < 2:
         raise ValueError("lookback_bars must be an integer >= 2")
     if (not np.isfinite(minimum_volume_multiple) or minimum_volume_multiple <= 0):
         raise ValueError("minimum_volume_multiple must be finite and positive")
+    if (not np.isfinite(max_bar_age_minutes) or max_bar_age_minutes <= 0):
+        raise ValueError("max_bar_age_minutes must be finite and positive")
     required = REQUIRED | {"bar_end_time", "available_time", "symbol"}
     missing = required - set(bars.columns)
     if missing:
@@ -99,6 +102,43 @@ def confirm_15m_breakout(
         return {
             "status": "PARTIAL_BAR_REJECTED", "entry_ready": False,
             "reason": "latest_15m_bar_not_closed", "completed_bars": int(len(x)),
+            "historical_pit_eligible": False,
+        }
+    capture_local = capture.tz_convert("Asia/Shanghai")
+    bar_end_local = bar_end.tz_convert("Asia/Shanghai")
+    seconds_since_midnight = (
+        capture_local.hour * 3600
+        + capture_local.minute * 60
+        + capture_local.second
+    )
+    in_entry_session = (
+        9 * 3600 + 45 * 60 <= seconds_since_midnight <= 11 * 3600 + 30 * 60
+        or 13 * 3600 + 15 * 60 <= seconds_since_midnight <= 15 * 3600
+    )
+    if not in_entry_session:
+        return {
+            "status": "OUTSIDE_15M_ENTRY_WINDOW", "entry_ready": False,
+            "reason": "15m_entry_confirmation_requires_active_trading_session",
+            "completed_bars": int(len(x)),
+            "available_time": capture_local.isoformat(),
+            "historical_pit_eligible": False,
+        }
+    bar_age_minutes = (
+        capture_local - bar_end_local
+    ).total_seconds() / 60.0
+    if (
+        bar_end_local.date() != capture_local.date()
+        or bar_age_minutes < 0
+        or bar_age_minutes > float(max_bar_age_minutes)
+    ):
+        return {
+            "status": "STALE_15M_CONFIRMATION", "entry_ready": False,
+            "reason": "latest_15m_bar_not_fresh_for_current_session",
+            "completed_bars": int(len(x)),
+            "bar_end_time": bar_end_local.isoformat(),
+            "available_time": capture_local.isoformat(),
+            "bar_age_minutes": bar_age_minutes,
+            "max_bar_age_minutes": float(max_bar_age_minutes),
             "historical_pit_eligible": False,
         }
     prior_high = float(previous.high.max())
