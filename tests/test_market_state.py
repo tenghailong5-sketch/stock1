@@ -27,7 +27,9 @@ def test_m3_requires_full_60_session_percentile_history():
 def test_m3_score_matches_specification():
     out = calculate_state_scores(history(60), decision_time="2026-11-10T09:00:00Z")
     row = out.iloc[-1]
-    expected = .35*1 + .25*1 + .20*1 + .20*1 - .10*1
+    # Every rolling input is constant: ties map to the 50th percentile,
+    # rather than being treated as a market-wide extreme at 100.
+    expected = .35*1 + .25*.5 + .20*.5 + .20*.5 - .10*.5
     assert row.StateScore == pytest.approx(expected)
 
 
@@ -94,3 +96,21 @@ def test_state_cooldown_never_defaults_to_neutral_and_resets_after_missing_data(
     ]
     assert pd.isna(out.position_scale.iloc[0])
     assert pd.isna(out.candidate_score_threshold.iloc[0])
+
+
+
+def test_rolling_percentile_uses_midrank_for_ties_and_extremes():
+    import numpy as np
+    from src.model.market_state import _rolling_percentile
+
+    tied = pd.Series([3.0] * 60)
+    assert _rolling_percentile(tied).iloc[-1] == pytest.approx(0.5)
+
+    increasing = pd.Series(range(60), dtype=float)
+    assert _rolling_percentile(increasing).iloc[-1] == pytest.approx(59.5 / 60)
+
+    decreasing = pd.Series(range(60, 0, -1), dtype=float)
+    assert _rolling_percentile(decreasing).iloc[-1] == pytest.approx(0.5 / 60)
+
+    invalid = pd.Series([1.0] * 59 + [np.inf])
+    assert pd.isna(_rolling_percentile(invalid).iloc[-1])
