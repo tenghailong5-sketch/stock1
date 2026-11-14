@@ -59,3 +59,17 @@ def test_peak_and_decay_are_independent_and_missing_stays_unknown():
     assert out.decay_evidence.tolist()[:2] == [False, True]
     assert pd.isna(out.peak_evidence.iloc[2])
     assert pd.isna(out.decay_evidence.iloc[2])
+
+
+def test_ignition_candidate_is_not_confirmed_when_any_gate_is_unknown():
+    from src.model.mainline_signal_gates import gate_ignition_labels
+
+    frame = pd.DataFrame({
+        "mainline_phase": ["IGNITION", "IGNITION", "DECAY"],
+        "startup_evidence_status": ["UNKNOWN", "CONFIRMED", "UNKNOWN"],
+    })
+    out = gate_ignition_labels(frame)
+    assert out.mainline_phase_gated.tolist() == [
+        "IGNITION_UNCONFIRMED", "IGNITION", "DECAY"
+    ]
+    assert not out.startup_live_eligible.any()
