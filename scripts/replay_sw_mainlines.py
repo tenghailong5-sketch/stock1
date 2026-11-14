@@ -10,6 +10,7 @@ import pandas as pd
 import requests
 
 from src.model.mainline_flows import classify_mainlines
+from src.model.policy_catalysts import visible_policy_events
 from src.providers.sw_api_industry import (
     fetch_sw_api_first_level_index_list,
     fetch_sw_api_industry_index_history,
@@ -100,10 +101,69 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         sessions=("trade_date", "size"),
         max_strength_percentile=("strength_percentile", "max"),
         max_turnover_share=("turnover_share", "max"),
+        max_turnover_share_percentile=("turnover_share_percentile", "max"),
     ).reset_index()
     segments = segments[segments.mainline_phase.isin(["IGNITION", "PEAK", "DECAY"])]
     segments_path = output_dir / "sw_mainline_phase_segments.csv"
     segments.to_csv(segments_path, index=False)
+
+    policy_path = Path("data/policy_catalysts/official_policy_events.jsonl")
+    if not policy_path.exists():
+        raise RuntimeError("official policy catalyst seed archive is missing")
+    policy_events = pd.read_json(policy_path, lines=True)
+    visible_events, policy_audit = visible_policy_events(
+        policy_events, decision_time=f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}T23:59:59+08:00"
+    )
+    trading_days = sorted(pd.to_datetime(phases.trade_date).dt.normalize().unique())
+    day_positions = {pd.Timestamp(day): i for i, day in enumerate(trading_days)}
+    first_replay_day = pd.Timestamp(trading_days[0])
+    industry_names = (
+        phases[["industry_code", "industry_name"]]
+        .drop_duplicates("industry_code").set_index("industry_code")["industry_name"].to_dict()
+    )
+    ignition_transitions = phases[
+        phases.mainline_phase.eq("IGNITION") & phases.phase_transition
+    ].copy()
+    alignment_rows = []
+    for event in visible_events.itertuples(index=False):
+        available_day = pd.Timestamp(event.available_at).tz_convert("Asia/Shanghai").normalize().tz_localize(None)
+        outside_window = available_day < first_replay_day
+        next_sessions = [day for day in trading_days if pd.Timestamp(day) > available_day]
+        first_possible_day = pd.Timestamp(next_sessions[0]) if next_sessions else pd.NaT
+        for code in event.industry_codes:
+            first_ignition = pd.NaT
+            lag_sessions = None
+            status = "OUTSIDE_REPLAY_WINDOW" if outside_window else "NO_POST_EVENT_IGNITION"
+            if not outside_window and pd.notna(first_possible_day):
+                candidates = ignition_transitions[
+                    ignition_transitions.industry_code.eq(str(code))
+                    & (pd.to_datetime(ignition_transitions.trade_date).dt.normalize() > available_day)
+                ].sort_values("trade_date")
+                if not candidates.empty:
+                    first_ignition = pd.Timestamp(candidates.iloc[0].trade_date).normalize()
+                    lag_sessions = day_positions[first_ignition] - day_positions[first_possible_day] + 1
+                    status = (
+                        "MATCHED_WITHIN_10_SESSIONS"
+                        if lag_sessions <= 10 else "IGNITION_AFTER_10_SESSIONS"
+                    )
+            alignment_rows.append({
+                "event_id": event.event_id,
+                "title": event.title,
+                "available_at": event.available_at,
+                "availability_basis": event.availability_basis,
+                "source_url": event.source_url,
+                "industry_code": str(code),
+                "industry_name": industry_names.get(str(code), "UNMAPPED"),
+                "first_possible_trade_date": first_possible_day,
+                "first_ignition_date": first_ignition,
+                "trade_session_lag": lag_sessions,
+                "alignment_status": status,
+                "interpretation": "temporal_coincidence_only_not_causal_validation",
+            })
+    alignment = pd.DataFrame(alignment_rows)
+    alignment_path = output_dir / "sw_mainline_policy_alignment.csv"
+    alignment.to_csv(alignment_path, index=False)
+    alignment_counts = alignment.alignment_status.value_counts().to_dict()
     summary = {
         "status": "RETROSPECTIVE_REPLAY_COMPLETE",
         "industry_count": expected,
@@ -111,6 +171,11 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "rows": int(len(phases)),
         "phase_counts": {str(k): int(v) for k, v in counts.items()},
         "phase_segments": int(len(segments)),
+        "visible_policy_events": int(len(visible_events)),
+        "policy_event_industry_pairs": int(len(alignment)),
+        "policy_ignition_alignment_counts": {str(k): int(v) for k, v in alignment_counts.items()},
+        "policy_availability_audit": policy_audit,
+        "policy_alignment_interpretation": "temporal_coincidence_only_not_causal_validation",
         "phase_first_dates": {
             phase: str(phases.loc[phases.mainline_phase.eq(phase), "trade_date"].min().date())
             for phase in ("IGNITION", "PEAK", "DECAY")
