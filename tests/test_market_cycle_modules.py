@@ -83,4 +83,6 @@ def test_real_m3_archive_replays_market_emotion_history():
     classified = classify_market_cycle(history)
     assert len(classified) >= 60
     assert classified.market_cycle.ne("UNKNOWN").sum() >= 55
+    assert "ICE" in set(classified.market_cycle)
+    assert "HEAT" in set(classified.market_cycle)
     assert classified.historical_pit_eligible.eq(False).all()
