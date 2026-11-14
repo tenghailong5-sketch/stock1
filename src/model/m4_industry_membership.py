@@ -175,7 +175,7 @@ def aggregate_pit_industry_turnover(
     bars["trade_date"] = dates
     bars["available_time"] = available.dt.tz_convert("UTC")
     bars["amount"] = pd.to_numeric(bars["amount"], errors="coerce")
-    if bars["amount"].isna().any() or (~bars["amount"].map(pd.notna)).any():
+    if bars["amount"].isna().any() or (~bars["amount"].map(lambda value: abs(value) != float("inf"))).any():
         raise ValueError("stock bar amount must be numeric")
     if (bars["amount"] < 0).any():
         raise ValueError("stock bar amount must be non-negative")
@@ -185,7 +185,7 @@ def aggregate_pit_industry_turnover(
     ].copy()
     known = target.loc[target["available_time"] <= cutoff.tz_convert("UTC")].copy()
     eligible = known.loc[
-        known["historical_pit_eligible"].map(lambda value: value is True or isinstance(value, bool) and value)
+        known["historical_pit_eligible"].eq(True)
         & known["availability_basis"].astype(str).str.strip().eq("source_published_at")
     ].copy()
     eligible_count = int(eligible["symbol"].nunique())
@@ -197,7 +197,7 @@ def aggregate_pit_industry_turnover(
         "stock_bar_coverage": eligible_count / len(symbols),
         "stock_bar_eligible_symbols": eligible_count,
         "stock_bar_retrieval_only_symbols": int(
-            known.loc[known["historical_pit_eligible"].map(lambda value: value is False or isinstance(value, bool) and not value), "symbol"].nunique()
+            known.loc[known["historical_pit_eligible"].eq(False), "symbol"].nunique()
         ),
         "historical_pit_eligible": False,
         "status": "incomplete_pit_stock_bars",
