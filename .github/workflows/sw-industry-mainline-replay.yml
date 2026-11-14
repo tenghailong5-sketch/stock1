@@ -8,6 +8,7 @@ on:
     paths:
       - "scripts/replay_sw_mainlines.py"
       - "src/providers/sw_industry.py"
+      - "src/providers/sw_api_industry.py"
       - "src/model/mainline_flows.py"
       - ".github/workflows/sw-industry-mainline-replay.yml"
   pull_request:
