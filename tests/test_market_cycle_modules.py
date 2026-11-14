@@ -92,6 +92,9 @@ def test_real_m3_archive_replays_market_emotion_history():
     assert classified.market_cycle.ne("UNKNOWN").sum() >= 55
     assert "ICE" in set(classified.market_cycle)
     assert "HEAT" in set(classified.market_cycle)
+    assert "highest_observed_limit_up_streak" in result["history"].columns
+    assert "strong_pool_count" in result["history"].columns
+    assert result["history"].highest_observed_limit_up_streak.notna().sum() >= 60
     assert classified.historical_pit_eligible.eq(False).all()
 
 def test_mainline_rejects_incomplete_industry_cross_section():
