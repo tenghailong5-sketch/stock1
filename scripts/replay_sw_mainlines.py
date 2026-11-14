@@ -9,7 +9,10 @@ from pathlib import Path
 import pandas as pd
 
 from src.model.mainline_flows import classify_mainlines
-from src.providers.sw_api_industry import (\n    fetch_sw_api_first_level_index_list,\n    fetch_sw_api_industry_index_history,\n)
+from src.providers.sw_api_industry import (
+    fetch_sw_api_first_level_index_list,
+    fetch_sw_api_industry_index_history,
+)
 
 
 def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output")) -> dict:
