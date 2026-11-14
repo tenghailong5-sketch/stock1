@@ -10,6 +10,10 @@ on:
       - "src/providers/sw_industry.py"
       - "src/providers/sw_api_industry.py"
       - "src/model/mainline_flows.py"
+      - "src/model/market_cycle.py"
+      - "src/model/m3_assembler.py"
+      - "src/model/policy_catalysts.py"
+      - "data/policy_catalysts/official_policy_events.jsonl"
       - ".github/workflows/sw-industry-mainline-replay.yml"
   pull_request:
     paths:
