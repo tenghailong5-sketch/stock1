@@ -220,7 +220,7 @@ def evaluate_peak_and_decay_independently(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def gate_ignition_labels(frame: pd.DataFrame) -> pd.DataFrame:
-    """Demote unverified ignition candidates; only three known-positive gates confirm."""
+    """Gate ignition without backdating; emit the session evidence becomes complete."""
     required = {"mainline_phase", "startup_evidence_status"}
     missing = required - set(frame.columns)
     if missing:
@@ -231,5 +231,42 @@ def gate_ignition_labels(frame: pd.DataFrame) -> pd.DataFrame:
     candidate = out["mainline_phase_candidate"].eq("IGNITION")
     confirmed = out["startup_evidence_status"].eq("CONFIRMED").fillna(False)
     out.loc[candidate & ~confirmed, "mainline_phase_gated"] = "IGNITION_UNCONFIRMED"
+
+    base_transition = (
+        out["phase_transition"].fillna(False).astype(bool)
+        if "phase_transition" in out.columns
+        else pd.Series(False, index=out.index)
+    )
+    gated_transition = base_transition.copy()
+    gated_transition.loc[candidate] = False
+    delayed_confirmation = pd.Series(False, index=out.index)
+    if {"industry_code", "trade_date"}.issubset(out.columns):
+        ordered = out[["industry_code", "trade_date", "mainline_phase_gated"]].copy()
+        ordered["_row"] = range(len(ordered))
+        ordered["trade_date"] = pd.to_datetime(ordered["trade_date"], errors="coerce")
+        if ordered["trade_date"].isna().any():
+            raise ValueError("ignition gate contains invalid trade_date")
+        if ordered.duplicated(["industry_code", "trade_date"]).any():
+            raise ValueError("ignition gate contains duplicate industry/date rows")
+        ordered = ordered.sort_values(["industry_code", "trade_date", "_row"])
+        previous = ordered.groupby("industry_code")["mainline_phase_gated"].shift()
+        delayed = (
+            ordered["mainline_phase_gated"].eq("IGNITION")
+            & previous.notna()
+            & previous.ne("IGNITION")
+        )
+        delayed_confirmation.iloc[ordered["_row"].to_numpy()] = delayed.to_numpy()
+    confirmed_transition = candidate & confirmed & (base_transition | delayed_confirmation)
+    gated_transition.loc[confirmed_transition] = True
+    out["phase_transition_gated"] = gated_transition.astype(bool)
+    out["phase_gate_reason"] = "not_ignition_candidate"
+    out.loc[candidate & ~confirmed, "phase_gate_reason"] = "ignition_evidence_not_confirmed"
+    out.loc[candidate & confirmed & base_transition, "phase_gate_reason"] = (
+        "ignition_confirmed_on_candidate_transition"
+    )
+    out.loc[candidate & confirmed & ~base_transition & delayed_confirmation,
+            "phase_gate_reason"] = "ignition_confirmed_after_evidence_arrived"
+    out.loc[candidate & confirmed & ~gated_transition,
+            "phase_gate_reason"] = "ignition_evidence_confirmed_no_new_transition"
     out["startup_live_eligible"] = False
     return out
