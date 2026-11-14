@@ -67,6 +67,7 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     market["trade_date"] = pd.to_datetime(market["trade_date"], errors="coerce").dt.normalize()
     market["close"] = pd.to_numeric(market["close"], errors="coerce")
     market = market.dropna(subset=["trade_date", "close"]).sort_values("trade_date")
+    market["market_return_3d"] = market["close"].div(market["close"].shift(3)).sub(1)
     market["market_return_5d"] = market["close"].div(market["close"].shift(5)).sub(1)
     market = market.rename(columns={"close": "market_close"})
 
@@ -82,7 +83,6 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         on="trade_date", how="left", validate="many_to_one",
     )
     panel = panel.dropna(subset=[
-        "industry_return_3d", "market_return_3d",
         "industry_return_3d", "market_return_3d",
         "industry_return_5d", "market_return_5d", "turnover", "market_turnover",
     ])
