@@ -33,6 +33,7 @@ from src.providers.baostock_industry import fetch_baostock_industry_membership_s
 from src.providers.sw_industry import (
     fetch_sw_current_industry_membership_snapshot,
     fetch_sw_industry_valid_time_ledger,
+    fetch_sw_industry_index_history,
 )
 from src.providers.sw_api_industry import fetch_sw_api_industry_membership_snapshot
 from src.providers.baidu_industry import fetch_baidu_industry_membership_snapshot
@@ -242,7 +243,34 @@ def _tencent_breadth_frame(ak_module):
     return out
 
 
-def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None, baostock_module=None, sw_industry_fetcher=None, sw_valid_time_ledger_fetcher=None, baidu_industry_fetcher=None, sw_api_industry_fetcher=None, cninfo_industry_fetcher=None) -> dict[str, int]:
+def _collect_sw_index_history(industry_snapshot, fetcher, *, clock=None):
+    """Fetch active SW industry index histories; never promote backfilled rows to PIT."""
+    if fetcher is None or industry_snapshot is None or industry_snapshot.empty:
+        return {}, {}
+    codes = sorted(set(
+        industry_snapshot["industry_code"].astype(str).str.strip().str.zfill(6)
+    ))
+    records_by_code = {}
+    failures = {}
+    for code in codes:
+        try:
+            frame = fetcher(code, clock=clock)
+            required = {"trade_date", "industry_code", "close", "available_time",
+                        "availability_basis", "historical_pit_eligible", "source_revision"}
+            missing = required - set(frame.columns) if frame is not None else required
+            if frame is None or frame.empty or missing:
+                raise ValueError("empty history or missing columns: " + ",".join(sorted(missing)))
+            if not frame["industry_code"].astype(str).eq(code).all():
+                raise ValueError("provider returned a different industry code")
+            if frame["historical_pit_eligible"].fillna(True).astype(bool).any():
+                raise ValueError("backfilled SW index history must remain PIT-ineligible")
+            records_by_code[code] = _records(frame)
+        except Exception as exc:
+            failures[code] = f"{type(exc).__name__}: {str(exc)[:180]}"
+    return records_by_code, failures
+
+
+def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None, baostock_module=None, sw_industry_fetcher=None, sw_valid_time_ledger_fetcher=None, sw_index_history_fetcher=None, baidu_industry_fetcher=None, sw_api_industry_fetcher=None, cninfo_industry_fetcher=None) -> dict[str, int]:
     ak_module = _RetryingProvider(ak_module, sleep_fn=retry_sleep)
     captured = pd.Timestamp(
         captured_at if captured_at is not None else datetime.now(ZoneInfo("Asia/Shanghai"))
@@ -480,6 +508,26 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
     elif expected_symbols:
         sw_error = RuntimeError("Shenwan provider was not injected into this collector run")
 
+
+    # Archive daily history for active SW2021 third-level industries. These
+    # backfilled index bars are retrieval-time observations, not historical PIT.
+    sw_index_history_records: dict[str, list[dict]] = {}
+    sw_index_history_failures: dict[str, str] = {}
+    if sw_index_history_fetcher is not None and sw_industry is not None:
+        sw_index_history_records, sw_index_history_failures = _collect_sw_index_history(
+            sw_industry, sw_index_history_fetcher, clock=industry_clock
+        )
+        source_status["shenwan_industry_index_history"] = (
+            f"ok: archived={len(sw_index_history_records)}; "
+            f"failed={len(sw_index_history_failures)}; PIT-ineligible"
+            if not sw_index_history_failures else
+            f"partial: archived={len(sw_index_history_records)}; "
+            f"failed={len(sw_index_history_failures)}; PIT-ineligible"
+        )
+    elif expected_symbols:
+        source_status["shenwan_industry_index_history"] = (
+            "unavailable: SW index-history provider not injected or SW membership unavailable"
+        )
 
     # Preserve the official SW membership-change ledger separately from the
     # current snapshot. Inclusion dates are valid-time evidence only; the
@@ -807,6 +855,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             "market_breadth_history_backfill": len(historical_breadth_records),
             "market_sentiment_history_backfill": len(historical_sentiment_records),
             **({"shenwan_valid_time_ledger": len(sw_valid_time_records)} if sw_valid_time_ledger_fetcher is not None else {}),
+            **({"shenwan_industry_index_history": sum(map(len, sw_index_history_records.values()))} if sw_index_history_fetcher is not None else {}),
         }
 
     counts: dict[str, int] = {}
@@ -824,6 +873,14 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         industry_records,
         ("snapshot_id", "symbol", "industry_code", "source_revision"),
     ) if industry_records else 0
+    if sw_index_history_fetcher is not None:
+        counts["shenwan_industry_index_history"] = 0
+        for code, rows in sorted(sw_index_history_records.items()):
+            counts["shenwan_industry_index_history"] += append_jsonl_atomic(
+                archive_root / "industry_index_daily" / f"{code}.jsonl",
+                rows,
+                ("industry_code", "trade_date", "source_revision"),
+            )
     if sw_valid_time_ledger_fetcher is not None:
         counts["shenwan_valid_time_ledger"] = append_jsonl_atomic(
             archive_root / "industry_valid_time_ledger" / "swsresearch_sw2021.jsonl",
@@ -907,6 +964,9 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 "shenwan_error": _error_detail(sw_error),
                 "shenwan_valid_time_ledger_error": _error_detail(sw_valid_time_error),
                 "shenwan_valid_time_ledger_row_count": len(sw_valid_time_records) if sw_valid_time_ledger_fetcher is not None else None,
+                "shenwan_industry_index_history_code_count": len(sw_index_history_records),
+                "shenwan_industry_index_history_row_count": sum(map(len, sw_index_history_records.values())),
+                "shenwan_industry_index_history_failed_codes": sw_index_history_failures,
                 "shenwan_api_coverage": sw_api_coverage,
                 "shenwan_api_error": _error_detail(sw_api_error),
                 "shenwan_api_failed_industry_count": (
@@ -955,6 +1015,7 @@ def main() -> None:
         baostock_module=bs,
         sw_industry_fetcher=fetch_sw_current_industry_membership_snapshot,
         sw_valid_time_ledger_fetcher=fetch_sw_industry_valid_time_ledger,
+        sw_index_history_fetcher=fetch_sw_industry_index_history,
         sw_api_industry_fetcher=fetch_sw_api_industry_membership_snapshot,
         cninfo_industry_fetcher=fetch_cninfo_current_industry_membership_snapshot,
     )
