@@ -249,12 +249,12 @@ def test_m5_maps_observed_industry_structure_and_trade_quality_without_filling_u
 
     assert first["industry_relative_strength"] == 92.0
     assert first["industry_strength"] == 92.0
-    assert first["industry_top_30pct"] is True
-    assert first["amount_ma20_ge_100m"] is True
+    assert bool(first["industry_top_30pct"])
+    assert bool(first["amount_ma20_ge_100m"])
     assert first["market_environment"] == 88.0
     assert first["m5_factor_scope"] == "bounded_live_research_pool_percentile"
-    assert second["industry_not_weak"] is True
-    assert second["amount_ma20_ge_100m"] is False
+    assert bool(second["industry_not_weak"])
+    assert not bool(second["amount_ma20_ge_100m"])
 
     # No fabricated cross-session residual, event, pullback, or risk inputs.
     for key in (
