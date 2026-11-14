@@ -496,7 +496,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             missing = required - set(ledger.columns)
             if missing:
                 raise ValueError("Shenwan valid-time ledger missing columns: " + ",".join(sorted(missing)))
-            if ledger["symbol"].astype(str).str.fullmatch(r"\\d{6}").eq(False).any():
+            if ledger["symbol"].astype(str).str.fullmatch(r"\d{6}").eq(False).any():
                 raise ValueError("Shenwan valid-time ledger contains invalid symbols")
             if ledger["historical_pit_eligible"].fillna(True).astype(bool).any():
                 raise ValueError("Shenwan valid-time ledger must remain PIT-ineligible")
@@ -511,9 +511,6 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             )
             if not allow_partial:
                 raise
-    else:
-        source_status["shenwan_valid_time_ledger"] = "unavailable: provider not injected"
-
     # CNINFO CSRC classification is an independent per-security source.
     # Query only symbols still missing from the multi-source union to limit load.
     cninfo_coverage = None
@@ -809,7 +806,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             "market_sentiment": int(sentiment is not None),
             "market_breadth_history_backfill": len(historical_breadth_records),
             "market_sentiment_history_backfill": len(historical_sentiment_records),
-            "shenwan_valid_time_ledger": len(sw_valid_time_records),
+            **({"shenwan_valid_time_ledger": len(sw_valid_time_records)} if sw_valid_time_ledger_fetcher is not None else {}),
         }
 
     counts: dict[str, int] = {}
@@ -827,11 +824,12 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         industry_records,
         ("snapshot_id", "symbol", "industry_code", "source_revision"),
     ) if industry_records else 0
-    counts["shenwan_valid_time_ledger"] = append_jsonl_atomic(
-        archive_root / "industry_valid_time_ledger" / "swsresearch_sw2021.jsonl",
-        sw_valid_time_records,
-        ("symbol", "industry_code", "valid_from", "source_update_date"),
-    ) if sw_valid_time_records else 0
+    if sw_valid_time_ledger_fetcher is not None:
+        counts["shenwan_valid_time_ledger"] = append_jsonl_atomic(
+            archive_root / "industry_valid_time_ledger" / "swsresearch_sw2021.jsonl",
+            sw_valid_time_records,
+            ("symbol", "industry_code", "valid_from", "source_update_date"),
+        ) if sw_valid_time_records else 0
     counts["industry_membership_sources"] = append_jsonl_atomic(
         archive_root / "industry_membership_sources" / f"{day}.jsonl",
         industry_source_records,
@@ -908,7 +906,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 "shenwan_coverage": sw_coverage,
                 "shenwan_error": _error_detail(sw_error),
                 "shenwan_valid_time_ledger_error": _error_detail(sw_valid_time_error),
-                "shenwan_valid_time_ledger_row_count": len(sw_valid_time_records),
+                "shenwan_valid_time_ledger_row_count": len(sw_valid_time_records) if sw_valid_time_ledger_fetcher is not None else None,
                 "shenwan_api_coverage": sw_api_coverage,
                 "shenwan_api_error": _error_detail(sw_api_error),
                 "shenwan_api_failed_industry_count": (
