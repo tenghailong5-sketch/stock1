@@ -34,3 +34,36 @@ def test_transition_validation_rejects_duplicate_and_missing_inputs():
         evaluate_mainline_transitions(pd.concat([frame, frame]), horizons=(1,))
     with pytest.raises(ValueError, match="missing validation fields"):
         evaluate_mainline_transitions(frame.drop(columns=["market_close"]), horizons=(1,))
+
+
+def test_ignition_threshold_grid_uses_chronological_holdout():
+    from src.model.mainline_validation import compare_ignition_thresholds
+
+    rows = []
+    dates = pd.date_range("2026-01-01", periods=60)
+    for day_i, day in enumerate(dates):
+        for industry_i in range(20):
+            ret = ((industry_i % 7) - 3) * 0.002 + (day_i % 5) * 0.0005
+            rows.append({
+                "trade_date": day,
+                "industry_code": f"I{industry_i:02d}",
+                "mainline_phase": "TRANSITION",
+                "phase_transition": False,
+                "industry_close": 100 + day_i * (industry_i + 1) * 0.01,
+                "market_close": 100 + day_i * 0.1,
+                "industry_return_3d": ret,
+                "market_return_3d": 0.001,
+                "industry_return_5d": ret * 1.5,
+                "market_return_5d": 0.002,
+                "turnover": 1000 + industry_i * 20 + day_i * (industry_i + 1),
+                "market_turnover": 30000,
+                "expected_industry_count": 20,
+            })
+    results, summary = compare_ignition_thresholds(
+        pd.DataFrame(rows), candidates=((0.5, 0.5), (0.7, 0.6)),
+        horizon=5, train_fraction=0.6,
+    )
+    assert len(results) == 2
+    assert results.split_date.nunique() == 1
+    assert summary["test_set_used_for_selection"] is False
+    assert summary["historical_pit_eligible"] is False
