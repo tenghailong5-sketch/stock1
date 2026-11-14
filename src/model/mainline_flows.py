@@ -58,18 +58,24 @@ def classify_mainlines(frame: pd.DataFrame) -> pd.DataFrame:
     out["phase_reason"] = "three_session_warmup"
     ignition_candidate = (
         ready & (out.strength_percentile >= 0.8)
-        & (out.turnover_share_percentile >= 0.5)
+        & (out.turnover_share_percentile >= 0.65)
+        & (out.relative_strength_5d > 0)
         & (out.turnover_share_change_3d > 0)
         & (out.relative_strength_change_3d > 0)
     )
     peak_candidate = (
         ready & (out.strength_percentile >= 0.8)
-        & (out.turnover_share_percentile >= 0.5)
+        & (out.turnover_share_percentile >= 0.65)
+        & (out.relative_strength_5d > 0)
         & (out.turnover_share_change_3d <= 0)
         & (out.relative_strength_change_3d <= 0)
     )
     decay_candidate = (
-        ready & (out.strength_percentile < 0.5)
+        ready & (
+            (out.strength_percentile < 0.5)
+            | (out.turnover_share_percentile < 0.5)
+            | (out.relative_strength_5d < 0)
+        )
         & (out.turnover_share_change_3d < 0)
         & (out.relative_strength_change_3d < 0)
     )
