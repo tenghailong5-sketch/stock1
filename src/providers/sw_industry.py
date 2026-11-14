@@ -25,7 +25,7 @@ STOCK_URL = f"{BASE_URL}/StockClassifyUse_stock.xls"
 CODE_URL = f"{BASE_URL}/SwClassCode_2021.xls"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; FHM100/1.0)"}
 INTERMEDIATE_URL = (
-    "https://cacerts.digicert.cn/"
+    "http://cacerts.digicert.cn/"
     "GeoTrustG2TLSCNRSA4096SHA2562022CA1.crt"
 )
 INTERMEDIATE_SHA256 = "05DC9EDC0FDDF A975A1432EF806EC780078B5362AD45AF76DB15C907630DB25D".replace(" ", "")
