@@ -14,6 +14,7 @@ from src.model.m4_industry_observations import select_latest_observed_industry_s
 from src.model.m3_assembler import assemble_m3_history
 from src.collectors.forward_archive import append_jsonl_atomic
 from src.providers.akshare_pit import normalize_daily_history_snapshot
+from src.model.runtime_mainline import scan_runtime_mainlines
 
 OUT=Path("output"); OUT.mkdir(exist_ok=True)
 MIN_AMOUNT=100_000_000
@@ -673,6 +674,12 @@ def main():
     # M3 and every captured stock bar are therefore evaluated against the same
     # cutoff; no provider response fetched after the cutoff can leak into the run.
     now=datetime.now(timezone.utc)
+    # Runtime mainline scan is part of this model invocation; no scheduler is involved.
+    runtime_mainline, runtime_mainline_audit = scan_runtime_mainlines(decision_time=now)
+    runtime_mainline.to_csv(OUT/"runtime_mainline_latest.csv", index=False, encoding="utf-8-sig")
+    (OUT/"runtime_mainline_audit.json").write_text(
+        json.dumps(runtime_mainline_audit, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
     if not w.empty and "available_time" in w.columns:
         stock_available = pd.to_datetime(w["available_time"], errors="coerce", utc=True)
         if stock_available.isna().any() or (stock_available > pd.Timestamp(now)).any():
@@ -765,6 +772,8 @@ def main():
       f"- M4价格/流动性观察因子已计算：{len(w)}",
       f"- M4观察分位审计记录：{len(observation_audit)}条",
       f"- 个股行情最新可用时间：{latest_stock_available or '无'}；统一决策时点：{now.isoformat()}",
+      f"- 运行时行业主线扫描：{runtime_mainline_audit.get('status')}；最新交易日={runtime_mainline_audit.get('latest_trade_date', '无')}；最新行业数={runtime_mainline_audit.get('latest_industry_rows', 0)}；启动证据确认={runtime_mainline_audit.get('confirmed_startups', 0)}（诊断用途，不接入正式评分）",
+      f"- 市场情绪证据：{runtime_mainline_audit.get('emotion', {}).get('sessions', 0)}个历史会话；政策归档完整性={runtime_mainline_audit.get('policy', {}).get('archive_complete', False)}（缺失政策不判定为无催化）",
       f"- M3市场状态：{m3['status']}；状态={m3['market_state'] or '未确认'}；有效会话={m3['valid_sessions']}；最新日期={m3['latest_trade_date'] or '无'}",
       f"- M3仓位系数：{m3['position_scale'] if m3['position_scale'] is not None else '不可用'}；原因={m3['reason'] or '无'}",
       f"- 前瞻行业快照：{industry_audit.get('status')}；覆盖={industry_audit.get('selected_symbol_count', 0)}/{industry_audit.get('expected_universe_size', 0)}；仅作当日观察审计，不具备历史PIT资格",
@@ -772,6 +781,8 @@ def main():
       f"- 正式模型状态：{formal_status}",
       "## 正式模型阻塞项",
       *[f"- {reason}" for reason in formal_blockers],
+      "## 运行时行业主线观察（非正式选股信号）",
+      (runtime_mainline.head(15).to_string(index=False) if not runtime_mainline.empty else "本次主线扫描不可用：" + str(runtime_mainline_audit.get('reason', runtime_mainline_audit.get('status')))),
       "## M5主要阻塞项",
       (m5_blockers.head(15).to_string(index=False) if len(m5_blockers) else "本次没有股票诊断记录；这不代表模型阻塞项为零。"), "",
       "## 模型状态（重要）",
@@ -797,6 +808,7 @@ def main():
     (OUT/"run_status.json").write_text(json.dumps({"time":now.isoformat(),"universe":len(u),
       "history_scan_universe":len(history_universe),"history_pool_audit":history_pool_audit,
       "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
+      "runtime_mainline_audit":runtime_mainline_audit,
       "formal_status":formal_status,"formal_blockers":formal_blockers},ensure_ascii=False,indent=2),encoding="utf-8")
     print(report); print(status)
     if push_error is not None:
