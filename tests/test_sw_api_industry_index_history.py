@@ -80,3 +80,27 @@ def test_fetch_sw_index_history_rejects_invalid_code_and_empty_data():
             "801010", start_date="20261102", end_date="20261108",
             session=FakeSession({TREND_URL: {"data": []}}),
         )
+
+def test_fetch_sw_first_level_index_list_retries_transient_timeout(monkeypatch):
+    import requests
+
+    class FlakySession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise requests.exceptions.ReadTimeout("temporary upstream timeout")
+            rows = [
+                {"swindexcode": f"80{i:04d}", "swindexname": f"industry-{i}"}
+                for i in range(1, 22)
+            ]
+            return FakeResponse({"data": {"results": rows, "count": len(rows)}})
+
+    monkeypatch.setattr("src.providers.sw_api_industry.time.sleep", lambda _: None)
+    session = FlakySession()
+    result = fetch_sw_api_first_level_index_list(session=session)
+    assert len(result) == 21
+    assert session.calls == 2
+
