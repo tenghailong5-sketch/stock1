@@ -79,20 +79,43 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     phases = classify_mainlines(panel[[
         "trade_date", "industry_code", "industry_return_5d", "market_return_5d",
         "turnover", "market_turnover", "expected_industry_count",
+        "industry_name", "available_time", "source_id", "source_revision",
     ]])
     phases["historical_pit_eligible"] = False
     phases["availability_basis"] = "retrieval_time_only"
-    phases["source_id"] = "swsresearch.sw_index_daily_via_akshare"
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_path = output_dir / "sw_mainline_phase_replay.csv"
     phases.to_csv(csv_path, index=False)
     counts = phases["mainline_phase"].value_counts().to_dict()
+    ordered = phases.sort_values(["industry_code", "trade_date"]).copy()
+    ordered["phase_segment"] = ordered.groupby("industry_code")["mainline_phase"].transform(
+        lambda values: values.ne(values.shift()).cumsum()
+    )
+    segments = ordered.groupby(
+        ["industry_code", "industry_name", "mainline_phase", "phase_segment"],
+        dropna=False,
+    ).agg(
+        segment_start=("trade_date", "min"),
+        segment_end=("trade_date", "max"),
+        sessions=("trade_date", "size"),
+        max_strength_percentile=("strength_percentile", "max"),
+        max_turnover_share=("turnover_share", "max"),
+    ).reset_index()
+    segments = segments[segments.mainline_phase.isin(["IGNITION", "PEAK", "DECAY"])]
+    segments_path = output_dir / "sw_mainline_phase_segments.csv"
+    segments.to_csv(segments_path, index=False)
     summary = {
         "status": "RETROSPECTIVE_REPLAY_COMPLETE",
         "industry_count": expected,
         "complete_trade_dates": int(phases.trade_date.nunique()),
         "rows": int(len(phases)),
         "phase_counts": {str(k): int(v) for k, v in counts.items()},
+        "phase_segments": int(len(segments)),
+        "phase_first_dates": {
+            phase: str(phases.loc[phases.mainline_phase.eq(phase), "trade_date"].min().date())
+            for phase in ("IGNITION", "PEAK", "DECAY")
+            if phases.mainline_phase.eq(phase).any()
+        },
         "start_date": str(phases.trade_date.min().date()),
         "end_date": str(phases.trade_date.max().date()),
         "historical_pit_eligible": False,
