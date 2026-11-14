@@ -230,3 +230,5 @@ def test_market_cycle_uses_validated_board_failure_and_promotion_rates():
     result = classify_market_cycle(frame)
     assert result.iloc[-1].market_cycle == "EXHAUSTION"
     assert result.iloc[-1].cycle_reason == "board_failure_or_promotion_collapse"
+    assert result.iloc[-1].market_cycle_data_basis == "breadth_limit_and_board_metrics"
+    assert result.iloc[0].market_cycle_data_basis == "breadth_and_limit_counts_only"
