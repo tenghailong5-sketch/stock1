@@ -83,6 +83,12 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
             frame["industry_name"] = str(name)
             frames.append(frame)
             time.sleep(0.2)
+        except requests.exceptions.RequestException as exc:
+            failures.append(f"{code}:{type(exc).__name__}:{str(exc)[:180]}")
+            raise RuntimeError(
+                "SW industry history endpoint is unavailable; stopping early "
+                f"after transient network failure for {code}"
+            ) from exc
         except Exception as exc:
             failures.append(f"{code}:{type(exc).__name__}:{str(exc)[:180]}")
     if failures:
