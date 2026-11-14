@@ -33,7 +33,7 @@ HEADERS = {
 
 def _clean_text(value) -> str:
     text = re.sub(r"<[^>]+>", " ", str(value or ""))
-    return re.sub(r"\\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _published_at(row: dict) -> str | None:
@@ -201,7 +201,7 @@ def append_policy_candidates(path: str | Path, candidates: list[dict]) -> int:
         for row in candidates:
             if row["candidate_id"] in existing:
                 continue
-            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\\n")
+            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
             existing.add(row["candidate_id"])
             added += 1
     return added
