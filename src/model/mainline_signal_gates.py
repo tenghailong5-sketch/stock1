@@ -116,11 +116,12 @@ def attach_startup_evidence(
         event_days = visible.available_at.dt.tz_convert("Asia/Shanghai").dt.normalize().dt.tz_localize(None)
         matched.append(bool(event_days.isin(window_dates).any()))
     policy_values = pd.Series(matched, index=out.index, dtype="boolean")
-    out["policy_catalyst_component"] = (
-        policy_values if policy_archive_complete else pd.Series(
-            pd.NA, index=out.index, dtype="boolean"
-        )
-    )
+    # A positively matched, source-backed event is known even when the archive
+    # is incomplete. Only absence is UNKNOWN until archive completeness is
+    # certified; otherwise valid positive catalysts are discarded.
+    if not policy_archive_complete:
+        policy_values = policy_values.mask(~policy_values, pd.NA)
+    out["policy_catalyst_component"] = policy_values
 
     numeric = ["turnover_share", "turnover_share_change_3d",
                "strength_3d_percentile", "relative_strength_change_2d"]
