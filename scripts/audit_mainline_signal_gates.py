@@ -31,6 +31,34 @@ def main() -> None:
     lifecycle = gate_ignition_labels(lifecycle)
     ignition_candidate = lifecycle["mainline_phase_candidate"].eq("IGNITION")
     confirmed = lifecycle["startup_evidence_status"].eq("CONFIRMED").fillna(False)
+
+    def evidence_counts(mask: pd.Series) -> dict[str, int]:
+        return {
+            "true": int((mask == True).sum()),  # noqa: E712
+            "false": int((mask == False).sum()),  # noqa: E712
+            "unknown": int(mask.isna().sum()),
+        }
+
+    gate_fields = [
+        "emotion_reversal_component",
+        "policy_catalyst_component",
+        "capital_turnover_share_positive",
+        "capital_turnover_share_increasing",
+        "capital_leadership_top_quintile",
+        "capital_relative_strength_accelerating",
+        "capital_concentration_component",
+    ]
+    positive_policy_ignition = (
+        ignition_candidate & lifecycle["policy_catalyst_component"].eq(True)
+    )
+    ignition_gate_breakdown = {
+        field: evidence_counts(lifecycle.loc[ignition_candidate, field])
+        for field in gate_fields
+    }
+    positive_policy_gate_breakdown = {
+        field: evidence_counts(lifecycle.loc[positive_policy_ignition, field])
+        for field in gate_fields
+    }
     lifecycle.to_csv(output / "sw_mainline_independent_evidence.csv", index=False)
     audit = {
         "emotion_data_availability": audit_emotion_history(emotion),
@@ -54,6 +82,9 @@ def main() -> None:
         "gated_ignition_candidate_rows": int(ignition_candidate.sum()),
         "confirmed_ignition_rows": int((ignition_candidate & confirmed).sum()),
         "unconfirmed_ignition_rows": int((ignition_candidate & ~confirmed).sum()),
+        "ignition_candidate_gate_breakdown": ignition_gate_breakdown,
+        "positive_policy_ignition_rows": int(positive_policy_ignition.sum()),
+        "positive_policy_ignition_gate_breakdown": positive_policy_gate_breakdown,
         "startup_live_eligible": False,
         "historical_pit_eligible": False,
     }
