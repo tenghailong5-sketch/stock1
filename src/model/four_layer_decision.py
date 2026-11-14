@@ -56,9 +56,9 @@ def market_permission(market_state: str, position_scale: float | None,
     scale = float(position_scale)
     if not 0.0 <= scale <= 1.0:
         return MarketPermission("BLOCKED", 0.0, False, "invalid_market_position_scale")
-    if market_state == "RISK_ON" and scale > 0:
+    if market_state == "RISK_ON" and scale == 1.0:
         return MarketPermission("ATTACK", scale, True, "confirmed_risk_on")
-    if market_state == "NEUTRAL" and 0 < scale < 1:
+    if market_state == "NEUTRAL" and scale == 0.7:
         return MarketPermission("PROBE", scale, True, "confirmed_neutral_probe_only")
     if market_state == "RISK_OFF" and scale == 0:
         return MarketPermission("DEFEND", 0.0, False, "confirmed_risk_off")
