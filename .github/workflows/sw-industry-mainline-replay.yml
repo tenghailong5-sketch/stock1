@@ -11,6 +11,8 @@ on:
       - "tests/test_mainline_threshold_research.py"
       - "src/providers/sw_industry.py"
       - "src/providers/sw_api_industry.py"
+      - "src/providers/eastmoney_market_emotion.py"
+      - "tests/test_eastmoney_market_emotion.py"
       - "src/model/mainline_flows.py"
       - "src/model/mainline_validation.py"
       - "src/model/market_cycle.py"
