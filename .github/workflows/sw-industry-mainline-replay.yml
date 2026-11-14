@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feat/policy-sentiment-mainline-architecture
+      - main
     paths:
       - "scripts/replay_sw_mainlines.py"
       - "src/providers/sw_industry.py"
