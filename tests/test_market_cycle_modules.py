@@ -89,3 +89,13 @@ def test_real_m3_archive_replays_market_emotion_history():
     assert "ICE" in set(classified.market_cycle)
     assert "HEAT" in set(classified.market_cycle)
     assert classified.historical_pit_eligible.eq(False).all()
+
+def test_mainline_rejects_incomplete_industry_cross_section():
+    frame = pd.DataFrame([{
+        "trade_date": "2026-01-01", "industry_code": "I1",
+        "industry_return_5d": 1, "market_return_5d": 0,
+        "turnover": 100, "market_turnover": 1000,
+        "expected_industry_count": 5,
+    }])
+    with pytest.raises(ValueError, match="peer universe"):
+        classify_mainlines(frame)
