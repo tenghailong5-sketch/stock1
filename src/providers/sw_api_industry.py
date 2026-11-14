@@ -230,16 +230,28 @@ TREND_URL = "https://www.swsresearch.com/institute-sw/api/index_publish/trend/"
 
 def _get_json_payload(session, url: str, *, params: dict, timeout: int):
     """GET a SW API JSON payload while preserving TLS verification."""
-    try:
-        response = session.get(url, params=params, headers=HEADERS, timeout=timeout)
-    except requests.exceptions.SSLError:
-        bundle = getattr(session, "_fhm_sw_ca_bundle", None)
-        if bundle is None:
-            bundle = _trusted_intermediate_bundle(timeout=timeout)
-            session._fhm_sw_ca_bundle = bundle
-            session.verify = bundle
-        response = session.get(url, params=params, headers=HEADERS, timeout=timeout)
-    response.raise_for_status()
+    response = None
+    for attempt in range(3):
+        try:
+            response = session.get(
+                url, params=params, headers=HEADERS, timeout=timeout
+            )
+            response.raise_for_status()
+            break
+        except requests.exceptions.SSLError:
+            bundle = getattr(session, "_fhm_sw_ca_bundle", None)
+            if bundle is None:
+                bundle = _trusted_intermediate_bundle(timeout=timeout)
+                session._fhm_sw_ca_bundle = bundle
+                session.verify = bundle
+            if attempt == 2:
+                raise
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+            if attempt == 2:
+                raise
+            time.sleep(1.0 * (attempt + 1))
+    if response is None:
+        raise RuntimeError("SW API request did not return a response")
     payload = response.json()
     if not isinstance(payload, dict) or "data" not in payload:
         raise ValueError("SW API response missing data payload")
