@@ -2,7 +2,7 @@ name: SW Industry Provider Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/sw-historical-industry-valid-time-ledger]
     paths:
       - "src/providers/sw_industry.py"
       - "src/providers/sw_api_industry.py"
