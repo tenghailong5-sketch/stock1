@@ -211,6 +211,12 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "market_emotion_archive_sessions": int(emotion_result.get("valid_sessions", 0)),
         "market_emotion_quality_warnings": emotion_result.get("quality_warnings", []),
         "market_cycle_sessions": int(len(market_cycles)),
+        "breadth_observations": int(market_cycles.breadth.notna().sum()),
+        "limit_pool_observations": int(
+            market_cycles[["limit_up_count", "limit_down_count"]].notna().all(axis=1).sum()
+        ),
+        "board_failure_rate_observations": int(market_cycles.board_failure_rate.notna().sum()),
+        "promotion_rate_observations": int(market_cycles.promotion_rate.notna().sum()),
         "market_cycle_counts": {
             str(k): int(v) for k, v in market_cycles.market_cycle.value_counts().to_dict().items()
         },
