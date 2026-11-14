@@ -23,6 +23,17 @@ import requests
 TDX_PACKAGE_URL = "https://www.tdx.com.cn/products/data/data/g4day/{ymd}.zip"
 TDX_BJ_FIRST_DAY = "20220506"
 TDX_MIN_PRICED = {"sh": 10000, "sz": 3000, "bj": 50}
+# Ordinary A-share equity prefixes; exclude indices, funds, bonds, futures and
+# other instruments carried in the same exchange-wide daily package.
+TDX_EQUITY_PREFIXES = {
+    "sh": ("600", "601", "603", "605", "688", "689"),
+    "sz": ("000", "001", "002", "003", "300", "301"),
+    "bj": ("43", "83", "87", "88", "92"),
+}
+
+
+def _is_a_share_equity(market: str, code: str) -> bool:
+    return code.startswith(TDX_EQUITY_PREFIXES[market])
 REQUIRED_COLUMNS = {
     "trade_date", "market", "symbol", "name", "prev_close", "open",
     "high", "low", "close", "volume", "amount", "available_time",
@@ -82,6 +93,8 @@ def _parse_package(content: bytes, ymd: str, *, min_priced=None) -> list[dict]:
                 raise RuntimeError(f"{market} contains invalid/duplicate code or block index")
             codes.add(code)
             seqs.add(seq)
+            if not _is_a_share_equity(market, code):
+                continue
             block = md1[seq * 512:(seq + 1) * 512]
             if len(block) != 512:
                 raise RuntimeError(f"{market}{code} quote block is out of range")
