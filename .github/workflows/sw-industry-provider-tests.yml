@@ -112,6 +112,13 @@ jobs:
           Path("sw2021-historical-valid-time-ledger.csv").write_text(
               ledger.to_csv(index=False), encoding="utf-8"
           )
+          unmapped = fetch_sw_industry_unmapped_history_audit()
+          Path("sw-history-unmapped-code-audit.csv").write_text(
+              unmapped.to_csv(index=False), encoding="utf-8"
+          )
+          unmapped_rows = int(unmapped["row_count"].sum()) if not unmapped.empty else 0
+          unmapped_symbols = int(unmapped["symbol_count"].sum()) if not unmapped.empty else 0
+          print(f"SW_HISTORY_UNMAPPED_AUDIT codes={len(unmapped)} rows={unmapped_rows} symbols={unmapped_symbols}")
           multi = ledger.groupby("symbol").size().gt(1)
           print(
               f"SW2021_HISTORY_LEDGER_OK rows={len(ledger)} "
@@ -133,5 +140,6 @@ jobs:
           name: sw2021-live-snapshot
           path: |
             sw2021-live-snapshot.csv
-            sw2021-historical-valid-time-ledger.csv\n            sw-history-unmapped-code-audit.csv
+            sw2021-historical-valid-time-ledger.csv
+            sw-history-unmapped-code-audit.csv\n            sw-history-unmapped-code-audit.csv
           retention-days: 7
