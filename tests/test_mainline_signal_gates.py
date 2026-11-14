@@ -34,7 +34,7 @@ def test_only_positive_policy_match_is_known_under_incomplete_archive():
         "market_cycle": ["ICE", "RECOVERY"],
     })
     policy = pd.DataFrame({
-        "available_at": ["2026-01-02T08:00:00Z", "2026-01-02T08:00:00Z"],
+        "available_at": ["2026-01-02T06:00:00Z", "2026-01-02T06:00:00Z"],
         "industry_codes": [["I1"], ["I2"]],
         "impact_direction": ["positive", "mixed"],
     })
@@ -67,7 +67,7 @@ def test_capital_gate_exposes_each_condition_without_relaxing_composite():
         "market_cycle": ["ICE", "RECOVERY"],
     })
     policy = pd.DataFrame({
-        "available_at": ["2026-01-02T08:00:00Z"],
+        "available_at": ["2026-01-02T06:00:00Z"],
         "industry_codes": [["I1"]],
         "impact_direction": ["positive"],
     })
@@ -122,3 +122,39 @@ def test_evidence_counts_handles_empty_series():
     assert evidence_counts(pd.Series([], dtype="boolean")) == {
         "true": 0, "false": 0, "unknown": 0
     }
+
+
+
+def test_policy_event_uses_first_trading_close_after_weekend_or_post_close():
+    industry = pd.DataFrame({
+        "trade_date": [
+            "2026-01-02", "2026-01-02",
+            "2026-01-05", "2026-01-05",
+        ],
+        "industry_code": ["I1", "I2", "I1", "I2"],
+        "turnover_share": [0.1, 0.1, 0.1, 0.1],
+        "turnover_share_change_3d": [0.01, 0.01, 0.01, 0.01],
+        "strength_3d_percentile": [0.9, 0.9, 0.9, 0.9],
+        "relative_strength_change_2d": [0.02, 0.02, 0.02, 0.02],
+    })
+    emotion = pd.DataFrame({
+        "trade_date": ["2026-01-01", "2026-01-02", "2026-01-05"],
+        "market_cycle": ["ICE", "RECOVERY", "RECOVERY"],
+    })
+    policy = pd.DataFrame({
+        # Friday 16:00 Shanghai: after the close, so effective Monday.
+        # Saturday 10:00 Shanghai: weekend publication, also effective Monday.
+        "available_at": [
+            "2026-01-02T08:00:00Z",
+            "2026-01-03T02:00:00Z",
+        ],
+        "industry_codes": [["I2"], ["I1"]],
+        "impact_direction": ["positive", "positive"],
+    })
+    out = attach_startup_evidence(
+        industry, emotion, policy, policy_archive_complete=True
+    )
+    friday = out[out.trade_date.eq(pd.Timestamp("2026-01-02"))]
+    monday = out[out.trade_date.eq(pd.Timestamp("2026-01-05"))]
+    assert friday.policy_catalyst_component.tolist() == [False, False]
+    assert monday.policy_catalyst_component.tolist() == [True, True]
