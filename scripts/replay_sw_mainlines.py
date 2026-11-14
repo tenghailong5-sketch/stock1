@@ -11,9 +11,7 @@ import pandas as pd
 import requests
 
 from src.model.mainline_flows import classify_mainlines
-from src.model.mainline_validation import (
-    compare_ignition_thresholds, evaluate_mainline_transitions,
-)
+from src.model.mainline_validation import evaluate_mainline_transitions
 from src.model.market_cycle import classify_market_cycle
 from src.model.m3_assembler import (
     assemble_m3_history, assemble_market_emotion_history,
@@ -108,28 +106,10 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     validation_events, validation_summary = evaluate_mainline_transitions(
         validation_input, horizons=(5, 10, 20)
     )
-    threshold_input = panel[[
-        "trade_date", "industry_code", "industry_close", "market_close",
-        "industry_return_3d", "market_return_3d",
-        "industry_return_5d", "market_return_5d", "turnover",
-        "market_turnover", "expected_industry_count",
-    ]].merge(
-        phases[["trade_date", "industry_code", "mainline_phase", "phase_transition"]],
-        on=["trade_date", "industry_code"], how="inner", validate="one_to_one",
-    )
-    threshold_grid_5d, threshold_summary_5d = compare_ignition_thresholds(
-        threshold_input, horizon=5, train_fraction=0.60,
-    )
-    threshold_grid_10d, threshold_summary_10d = compare_ignition_thresholds(
-        threshold_input, horizon=10, train_fraction=0.60,
-    )
+    # Keep the current classifier frozen: no threshold search or test-period tuning.
     validation_path = output_dir / "sw_mainline_transition_validation.csv"
-    threshold_path_5d = output_dir / "sw_mainline_ignition_threshold_grid_5d.csv"
-    threshold_path_10d = output_dir / "sw_mainline_ignition_threshold_grid_10d.csv"
     output_dir.mkdir(parents=True, exist_ok=True)
     validation_events.to_csv(validation_path, index=False)
-    threshold_grid_5d.to_csv(threshold_path_5d, index=False)
-    threshold_grid_10d.to_csv(threshold_path_10d, index=False)
     market_decision_time = pd.Timestamp.now(tz="Asia/Shanghai")
     m3_result = assemble_m3_history(
         Path("data/forward_archive"), index_symbol="000001",
@@ -332,12 +312,7 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "outcome_validation": validation_summary,
         "outcome_validation_events": int(len(validation_events)),
         "outcome_validation_output": str(validation_path),
-        "ignition_threshold_research": {
-            "5d": threshold_summary_5d,
-            "10d": threshold_summary_10d,
-        },
-        "ignition_threshold_grid_5d_output": str(threshold_path_5d),
-        "ignition_threshold_grid_10d_output": str(threshold_path_10d),
+        "ignition_threshold_research": "DISABLED_FROZEN_CLASSIFIER_NO_THRESHOLD_SEARCH",
         "market_m3_status": m3_result.get("status"),
         "market_emotion_archive_status": emotion_result.get("status"),
         "market_emotion_archive_sessions": int(emotion_result.get("valid_sessions", 0)),
