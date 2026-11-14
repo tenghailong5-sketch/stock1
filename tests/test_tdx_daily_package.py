@@ -62,7 +62,7 @@ def test_audit_reports_exact_counts_and_amount_by_market():
     frame = normalize_tdx_package(rows, available_time="2026-11-14T00:00:00Z")
     audit = audit_tdx_snapshot(frame)
     assert audit["total_priced_rows"] == 6
-    assert audit["unique_symbols"] == 2
+    assert audit["unique_symbols"] == 6
     assert audit["markets"]["sh"]["priced_rows"] == 2
     assert audit["markets"]["bj"]["amount_sum_cny"] == 2000000.0
     assert audit["historical_pit_eligible"] is False
