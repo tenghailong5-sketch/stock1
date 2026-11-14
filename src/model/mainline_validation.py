@@ -186,3 +186,64 @@ def compare_ignition_thresholds(
         "historical_pit_eligible": False,
     }
     return results, summary
+
+
+def evaluate_frozen_chronological_holdout(
+    frame: pd.DataFrame, *, horizons=(5, 10, 20), train_fraction: float = 0.60,
+) -> tuple[pd.DataFrame, dict]:
+    """Evaluate frozen phase labels on a later chronological holdout.
+
+    The split is based on all observed dates, not event dates. Training outcome
+    labels are purged by the maximum forward horizon before the holdout begins.
+    No parameters are selected or changed by this function.
+    """
+    if not 0.5 <= train_fraction <= 0.8:
+        raise ValueError("train_fraction must be within [0.5,0.8]")
+    dates = sorted(pd.to_datetime(frame["trade_date"], errors="coerce").dropna().unique())
+    if len(dates) < max(40, max(horizons) * 3):
+        raise ValueError("insufficient dates for chronological holdout")
+    split_pos = int(len(dates) * train_fraction)
+    split_date = pd.Timestamp(dates[split_pos])
+    train_label_end = pd.Timestamp(dates[split_pos - max(horizons) - 1])
+    events, _ = evaluate_mainline_transitions(frame, horizons=horizons)
+    events["trade_date"] = pd.to_datetime(events.trade_date)
+    train = events[
+        (events.trade_date <= train_label_end)
+        & events[f"excess_forward_return_{max(horizons)}d"].notna()
+    ].copy()
+    test = events[
+        (events.trade_date >= split_date)
+        & events[f"excess_forward_return_{max(horizons)}d"].notna()
+    ].copy()
+
+    def metrics(rows: pd.DataFrame) -> dict:
+        result = {}
+        for phase in ("IGNITION", "PEAK", "DECAY"):
+            subset = rows[rows.mainline_phase.eq(phase)]
+            phase_result = {"events": int(len(subset))}
+            for horizon in horizons:
+                values = subset[f"excess_forward_return_{horizon}d"].dropna()
+                favorable = values.gt(0) if phase == "IGNITION" else values.lt(0)
+                phase_result[f"evaluated_{horizon}d"] = int(len(values))
+                phase_result[f"mean_excess_{horizon}d"] = (
+                    float(values.mean()) if len(values) else None
+                )
+                phase_result[f"directional_hit_rate_{horizon}d"] = (
+                    float(favorable.mean()) if len(values) else None
+                )
+            result[phase] = phase_result
+        return result
+
+    summary = {
+        "split_date": split_date.date().isoformat(),
+        "train_label_end": train_label_end.date().isoformat(),
+        "train": metrics(train),
+        "holdout": metrics(test),
+        "classifier_frozen": True,
+        "threshold_search_used": False,
+        "holdout_used_for_selection": False,
+        "historical_pit_eligible": False,
+    }
+    train["validation_partition"] = "TRAIN"
+    test["validation_partition"] = "HOLDOUT"
+    return pd.concat([train, test], ignore_index=True), summary
