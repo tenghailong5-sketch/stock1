@@ -4,14 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       trade_date:
-        description: "Trading date to retrieve (YYYY-MM-DD)"
-        required: true
+        description: "Trading date YYYY-MM-DD; leave empty to find latest published weekday"
+        required: false
         type: string
+        default: ""
       commit_archive:
         description: "Commit validated CSV and manifest to main"
         required: true
         type: boolean
         default: true
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/tdx-daily-backfill.yml"
 
 permissions:
   contents: write
@@ -23,9 +28,10 @@ concurrency:
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
-      TRADE_DATE: ${{ inputs.trade_date }}
+      TRADE_DATE: ${{ inputs.trade_date || '' }}
+      COMMIT_ARCHIVE: ${{ inputs.commit_archive || 'true' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,21 +45,22 @@ jobs:
       - name: Run regression tests
         run: pytest -q
       - name: Download and validate full-market daily package
-        run: python -m src.collectors.tdx_daily_backfill --date "$TRADE_DATE" --output data/market_daily
+        id: download
+        run: python -m src.collectors.tdx_daily_backfill --date "${TRADE_DATE:-latest}" --output data/market_daily
       - name: Upload data artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fhm100-full-market-${{ inputs.trade_date }}
-          path: data/market_daily/${{ inputs.trade_date }}/
+          name: fhm100-full-market-${{ steps.download.outputs.trade_date }}
+          path: data/market_daily/${{ steps.download.outputs.trade_date }}/
           if-no-files-found: error
           retention-days: 30
       - name: Commit validated daily archive
-        if: inputs.commit_archive
+        if: env.COMMIT_ARCHIVE == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "data/market_daily/$TRADE_DATE"
-          git commit -m "Archive full-market daily data for $TRADE_DATE" || {
+          git add "data/market_daily/${{ steps.download.outputs.trade_date }}"
+          git commit -m "Archive full-market daily data for ${{ steps.download.outputs.trade_date }}" || {
             echo "No new data to commit."
             exit 0
           }
