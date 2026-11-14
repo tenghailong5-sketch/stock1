@@ -44,7 +44,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fhm100-full-market-${{ inputs.trade_date }}
-          path: data/market_daily/$TRADE_DATE/
+          path: data/market_daily/${{ inputs.trade_date }}/
           if-no-files-found: error
           retention-days: 30
       - name: Commit validated daily archive
