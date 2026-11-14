@@ -170,7 +170,7 @@ def test_emotion_assembler_merges_supplemental_fields_without_replacing_primary_
         "breadth": 0.55, "breadth_coverage": 1.0,
         "total_amount": 1000, "total_amount_status": "complete_provider_snapshot_sum",
         "source_id": "primary.breadth",
-    }) + "\\n", encoding="utf-8")
+    }) + "\n", encoding="utf-8")
     rows = [
         {
             "trade_date": "2026-01-05",
@@ -190,7 +190,7 @@ def test_emotion_assembler_merges_supplemental_fields_without_replacing_primary_
         },
     ]
     (sentiment_dir / "2026-01-05.jsonl").write_text(
-        "".join(json.dumps(row) + "\\n" for row in rows), encoding="utf-8"
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
     )
     result = assemble_market_emotion_history(
         tmp_path, decision_time="2026-01-05T18:00:00+08:00", min_sessions=1,
