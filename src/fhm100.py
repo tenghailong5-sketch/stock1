@@ -15,6 +15,9 @@ from src.model.m3_assembler import assemble_m3_history
 from src.collectors.forward_archive import append_jsonl_atomic
 from src.providers.akshare_pit import normalize_daily_history_snapshot
 from src.model.runtime_mainline import scan_runtime_mainlines
+from src.model.live_decision_integration import (
+    build_live_decision_gate_audit, summarize_gate_blockers,
+)
 
 OUT=Path("output"); OUT.mkdir(exist_ok=True)
 MIN_AMOUNT=100_000_000
@@ -727,6 +730,24 @@ def main():
     m5_blockers = summarize_m5_blockers(m5)
     m5_blockers.to_csv(OUT/"m5_blocker_summary.csv",index=False,encoding="utf-8-sig")
 
+    # Execute M2 -> M3 -> M5 -> M8 on every strategy row. Missing PIT,
+    # factor, 15-minute or portfolio-risk inputs remain explicit blockers.
+    decision_gates, decision_gate_audit = build_live_decision_gate_audit(
+        w, m5, m3, runtime_mainline, industry_membership,
+        decision_time=now,
+    )
+    decision_gates.to_csv(
+        OUT/"four_layer_decision_gates.csv", index=False, encoding="utf-8-sig"
+    )
+    gate_blockers = summarize_gate_blockers(decision_gates)
+    gate_blockers.to_csv(
+        OUT/"four_layer_gate_blockers.csv", index=False, encoding="utf-8-sig"
+    )
+    (OUT/"four_layer_decision_audit.json").write_text(
+        json.dumps(decision_gate_audit, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+
     # A successful research run is not equivalent to a formal FHM-100 signal.
     # Keep data blockers separate from unfinished model integration so an empty
     # universe can never be misreported as "no stocks passed the strategy".
@@ -740,11 +761,13 @@ def main():
     if industry_audit.get("status") != "ready_forward_only":
         formal_blockers.append("FORWARD_INDUSTRY_SNAPSHOT_NOT_READY:" + str(industry_audit.get("status")))
     formal_blockers.extend([
-        "M5_FACTOR_PIPELINE_NOT_CONNECTED_TO_LIVE_CANDIDATES",
+        "M5_REQUIRED_FACTORS_AND_HARD_GATES_NOT_COMPLETE",
         "M6_OUT_OF_SAMPLE_PREDICTION_NOT_VALIDATED",
-        "M8_PORTFOLIO_RISK_PIPELINE_NOT_CONNECTED",
+        "M8_STOP_SIZE_AND_PORTFOLIO_CONTEXT_NOT_AVAILABLE",
         "M9_EXECUTION_AWARE_BACKTEST_NOT_ADMITTED",
     ])
+    if decision_gate_audit.get("allowed_count", 0) == 0:
+        formal_blockers.append("FOUR_LAYER_DECISION_GATE_BLOCKED_ALL_CANDIDATES")
     formal_status = "BLOCKED_FORMAL_SIGNAL" if formal_blockers else "READY"
     (OUT/"formal_gate.json").write_text(json.dumps({
         "status": formal_status,
@@ -755,6 +778,8 @@ def main():
         "valid_history_count": int(len(w)),
         "m3_status": str(m3.get("status")),
         "m5_is_diagnostic_only": True,
+        "four_layer_decision_integrated": True,
+        "four_layer_decision_audit": decision_gate_audit,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     (OUT/"m3_market_context.json").write_text(json.dumps(m3, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     w.to_csv(OUT/"watchlist.csv",index=False,encoding="utf-8-sig")
@@ -778,11 +803,14 @@ def main():
       f"- M3仓位系数：{m3['position_scale'] if m3['position_scale'] is not None else '不可用'}；原因={m3['reason'] or '无'}",
       f"- 前瞻行业快照：{industry_audit.get('status')}；覆盖={industry_audit.get('selected_symbol_count', 0)}/{industry_audit.get('expected_universe_size', 0)}；仅作当日观察审计，不具备历史PIT资格",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
+      f"- 四层决策门：{decision_gate_audit.get('status')}；检查记录={decision_gate_audit.get('candidate_count', 0)}；15分钟扫描={decision_gate_audit.get('minute_scanned_count', 0)}；准入={decision_gate_audit.get('allowed_count', 0)}；阻断={decision_gate_audit.get('blocked_count', 0)}",
       f"- 正式模型状态：{formal_status}",
       "## 正式模型阻塞项",
       *[f"- {reason}" for reason in formal_blockers],
       "## 运行时行业主线观察（非正式选股信号）",
       (runtime_mainline.head(15).to_string(index=False) if not runtime_mainline.empty else "本次主线扫描不可用：" + str(runtime_mainline_audit.get('reason', runtime_mainline_audit.get('status')))),
+      "## 四层决策门阻塞项",
+      (gate_blockers.head(20).to_string(index=False) if len(gate_blockers) else "无四层决策记录。"),
       "## M5主要阻塞项",
       (m5_blockers.head(15).to_string(index=False) if len(m5_blockers) else "本次没有股票诊断记录；这不代表模型阻塞项为零。"), "",
       "## 模型状态（重要）",
