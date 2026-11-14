@@ -111,6 +111,7 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     holdout_events, holdout_summary = evaluate_frozen_chronological_holdout(
         validation_input, horizons=(5, 10, 20), train_fraction=0.60,
     )
+    output_dir.mkdir(parents=True, exist_ok=True)
     holdout_events.to_csv(
         output_dir / "sw_mainline_frozen_holdout_events.csv", index=False
     )
