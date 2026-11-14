@@ -111,7 +111,6 @@ def compare_ignition_thresholds(
         raise ValueError("training window is too short for the forward horizon")
     split_date = pd.Timestamp(dates[split_pos])
     train_label_end = pd.Timestamp(dates[split_pos - horizon - 1])
-    date_positions = {pd.Timestamp(day): i for i, day in enumerate(dates)}
     rows = []
     for strength_min, turnover_min in candidates:
         classified = classify_mainlines(
