@@ -4,6 +4,9 @@ from __future__ import annotations
 import pandas as pd
 
 
+DEFAULT_IGNITION_STRENGTH_MIN = 0.65
+
+
 REQUIRED = {"trade_date", "industry_code", "industry_return_3d",
             "market_return_3d", "industry_return_5d", "market_return_5d",
             "turnover", "market_turnover", "expected_industry_count"}
@@ -11,7 +14,7 @@ REQUIRED = {"trade_date", "industry_code", "industry_return_3d",
 
 def classify_mainlines(
     frame: pd.DataFrame, *,
-    ignition_strength_min: float = 0.65,
+    ignition_strength_min: float = DEFAULT_IGNITION_STRENGTH_MIN,
     ignition_turnover_min: float = 0.50,
 ) -> pd.DataFrame:
     """Rank relative strength, turnover share expansion and breadth by date.
