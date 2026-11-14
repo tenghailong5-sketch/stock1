@@ -14,11 +14,12 @@ def membership(rows):
     return pd.DataFrame(rows, columns=[
         "symbol", "industry_code", "valid_from", "valid_to",
         "available_time", "source_id", "source_revision", "snapshot_scope",
+        "historical_pit_eligible", "availability_basis",
     ])
 
 
 def row(symbol, industry, available=DECISION, start="2026-01-01",
-        end=None, revision="v1"):
+        end=None, revision="v1", pit=True, basis="source_published_at"):
     return {
         "symbol": symbol,
         "industry_code": industry,
@@ -28,6 +29,8 @@ def row(symbol, industry, available=DECISION, start="2026-01-01",
         "source_id": "provider-x",
         "source_revision": revision,
         "snapshot_scope": "declared_universe",
+        "historical_pit_eligible": pit,
+        "availability_basis": basis,
     }
 
 
@@ -193,3 +196,35 @@ def test_future_stock_bar_revision_is_not_available_at_decision_time():
     assert result.empty
     assert audit["status"] == "incomplete_pit_stock_bars"
     assert audit["stock_bar_coverage"] == 0.5
+
+
+def test_retrieval_time_membership_is_rejected_even_with_validity_interval():
+    frame = membership([
+        row("000001", "TECH", pit=False, basis="retrieval_time_only"),
+        row("000002", "BANK", pit=False, basis="retrieval_time_only"),
+    ])
+    selected, audit = select(frame)
+    assert selected.empty
+    assert audit["status"] == "no_pit_eligible_membership"
+    assert audit["membership_pit_rejected_rows"] == 2
+    assert audit["historical_pit_eligible"] is False
+
+
+def test_membership_requires_explicit_pit_provenance_columns():
+    frame = membership([row("000001", "TECH"), row("000002", "BANK")])
+    frame = frame.drop(columns=["historical_pit_eligible", "availability_basis"])
+    with pytest.raises(ValueError, match="historical_pit_eligible"):
+        select(frame)
+
+
+def test_aggregation_blocks_retrieval_time_only_membership():
+    bars = stock_bars([stock_bar("000001", 100), stock_bar("000002", 250)])
+    members = membership([
+        row("000001", "TECH", pit=False, basis="retrieval_time_only"),
+        row("000002", "BANK", pit=False, basis="retrieval_time_only"),
+    ])
+    result, audit = aggregate(bars, members)
+    assert result.empty
+    assert audit["status"] == "incomplete_pit_membership"
+    assert audit["membership_status"] == "no_pit_eligible_membership"
+    assert audit["historical_pit_eligible"] is False
