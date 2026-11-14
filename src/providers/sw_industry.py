@@ -196,3 +196,105 @@ def fetch_sw_current_industry_membership_snapshot(
         "historical_pit_eligible", "source_id", "snapshot_scope",
         "source_revision",
     ]]
+
+def fetch_sw_industry_valid_time_ledger(
+    *, clock=None, session=None, timeout: int = 60
+) -> pd.DataFrame:
+    """Return SW2021 membership intervals derivable from the official XLS.
+
+    The inclusion date is treated only as a valid-time start. The next recorded
+    inclusion date for the same stock closes the preceding interval. The source
+    does not establish when each historical row first became available, so
+    every row remains historical-PIT-ineligible.
+    """
+    now = clock or (lambda: datetime.now(timezone.utc))
+    client = session or requests
+    stock_content = _download_xls(client, STOCK_URL, timeout)
+    code_content = _download_xls(client, CODE_URL, timeout)
+
+    code_headers, code_rows = _sheet_rows(code_content)
+    code_idx = _column(code_headers, "行业代码")
+    l1_idx = _column(code_headers, "一级行业名称")
+    l2_idx = _column(code_headers, "二级行业名称")
+    l3_idx = _column(code_headers, "三级行业名称")
+    code_map = {}
+    for row in code_rows:
+        code = _text(row[code_idx]).zfill(6)
+        names = (_text(row[l1_idx]), _text(row[l2_idx]), _text(row[l3_idx]))
+        if code and all(names):
+            code_map[code] = names
+    if not code_map:
+        raise ValueError("Shenwan industry-code dictionary contains no usable rows")
+
+    headers, rows = _sheet_rows(stock_content)
+    symbol_idx = _column(headers, "股票代码")
+    date_idx = _column(headers, "计入日期")
+    industry_idx = _column(headers, "行业代码")
+    update_idx = headers.index("更新日期") if "更新日期" in headers else None
+
+    records = []
+    for row in rows:
+        symbol = _text(row[symbol_idx])
+        industry_code = _text(row[industry_idx]).zfill(6)
+        if len(symbol) != 6 or not symbol.isdigit() or industry_code not in code_map:
+            continue
+        raw_date = row[date_idx]
+        if isinstance(raw_date, (int, float)):
+            valid_from = pd.Timestamp("1899-12-30") + pd.to_timedelta(float(raw_date), unit="D")
+        else:
+            valid_from = pd.to_datetime(_text(raw_date), errors="coerce")
+        if pd.isna(valid_from):
+            continue
+        update_date = ""
+        if update_idx is not None:
+            raw_update = row[update_idx]
+            if isinstance(raw_update, (int, float)):
+                update_date = str((pd.Timestamp("1899-12-30") + pd.to_timedelta(float(raw_update), unit="D")).date())
+            else:
+                parsed_update = pd.to_datetime(_text(raw_update), errors="coerce")
+                update_date = "" if pd.isna(parsed_update) else str(parsed_update.date())
+        level1, level2, level3 = code_map[industry_code]
+        records.append({
+            "symbol": symbol, "industry_code": industry_code,
+            "industry_name": level3, "industry_level1": level1,
+            "industry_level2": level2, "valid_from": pd.Timestamp(valid_from).normalize(),
+            "source_update_date": update_date,
+        })
+
+    if not records:
+        raise ValueError("Shenwan historical classification file contains no usable rows")
+    frame = pd.DataFrame(records).sort_values(
+        ["symbol", "valid_from", "industry_code"], kind="stable"
+    ).reset_index(drop=True)
+    duplicate_dates = frame.duplicated(["symbol", "valid_from"], keep=False)
+    if duplicate_dates.any():
+        conflicts = frame.loc[duplicate_dates].groupby(["symbol", "valid_from"])["industry_code"].nunique()
+        if conflicts.gt(1).any():
+            raise ValueError("Shenwan history has conflicting industries for the same stock/date")
+        frame = frame.drop_duplicates(["symbol", "valid_from"], keep="last").reset_index(drop=True)
+
+    frame["valid_to"] = frame.groupby("symbol")["valid_from"].shift(-1)
+    captured = pd.Timestamp(now())
+    if captured.tzinfo is None:
+        raise ValueError("Shenwan observation clock must be timezone-aware")
+    captured = captured.tz_convert("UTC")
+    frame["observed_at"] = captured
+    frame["available_time"] = captured
+    frame["availability_basis"] = "retrieval_time_only"
+    frame["historical_pit_eligible"] = False
+    frame["source_id"] = "swsresearch.sw2021_stock_classification_history"
+    frame["snapshot_scope"] = "historical_valid_time_intervals_not_pit"
+    frame["source_revision"] = frame.apply(
+        lambda row: hashlib.sha256(
+            f"{row['symbol']}|{row['industry_code']}|{row['valid_from']}|{row['valid_to']}|{row['source_update_date']}".encode("utf-8")
+        ).hexdigest(), axis=1,
+    )
+    frame["snapshot_id"] = str(uuid.uuid4())
+    return frame[[
+        "symbol", "industry_code", "industry_name", "industry_level1",
+        "industry_level2", "valid_from", "valid_to", "source_update_date",
+        "snapshot_id", "observed_at", "available_time", "availability_basis",
+        "historical_pit_eligible", "source_id", "snapshot_scope", "source_revision",
+    ]]
+
+
