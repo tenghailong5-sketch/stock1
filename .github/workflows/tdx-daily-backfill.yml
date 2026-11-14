@@ -1,0 +1,58 @@
+name: FHM-100 Full-Market Daily Data Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      trade_date:
+        description: "Trading date to retrieve (YYYY-MM-DD)"
+        required: true
+        type: string
+      commit_archive:
+        description: "Commit validated CSV and manifest to main"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fhm100-full-market-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run regression tests
+        run: pytest -q
+      - name: Download and validate full-market daily package
+        run: python -m src.collectors.tdx_daily_backfill --date "${{ inputs.trade_date }}" --output data/market_daily
+      - name: Upload data artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fhm100-full-market-${{ inputs.trade_date }}
+          path: data/market_daily/${{ inputs.trade_date }}/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Commit validated daily archive
+        if: inputs.commit_archive
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "data/market_daily/${{ inputs.trade_date }}"
+          git commit -m "Archive full-market daily data for ${{ inputs.trade_date }}" || {
+            echo "No new data to commit."
+            exit 0
+          }
+          git push origin HEAD:main
