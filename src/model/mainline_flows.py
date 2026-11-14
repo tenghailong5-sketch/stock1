@@ -41,6 +41,8 @@ def classify_mainlines(frame: pd.DataFrame) -> pd.DataFrame:
         observed_counts != out.groupby("trade_date")["expected_industry_count"].first()
     ).any():
         raise ValueError("incomplete or inconsistent industry peer universe")
+    if out.groupby("trade_date")["market_turnover"].nunique().ne(1).any():
+        raise ValueError("market_turnover denominator must be consistent within each date")
     if (out.market_turnover <= 0).any():
         raise ValueError("market_turnover must be positive")
     out["relative_strength_5d"] = out.industry_return_5d - out.market_return_5d
