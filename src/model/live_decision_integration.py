@@ -68,7 +68,6 @@ def build_live_decision_gate_audit(
     # Preserve rank order for deterministic bounded scans and bind every
     # 15-minute observation to the runner's single frozen decision cutoff.
     minute_symbols = ranked["代码"].astype(str).str.zfill(6).head(minute_scan_limit).tolist()
-    minute_symbol_set = set(minute_symbols)
     minute_results = {}
     for symbol in minute_symbols:
         try:
