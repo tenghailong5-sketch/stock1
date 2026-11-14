@@ -70,6 +70,9 @@ def test_runtime_mainline_scan_connects_phases_and_evidence(monkeypatch, tmp_pat
     assert len(latest) == 20
     assert "mainline_phase_gated" in latest
     assert "startup_evidence_status" in latest
+    assert latest["turnover_share_basis"].eq(
+        "relative_share_of_sw_first_level_industry_index_turnover"
+    ).all()
     assert not audit["historical_pit_eligible"]
     assert not audit["policy"]["archive_complete"]
 
