@@ -17,6 +17,7 @@ from src.collectors.forward_archive import append_jsonl_atomic
 from src.providers.akshare_pit import normalize_daily_history_snapshot
 from src.model.runtime_mainline import scan_runtime_mainlines
 from src.model.sw_industry_research import select_sw_industry_research_snapshot
+from src.model.sw_stock_mainline_research import build_sw_stock_mainline_research
 from src.providers.sw_industry_history import fetch_sw_industry_history
 from src.model.live_decision_integration import (
     aggregate_archived_stock_turnover,
@@ -720,6 +721,17 @@ def main():
             sw_history, expected_symbols,
             as_of_date=now.astimezone(ZoneInfo("Asia/Shanghai")).date(),
         )
+        sw_stock_mainline, sw_stock_mainline_audit = build_sw_stock_mainline_research(
+            sw_research, runtime_mainline,
+            as_of_date=now.astimezone(ZoneInfo("Asia/Shanghai")).date(),
+        )
+        sw_stock_mainline.to_csv(
+            OUT/"sw_stock_mainline_research.csv", index=False, encoding="utf-8-sig"
+        )
+        (OUT/"sw_stock_mainline_research_audit.json").write_text(
+            json.dumps(sw_stock_mainline_audit, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
         sw_research.to_csv(
             OUT/"sw_industry_history_research.csv", index=False, encoding="utf-8-sig"
         )
@@ -742,6 +754,20 @@ def main():
             "historical_pit_eligible": False,
             "trading_authorization": False,
         }
+        sw_stock_mainline_audit = {
+            "status": "UNAVAILABLE",
+            "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
+            "historical_pit_eligible": False,
+            "trading_authorization": False,
+            "research_only": True,
+        }
+        pd.DataFrame().to_csv(
+            OUT/"sw_stock_mainline_research.csv", index=False, encoding="utf-8-sig"
+        )
+        (OUT/"sw_stock_mainline_research_audit.json").write_text(
+            json.dumps(sw_stock_mainline_audit, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     (OUT/"sw_industry_history_research_audit.json").write_text(
         json.dumps(sw_history_audit, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
@@ -921,6 +947,7 @@ def main():
       f"- M3仓位系数：{m3['position_scale'] if m3['position_scale'] is not None else '不可用'}；原因={m3['reason'] or '无'}",
       f"- 前瞻行业快照：{industry_audit.get('status')}；覆盖={industry_audit.get('selected_symbol_count', 0)}/{industry_audit.get('expected_universe_size', 0)}；仅作当日观察审计，不具备历史PIT资格",
       f"- 申万有效日期行业映射：{sw_history_audit.get('status')}；覆盖={sw_history_audit.get('matched_symbols', 0)}/{sw_history_audit.get('expected_symbols', 0)}；仅作研究展示，不参与评分或交易授权",
+      f"- 申万个股-行业主线研究映射：{sw_stock_mainline_audit.get('status')}；覆盖={sw_stock_mainline_audit.get('matched_symbols', 0)}/{sw_stock_mainline_audit.get('active_membership_symbols', 0)}；仅作研究展示，不具备历史PIT或交易授权",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
       f"- 四层决策门：{decision_gate_audit.get('status')}；检查记录={decision_gate_audit.get('candidate_count', 0)}；15分钟扫描={decision_gate_audit.get('minute_scanned_count', 0)}；准入={decision_gate_audit.get('allowed_count', 0)}；阻断={decision_gate_audit.get('blocked_count', 0)}",
       f"- 正式模型状态：{formal_status}",
@@ -957,6 +984,7 @@ def main():
       "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
       "runtime_mainline_audit":runtime_mainline_audit,
       "sw_industry_history_research_audit":sw_history_audit,
+      "sw_stock_mainline_research_audit":sw_stock_mainline_audit,
       "formal_status":formal_status,"formal_blockers":formal_blockers},ensure_ascii=False,indent=2),encoding="utf-8")
     print(report); print(status)
     if push_error is not None:
