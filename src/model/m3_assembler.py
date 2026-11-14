@@ -359,6 +359,17 @@ def assemble_market_emotion_history(
         )
         board_failure = pd.to_numeric(sentiment.get("board_failure_rate"), errors="coerce")
         promotion = pd.to_numeric(sentiment.get("promotion_rate"), errors="coerce")
+        highest_streak = pd.to_numeric(
+            sentiment.get("highest_observed_limit_up_streak"), errors="coerce"
+        )
+        strong_pool = pd.to_numeric(sentiment.get("strong_pool_count"), errors="coerce")
+        streak_observed = pd.to_numeric(
+            sentiment.get("limit_up_streak_observed_count"), errors="coerce"
+        )
+        streak_missing = pd.to_numeric(
+            sentiment.get("limit_up_streak_missing_count"), errors="coerce"
+        )
+        opened_rate = pd.to_numeric(sentiment.get("opened_rate"), errors="coerce")
         rows.append({
             "trade_date": pd.Timestamp(day),
             "breadth": float(breadth_ratio),
@@ -370,6 +381,22 @@ def assemble_market_emotion_history(
             "promotion_rate": (
                 float(promotion) if pd.notna(promotion) and 0 <= promotion <= 1 else np.nan
             ),
+            "highest_observed_limit_up_streak": (
+                float(highest_streak) if pd.notna(highest_streak) and highest_streak >= 0 else np.nan
+            ),
+            "strong_pool_count": (
+                float(strong_pool) if pd.notna(strong_pool) and strong_pool >= 0 else np.nan
+            ),
+            "limit_up_streak_observed_count": (
+                float(streak_observed) if pd.notna(streak_observed) and streak_observed >= 0 else np.nan
+            ),
+            "limit_up_streak_missing_count": (
+                float(streak_missing) if pd.notna(streak_missing) and streak_missing >= 0 else np.nan
+            ),
+            "opened_rate": (
+                float(opened_rate) if pd.notna(opened_rate) and 0 <= opened_rate <= 1 else np.nan
+            ),
+            "opened_rate_status": sentiment.get("opened_rate_status"),
             "total_amount": float(amount),
             "breadth_coverage": float(coverage),
             "available_time": max(breadth_available, sentiment_available),
