@@ -9,7 +9,7 @@ and M9 validation/monitoring.
 
 | Engine | Inputs | Output | Source contract |
 |---|---|---|---|
-| Policy catalyst | official policy/announcement records | visible event + industry mapping | published_at, available_at, source_url, source_id, event type, industry codes |
+| Policy catalyst | official policy/announcement records | visible event + industry mapping | published_at, available_at, source_url, source_id, event type, industry codes, impact_direction, confidence, confidence_basis |
 | Market emotion cycle | breadth, limit-up/down counts, optional board-failure and promotion rates | ICE / RECOVERY / HEAT / EXHAUSTION / TRANSITION | same-session market aggregates with capture and availability timestamps |
 | Mainline flows | daily industry return, market return, industry turnover and market turnover | IGNITION / PEAK / DECAY | industry daily series and contemporaneous industry taxonomy |
 
@@ -20,7 +20,7 @@ and M9 validation/monitoring.
 - Index daily bars: `data/forward_archive/index_daily/{index_symbol}.jsonl`.
 - Industry membership observations: `data/forward_archive/industry_membership/`; retrieval-time observations are forward-only.
 - Existing official SW2021 latest snapshot remains forward-only. It must not be backfilled across historical dates.
-- Policy event archive is a new required input; until source-backed event records are collected, the policy engine reports no visible events rather than synthesizing them.
+- Policy event archive is a new required input; each event also requires controlled impact_direction and a numeric confidence plus confidence_basis audit trail. Until source-backed event records are collected, the policy engine reports no visible events rather than synthesizing them.
 - Historical industry index/turnover series and historical constituent membership with original effective/publication timestamps are required for a valid historical mainline test.
 
 ## Time and quality gates
