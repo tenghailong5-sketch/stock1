@@ -56,9 +56,9 @@ def attach_startup_evidence(
     """Attach three separately auditable ignition components to industry rows.
 
     A startup is CONFIRMED only when an ICE-to-RECOVERY reversal, a visible
-    mapped policy catalyst, and rising industry turnover concentration all
-    coexist. If the policy corpus is not certified complete, absence of a
-    matched event remains UNKNOWN, never False.
+    positive mapped policy catalyst, and rising industry turnover concentration
+    all coexist. If the policy corpus is not certified complete, absence of a
+    matched positive event remains UNKNOWN, never False.
     """
     required_industry = {"trade_date", "industry_code", "turnover_share",
                          "turnover_share_change_3d", "strength_3d_percentile",
@@ -97,13 +97,15 @@ def attach_startup_evidence(
 
     events = policy_events.copy()
     events["available_at"] = pd.to_datetime(events.available_at, errors="coerce", utc=True)
+    if events.available_at.isna().any():
+        raise ValueError("policy available_at contains invalid timestamps")
+    if not events.impact_direction.isin({"positive", "negative", "mixed", "unclear"}).all():
+        raise ValueError("policy impact_direction uses an unknown value")
+    if events.industry_codes.map(lambda x: not isinstance(x, (list, tuple, set))).any():
+        raise ValueError("policy industry_codes must be explicit collections")
     # Only explicitly positive, source-backed policy events can support an
     # ignition. Mixed/negative/unclear events are not positive startup evidence.
     events = events[events.impact_direction.eq("positive")].copy()
-    if events.available_at.isna().any():
-        raise ValueError("policy available_at contains invalid timestamps")
-    if events.industry_codes.map(lambda x: not isinstance(x, (list, tuple, set))).any():
-        raise ValueError("policy industry_codes must be explicit collections")
     dates = sorted(out.trade_date.unique())
     date_position = {date: i for i, date in enumerate(dates)}
     matched = []
