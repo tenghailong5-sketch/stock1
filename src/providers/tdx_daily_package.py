@@ -113,7 +113,7 @@ def _parse_package(content: bytes, ymd: str, *, min_priced=None) -> list[dict]:
                 raise RuntimeError(
                     f"{market}{code} has inconsistent OHLC: "
                     f"prev_close={prev_close!r}, open={open_!r}, high={high!r}, "
-                    f"low={low!r}, close={close!r}, seq={seq}, "
+                    f"low={low!r}, close={close!r}, volume={volume!r}, amount={amount!r}, seq={seq}, "
                     f"cod_records={len(cod)//150}, md1_records={len(md1)//512}"
                 )
             raw_name = record[40:72].split(b"\x00")[0]
