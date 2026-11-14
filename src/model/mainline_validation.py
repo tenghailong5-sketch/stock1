@@ -197,6 +197,11 @@ def evaluate_frozen_chronological_holdout(
     labels are purged by the maximum forward horizon before the holdout begins.
     No parameters are selected or changed by this function.
     """
+    missing = REQUIRED - set(frame.columns)
+    if missing:
+        raise ValueError("missing validation fields: " + ",".join(sorted(missing)))
+    if not horizons or any(not isinstance(h, int) or h < 1 for h in horizons):
+        raise ValueError("horizons must contain positive integer trading-session counts")
     if not 0.5 <= train_fraction <= 0.8:
         raise ValueError("train_fraction must be within [0.5,0.8]")
     dates = sorted(pd.to_datetime(frame["trade_date"], errors="coerce").dropna().unique())
