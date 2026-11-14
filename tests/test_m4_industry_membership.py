@@ -1,7 +1,10 @@
 import pandas as pd
 import pytest
 
-from src.model.m4_industry_membership import (\n    aggregate_pit_industry_turnover,\n    select_pit_industry_membership,\n)
+from src.model.m4_industry_membership import (
+    aggregate_pit_industry_turnover,
+    select_pit_industry_membership,
+)
 
 
 DECISION = "2026-11-11T09:30:00+08:00"
