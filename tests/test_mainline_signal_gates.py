@@ -20,32 +20,36 @@ def test_emotion_audit_reports_missing_fields_without_zero_fill():
     assert audit["zero_filled"] == 0
 
 
-def test_positive_policy_match_is_known_but_absence_stays_unknown_in_incomplete_archive():
+def test_only_positive_policy_match_is_known_under_incomplete_archive():
     industry = pd.DataFrame({
-        "trade_date": ["2026-01-02", "2026-01-02"],
-        "industry_code": ["I1", "I2"],
-        "turnover_share": [0.12, 0.12],
-        "turnover_share_change_3d": [0.03, 0.03],
-        "strength_3d_percentile": [0.95, 0.95],
-        "relative_strength_change_2d": [0.02, 0.02],
+        "trade_date": ["2026-01-02", "2026-01-02", "2026-01-02"],
+        "industry_code": ["I1", "I2", "I3"],
+        "turnover_share": [0.12, 0.12, 0.12],
+        "turnover_share_change_3d": [0.03, 0.03, 0.03],
+        "strength_3d_percentile": [0.95, 0.95, 0.95],
+        "relative_strength_change_2d": [0.02, 0.02, 0.02],
     })
     emotion = pd.DataFrame({
         "trade_date": ["2026-01-01", "2026-01-02"],
         "market_cycle": ["ICE", "RECOVERY"],
     })
     policy = pd.DataFrame({
-        "available_at": ["2026-01-02T08:00:00Z"],
-        "industry_codes": [["I1"]],
+        "available_at": ["2026-01-02T08:00:00Z", "2026-01-02T08:00:00Z"],
+        "industry_codes": [["I1"], ["I2"]],
+        "impact_direction": ["positive", "mixed"],
     })
     partial = attach_startup_evidence(industry, emotion, policy)
     assert partial.policy_catalyst_component.iloc[0] == True
     assert pd.isna(partial.policy_catalyst_component.iloc[1])
-    assert partial.startup_evidence_status.tolist() == ["CONFIRMED", "UNKNOWN"]
+    assert pd.isna(partial.policy_catalyst_component.iloc[2])
+    assert partial.startup_evidence_status.tolist() == ["CONFIRMED", "UNKNOWN", "UNKNOWN"]
     complete = attach_startup_evidence(
         industry, emotion, policy, policy_archive_complete=True
     )
-    assert complete.policy_catalyst_component.tolist() == [True, False]
-    assert complete.startup_evidence_status.tolist() == ["CONFIRMED", "NOT_CONFIRMED"]
+    assert complete.policy_catalyst_component.tolist() == [True, False, False]
+    assert complete.startup_evidence_status.tolist() == [
+        "CONFIRMED", "NOT_CONFIRMED", "NOT_CONFIRMED"
+    ]
     assert not partial.startup_live_eligible.any()
 
 
