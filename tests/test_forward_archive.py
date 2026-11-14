@@ -1004,3 +1004,47 @@ def test_collector_adds_manual_evidence_to_multisource_archive_only(tmp_path):
     selected_rows = [json.loads(line) for line in selected_path.read_text(encoding="utf-8").splitlines()]
     assert all(row.get("source_id") != "sina.finance_f10_sw" for row in selected_rows)
     assert counts["industry_membership_sources"] == 7
+
+    
+def test_collector_archives_official_sw_valid_time_ledger_as_pit_ineligible(tmp_path):
+    captured = pd.Timestamp("2026-11-14T08:30:00Z")
+    def ledger_fetcher(*, clock=None):
+        return pd.DataFrame([{
+            "symbol": "000001",
+            "industry_code": "801010",
+            "valid_from": pd.Timestamp("2020-01-02"),
+            "source_update_date": "2020-01-03",
+            "available_time": captured,
+            "availability_basis": "retrieval_time_only",
+            "historical_pit_eligible": False,
+            "source_id": "swsresearch.sw2021_stock_classification",
+            "source_revision": "fixture-v1",
+        }])
+    counts = collect(
+        FakeArchiveAkshare(), tmp_path,
+        captured_at="2026-11-14T08:30:00Z",
+        sw_valid_time_ledger_fetcher=ledger_fetcher,
+    )
+    assert counts["shenwan_valid_time_ledger"] == 1
+    path = tmp_path / "industry_valid_time_ledger" / "swsresearch_sw2021.jsonl"
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["valid_from"].startswith("2020-01-02")
+    assert rows[0]["source_update_date"] == "2020-01-03"
+    assert rows[0]["availability_basis"] == "retrieval_time_only"
+    assert rows[0]["historical_pit_eligible"] is False
+
+
+def test_collector_rejects_sw_ledger_claiming_historical_pit_eligibility(tmp_path):
+    def ledger_fetcher(*, clock=None):
+        return pd.DataFrame([{
+            "symbol": "000001", "industry_code": "801010",
+            "valid_from": "2020-01-02", "available_time": "2026-11-14T08:30:00Z",
+            "availability_basis": "retrieval_time_only",
+            "historical_pit_eligible": True,
+        }])
+    with pytest.raises(ValueError, match="must remain PIT-ineligible"):
+        collect(
+            FakeArchiveAkshare(), tmp_path,
+            captured_at="2026-11-14T08:30:00Z",
+            sw_valid_time_ledger_fetcher=ledger_fetcher,
+        )

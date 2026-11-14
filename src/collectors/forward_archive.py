@@ -30,7 +30,10 @@ from src.providers.akshare_pit import (
 )
 from src.providers.kaipanhong_market import fetch_historical_market_context
 from src.providers.baostock_industry import fetch_baostock_industry_membership_snapshot
-from src.providers.sw_industry import fetch_sw_current_industry_membership_snapshot
+from src.providers.sw_industry import (
+    fetch_sw_current_industry_membership_snapshot,
+    fetch_sw_industry_valid_time_ledger,
+)
 from src.providers.sw_api_industry import fetch_sw_api_industry_membership_snapshot
 from src.providers.baidu_industry import fetch_baidu_industry_membership_snapshot
 from src.providers.cninfo_industry import fetch_cninfo_current_industry_membership_snapshot
@@ -239,7 +242,7 @@ def _tencent_breadth_frame(ak_module):
     return out
 
 
-def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None, baostock_module=None, sw_industry_fetcher=None, baidu_industry_fetcher=None, sw_api_industry_fetcher=None, cninfo_industry_fetcher=None) -> dict[str, int]:
+def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None, baostock_module=None, sw_industry_fetcher=None, sw_valid_time_ledger_fetcher=None, baidu_industry_fetcher=None, sw_api_industry_fetcher=None, cninfo_industry_fetcher=None) -> dict[str, int]:
     ak_module = _RetryingProvider(ak_module, sleep_fn=retry_sleep)
     captured = pd.Timestamp(
         captured_at if captured_at is not None else datetime.now(ZoneInfo("Asia/Shanghai"))
@@ -478,6 +481,36 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         sw_error = RuntimeError("Shenwan provider was not injected into this collector run")
 
 
+    # Preserve the official SW membership-change ledger separately from the
+    # current snapshot. Inclusion dates are valid-time evidence only; the
+    # workbook does not prove historical publication/availability timestamps.
+    sw_valid_time_records: list[dict] = []
+    sw_valid_time_error = None
+    if sw_valid_time_ledger_fetcher is not None:
+        try:
+            ledger = sw_valid_time_ledger_fetcher(clock=industry_clock)
+            if ledger is None or ledger.empty:
+                raise ValueError("Shenwan valid-time ledger returned an empty result")
+            required = {"symbol", "industry_code", "valid_from", "available_time",
+                        "availability_basis", "historical_pit_eligible"}
+            missing = required - set(ledger.columns)
+            if missing:
+                raise ValueError("Shenwan valid-time ledger missing columns: " + ",".join(sorted(missing)))
+            if ledger["symbol"].astype(str).str.fullmatch(r"\d{6}").eq(False).any():
+                raise ValueError("Shenwan valid-time ledger contains invalid symbols")
+            if ledger["historical_pit_eligible"].fillna(True).astype(bool).any():
+                raise ValueError("Shenwan valid-time ledger must remain PIT-ineligible")
+            sw_valid_time_records = _records(ledger)
+            source_status["shenwan_valid_time_ledger"] = (
+                f"ok: swsresearch.StockClassifyUse_stock; rows={len(sw_valid_time_records)}; PIT-ineligible"
+            )
+        except Exception as exc:
+            sw_valid_time_error = exc
+            source_status["shenwan_valid_time_ledger"] = (
+                f"unavailable: {type(exc).__name__}: {str(exc)[:240]}"
+            )
+            if not allow_partial:
+                raise
     # CNINFO CSRC classification is an independent per-security source.
     # Query only symbols still missing from the multi-source union to limit load.
     cninfo_coverage = None
@@ -773,6 +806,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             "market_sentiment": int(sentiment is not None),
             "market_breadth_history_backfill": len(historical_breadth_records),
             "market_sentiment_history_backfill": len(historical_sentiment_records),
+            **({"shenwan_valid_time_ledger": len(sw_valid_time_records)} if sw_valid_time_ledger_fetcher is not None else {}),
         }
 
     counts: dict[str, int] = {}
@@ -790,6 +824,12 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
         industry_records,
         ("snapshot_id", "symbol", "industry_code", "source_revision"),
     ) if industry_records else 0
+    if sw_valid_time_ledger_fetcher is not None:
+        counts["shenwan_valid_time_ledger"] = append_jsonl_atomic(
+            archive_root / "industry_valid_time_ledger" / "swsresearch_sw2021.jsonl",
+            sw_valid_time_records,
+            ("symbol", "industry_code", "valid_from", "source_update_date"),
+        ) if sw_valid_time_records else 0
     counts["industry_membership_sources"] = append_jsonl_atomic(
         archive_root / "industry_membership_sources" / f"{day}.jsonl",
         industry_source_records,
@@ -865,6 +905,8 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 "baostock_error": _error_detail(baostock_error),
                 "shenwan_coverage": sw_coverage,
                 "shenwan_error": _error_detail(sw_error),
+                "shenwan_valid_time_ledger_error": _error_detail(sw_valid_time_error),
+                "shenwan_valid_time_ledger_row_count": len(sw_valid_time_records) if sw_valid_time_ledger_fetcher is not None else None,
                 "shenwan_api_coverage": sw_api_coverage,
                 "shenwan_api_error": _error_detail(sw_api_error),
                 "shenwan_api_failed_industry_count": (
@@ -912,6 +954,7 @@ def main() -> None:
         historical_market_fetcher=fetch_historical_market_context,
         baostock_module=bs,
         sw_industry_fetcher=fetch_sw_current_industry_membership_snapshot,
+        sw_valid_time_ledger_fetcher=fetch_sw_industry_valid_time_ledger,
         sw_api_industry_fetcher=fetch_sw_api_industry_membership_snapshot,
         cninfo_industry_fetcher=fetch_cninfo_current_industry_membership_snapshot,
     )
