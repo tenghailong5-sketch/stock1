@@ -274,3 +274,44 @@ def test_sw_index_history_provider_accepts_direct_api_schema_without_optional_fi
     assert result["open"].isna().all()
     assert result["volume"].isna().all()
 
+
+
+def test_sw_direct_history_api_requests_correct_endpoint_and_normalizes_payload(monkeypatch):
+    captured = {}
+    class ApiResponse:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"data": [{
+                "swindexcode": "801010", "bargaindate": "2026-11-13",
+                "closeindex": 102.0, "openindex": 100.0, "maxindex": 103.0,
+                "minindex": 99.0, "bargainamount": 12.0, "bargainsum": 24.0,
+            }]}
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return ApiResponse()
+
+    monkeypatch.setattr(sw_industry.requests, "get", fake_get)
+    monkeypatch.setattr(sw_industry, "_trusted_intermediate_bundle", lambda: "/tmp/test-ca.pem")
+    result = sw_industry._fetch_sw_index_history_api("801010")
+    assert captured["url"] == "https://www.swsresearch.com/institute-sw/api/index_publish/trend/"
+    assert captured["params"] == {"swindexcode": "801010", "period": "DAY"}
+    assert captured["verify"] == "/tmp/test-ca.pem"
+    assert result.loc[0, "closeindex"] == 102.0
+    assert result.loc[0, "bargaindate"] == "2026-11-13"
+
+
+def test_sw_direct_history_api_rejects_invalid_response_envelope(monkeypatch):
+    class ApiResponse:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"unexpected": []}
+
+    monkeypatch.setattr(sw_industry.requests, "get", lambda *args, **kwargs: ApiResponse())
+    monkeypatch.setattr(sw_industry, "_trusted_intermediate_bundle", lambda: "/tmp/test-ca.pem")
+    with pytest.raises(ValueError, match="invalid data payload"):
+        sw_industry._fetch_sw_index_history_api("801010")
+
