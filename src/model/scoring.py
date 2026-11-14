@@ -161,6 +161,65 @@ def score_factor_bundle(frame, factor_map, *, date_col="trade_date"):
     return out
 
 
+
+def score_factor_bundle_audited(
+    frame,
+    factor_map,
+    universe_specs,
+    *,
+    date_col="trade_date",
+):
+    """Rank factors only when each date matches its declared peer universe.
+
+    factor_map uses the same output_name: (raw_column, higher_is_better)
+    contract as score_factor_bundle. universe_specs must provide scope_id and
+    expected_universe_size for every output factor, with optional min_coverage.
+    Incomplete or undersized universes keep ranks missing; the returned audit
+    explains why. Returns (ranked_frame, audit).
+    """
+    import pandas as pd
+    from .m4_percentile import audited_percentile_rank
+
+    if not isinstance(universe_specs, Mapping):
+        raise ValueError("universe_specs must be a mapping")
+    if set(universe_specs) != set(factor_map):
+        raise ValueError("universe_specs must match factor_map output names exactly")
+    out = frame.copy()
+    audits = []
+    for output_name, spec in factor_map.items():
+        if not isinstance(spec, tuple) or len(spec) != 2:
+            raise ValueError("invalid factor mapping for " + output_name)
+        raw_col, higher_is_better = spec
+        if not isinstance(raw_col, str) or not raw_col:
+            raise ValueError("raw factor column must be a non-empty string")
+        if not isinstance(higher_is_better, bool):
+            raise ValueError("higher_is_better must be an explicit boolean for " + output_name)
+        if raw_col not in out:
+            raise ValueError("missing raw factor column: " + raw_col)
+        universe = universe_specs[output_name]
+        if not isinstance(universe, Mapping):
+            raise ValueError("universe spec must be a mapping for " + output_name)
+        unknown = set(universe) - {"scope_id", "expected_universe_size", "min_coverage"}
+        if unknown:
+            raise ValueError("unknown universe spec keys for " + output_name + ": " + ",".join(sorted(unknown)))
+        if not {"scope_id", "expected_universe_size"}.issubset(universe):
+            raise ValueError("universe spec requires scope_id and expected_universe_size for " + output_name)
+        ranks, audit = audited_percentile_rank(
+            out,
+            raw_col,
+            scope_id=universe["scope_id"],
+            expected_universe_size=universe["expected_universe_size"],
+            date_col=date_col,
+            higher_is_better=higher_is_better,
+            min_coverage=universe.get("min_coverage", 0.95),
+        )
+        out[output_name] = ranks
+        audit.insert(1, "factor_name", output_name)
+        audits.append(audit)
+    combined = pd.concat(audits, ignore_index=True) if audits else pd.DataFrame()
+    return out, combined
+
+
 def qualify_candidate(result: StrategyResult, *, minimum_score: float = 80.0) -> StrategyResult:
     """Apply the mandatory FHM candidate floor after all strategy hard gates.
 
