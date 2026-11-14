@@ -64,3 +64,22 @@ def test_invalid_ohlc_is_rejected():
     raw.loc[4, "最高"] = 10.2
     with pytest.raises(ValueError, match="high is inconsistent"):
         normalize_15m_bars(raw, symbol="600000", captured_at="2026-11-13T03:20:00Z")
+
+def test_previous_session_breakout_cannot_authorize_current_session_entry():
+    bars = normalize_15m_bars(
+        sample(), symbol="600000", captured_at="2026-11-16T02:00:00Z"
+    )
+    result = confirm_15m_breakout(bars)
+    assert result["entry_ready"] is False
+    assert result["status"] == "STALE_15M_CONFIRMATION"
+    assert result["reason"] == "latest_15m_bar_not_fresh_for_current_session"
+
+
+def test_same_session_but_over_age_15m_bar_is_rejected():
+    bars = normalize_15m_bars(
+        sample(), symbol="600000", captured_at="2026-11-13T04:00:00Z"
+    )
+    result = confirm_15m_breakout(bars, max_bar_age_minutes=30)
+    assert result["entry_ready"] is False
+    assert result["status"] == "STALE_15M_CONFIRMATION"
+
