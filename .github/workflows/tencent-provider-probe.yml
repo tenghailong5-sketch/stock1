@@ -1,12 +1,7 @@
 name: Tencent Free Data Provider Qualification
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/probe_tencent_history.py"
-      - ".github/workflows/tencent-provider-probe.yml"
-      - "requirements.txt"
+
 permissions:
   contents: read
 concurrency:

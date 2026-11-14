@@ -1,17 +1,7 @@
 name: Resumable Delisted Security Discovery
 
 on:
-  schedule:
-    # Daily at 02:00 China time. Each run advances a bounded checkpoint.
-    - cron: "0 18 * * *"
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/delisted-discovery.yml"
-  pull_request:
-    paths:
-      - ".github/workflows/delisted-discovery.yml"
 
 permissions:
   contents: read
