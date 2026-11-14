@@ -129,6 +129,8 @@ def assemble_m3_history(
     merged["amount"] = np.nan
     merged["limit_up_cnt"] = np.nan
     merged["limit_down_cnt"] = np.nan
+    merged["board_failure_rate"] = np.nan
+    merged["promotion_rate"] = np.nan
     merged["snapshot_available_time"] = pd.Series(
         pd.NaT, index=merged.index, dtype="datetime64[ns, UTC]"
     )
@@ -173,6 +175,12 @@ def assemble_m3_history(
         merged.at[i, "amount"] = float(amount)
         merged.at[i, "limit_up_cnt"] = float(up)
         merged.at[i, "limit_down_cnt"] = float(down)
+        board_failure = pd.to_numeric(sentiment.get("board_failure_rate"), errors="coerce")
+        promotion = pd.to_numeric(sentiment.get("promotion_rate"), errors="coerce")
+        if pd.notna(board_failure) and 0 <= board_failure <= 1:
+            merged.at[i, "board_failure_rate"] = float(board_failure)
+        if pd.notna(promotion) and 0 <= promotion <= 1:
+            merged.at[i, "promotion_rate"] = float(promotion)
         merged.at[i, "snapshot_available_time"] = max(
             breadth_available_time, sentiment_available_time
         )
