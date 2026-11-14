@@ -218,20 +218,32 @@ def aggregate_pit_industry_turnover(
         audit["status"] = "incomplete_pit_membership"
         return pd.DataFrame(columns=["industry_code", "stock_count", "turnover"]), audit
 
-    joined = eligible[["symbol", "amount"]].merge(
-        selected_membership[["symbol", "industry_code"]],
-        on="symbol", how="left", validate="one_to_one",
+    joined = eligible[["symbol", "amount", "available_time"]].merge(
+        selected_membership[["symbol", "industry_code", "available_time"]],
+        on="symbol", how="left", validate="one_to_one", suffixes=("_bar", "_membership"),
     )
     if joined["industry_code"].isna().any():
         audit["status"] = "unmapped_pit_stock_bars"
         return pd.DataFrame(columns=["industry_code", "stock_count", "turnover"]), audit
 
+    joined["available_time"] = joined[
+        ["available_time_bar", "available_time_membership"]
+    ].max(axis=1)
     result = (
         joined.groupby("industry_code", as_index=False)
-        .agg(stock_count=("symbol", "nunique"), turnover=("amount", "sum"))
+        .agg(
+            stock_count=("symbol", "nunique"),
+            turnover=("amount", "sum"),
+            available_time=("available_time", "max"),
+        )
         .sort_values("industry_code")
         .reset_index(drop=True)
     )
+    result["trade_date"] = target_date
+    result["scope_id"] = scope_id
+    result["decision_time"] = cutoff.isoformat()
+    result["availability_basis"] = "source_published_at"
+    result["historical_pit_eligible"] = True
     audit["status"] = "ready"
     audit["historical_pit_eligible"] = True
     audit["industry_count"] = int(len(result))
