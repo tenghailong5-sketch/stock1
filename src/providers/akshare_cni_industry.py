@@ -14,7 +14,10 @@ import uuid
 import pandas as pd
 
 
-CNI_BROAD_A_SHARE_INDEX = "399317"\n\n\nREQUIRED_SOURCE_COLUMNS = {"日期", "样本代码", "所属行业"}
+CNI_BROAD_A_SHARE_INDEX = "399317"
+
+
+REQUIRED_SOURCE_COLUMNS = {"日期", "样本代码", "所属行业"}
 OUTPUT_COLUMNS = [
     "snapshot_id", "index_symbol", "symbol", "membership_date",
     "industry_scheme", "industry_code", "industry_name", "observed_at",
