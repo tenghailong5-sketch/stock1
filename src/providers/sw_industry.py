@@ -25,14 +25,14 @@ STOCK_URL = f"{BASE_URL}/StockClassifyUse_stock.xls"
 CODE_URL = f"{BASE_URL}/SwClassCode_2021.xls"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; FHM100/1.0)"}
 INTERMEDIATE_URL = (
-    "https://cacerts.digicert.com/"
-    "DigiCertBasicOVG2TLSCNRSA4096SHA2562022CA1.crt"
+    "https://cacerts.digicert.cn/"
+    "GeoTrustG2TLSCNRSA4096SHA2562022CA1.crt"
 )
-INTERMEDIATE_SHA1 = "60707270F2100EE2B771FEC9EFFAD8C9BFFE3358"
+INTERMEDIATE_SHA256 = "05DC9EDC0FDDF A975A1432EF806EC780078B5362AD45AF76DB15C907630DB25D".replace(" ", "")
 
 
 def _trusted_intermediate_bundle(*, timeout: int = 15) -> str:
-    """Append the pinned SW-host intermediate CA to certifi's normal trust roots."""
+    """Append the pinned GeoTrust intermediate CA to certifi's normal trust roots."""
     response = requests.get(INTERMEDIATE_URL, timeout=timeout)
     response.raise_for_status()
     payload = response.content
@@ -42,8 +42,8 @@ def _trusted_intermediate_bundle(*, timeout: int = 15) -> str:
     else:
         der = payload
         pem = ssl.DER_cert_to_PEM_cert(payload).encode("ascii")
-    fingerprint = hashlib.sha1(der).hexdigest().upper()
-    if fingerprint != INTERMEDIATE_SHA1:
+    fingerprint = hashlib.sha256(der).hexdigest().upper()
+    if fingerprint != INTERMEDIATE_SHA256:
         raise RuntimeError(
             "DigiCert intermediate certificate fingerprint mismatch: " + fingerprint
         )
@@ -71,8 +71,8 @@ def _download_xls(client, url: str, timeout: int) -> bytes:
     try:
         response = client.get(url, headers=HEADERS, timeout=timeout)
     except requests.exceptions.SSLError:
-        # The official SW host currently omits its intermediate CA in the
-        # default chain. Reuse a pinned DigiCert intermediate; never disable TLS.
+        # The official SW host omits its GeoTrust intermediate CA.
+        # Reuse the exact issuer pinned by SHA-256; never disable TLS.
         bundle = _trusted_intermediate_bundle(timeout=min(timeout, 15))
         response = client.get(
             url, headers=HEADERS, timeout=timeout, verify=bundle
