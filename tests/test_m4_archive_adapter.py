@@ -4,6 +4,7 @@ import pytest
 from src.model.m4_archive_adapter import (
     build_industry_index_returns,
     build_market_index_returns,
+    build_stock_daily_returns,
 )
 
 
@@ -63,3 +64,17 @@ def test_rejects_false_pit_claim_and_non_retrieval_availability():
     bars.loc[0, "availability_basis"] = "publication_time"
     with pytest.raises(ValueError, match="retrieval_time_only"):
         build_industry_index_returns(bars, decision_time="2026-11-15T00:00:00Z")
+
+
+
+def test_stock_adapter_emits_daily_and_rolling_returns_for_m4_residual_model():
+    bars = _bars("symbol", "000333")
+    result = build_stock_daily_returns(
+        bars, decision_time="2026-11-15T00:00:00Z"
+    )
+    assert len(result) == 6
+    assert result["symbol"].eq("000333").all()
+    assert {"daily_return", "return_5", "return_20", "available_time",
+            "source_id", "source_revision", "historical_pit_eligible"} <= set(result.columns)
+    assert result["daily_return"].notna().all()
+    assert result["historical_pit_eligible"].eq(False).all()

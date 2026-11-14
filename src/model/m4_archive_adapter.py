@@ -45,7 +45,7 @@ def _index_returns(
     x = x.loc[x["available_time"] <= cutoff.tz_convert("UTC")].copy()
     if x.empty:
         return pd.DataFrame(columns=[
-            "trade_date", identity_col, output_5, output_20, "available_time",
+            "trade_date", identity_col, "daily_return", output_5, output_20, "available_time",
             "source_id", "source_revision", "availability_basis",
             "historical_pit_eligible",
         ])
@@ -82,6 +82,7 @@ def _index_returns(
         if group["source_id"].nunique() != 1:
             raise ValueError("mixed source_id within an index series")
         g = group.reset_index(drop=True).copy()
+        g["daily_return"] = g["close"].pct_change(1)
         g[output_5] = g["close"].pct_change(5)
         g[output_20] = g["close"].pct_change(20)
         # The 20-session return depends on the full 21-bar path. Stamp the
@@ -101,7 +102,7 @@ def _index_returns(
         g["historical_pit_eligible"] = False
         g = g.loc[g[output_5].notna() & g[output_20].notna()].copy()
         results.append(g[[
-            "trade_date", identity_col, output_5, output_20, "available_time",
+            "trade_date", identity_col, "daily_return", output_5, output_20, "available_time",
             "source_id", "source_revision", "availability_basis",
             "historical_pit_eligible",
         ]])
@@ -110,10 +111,13 @@ def _index_returns(
 
 def build_industry_index_returns(index_bars: pd.DataFrame, *, decision_time) -> pd.DataFrame:
     """Build industry return_5/return_20 rows visible at a forward decision."""
-    return _index_returns(
+    out = _index_returns(
         index_bars, identity_col="industry_code", decision_time=decision_time,
         output_5="return_5", output_20="return_20",
     )
+    out["industry_return"] = out["daily_return"]
+    out["industry_return_5"] = out["return_5"]
+    return out
 
 
 def build_market_index_returns(index_bars: pd.DataFrame, *, decision_time) -> pd.DataFrame:
@@ -122,7 +126,16 @@ def build_market_index_returns(index_bars: pd.DataFrame, *, decision_time) -> pd
         raise ValueError("market index bars require index_symbol")
     if index_bars["index_symbol"].astype(str).nunique() != 1:
         raise ValueError("market return adapter requires exactly one benchmark index")
-    return _index_returns(
+    out = _index_returns(
         index_bars, identity_col="index_symbol", decision_time=decision_time,
         output_5="market_return_5", output_20="market_return_20",
+    )
+    return out.rename(columns={"daily_return": "market_return"})
+
+
+def build_stock_daily_returns(stock_bars: pd.DataFrame, *, decision_time) -> pd.DataFrame:
+    """Build stock daily/5d/20d returns from retrieval-time-only stock archives."""
+    return _index_returns(
+        stock_bars, identity_col="symbol", decision_time=decision_time,
+        output_5="return_5", output_20="return_20",
     )
