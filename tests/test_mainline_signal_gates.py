@@ -107,3 +107,18 @@ def test_ignition_candidate_is_not_confirmed_when_any_gate_is_unknown():
         "IGNITION_UNCONFIRMED", "IGNITION", "DECAY"
     ]
     assert not out.startup_live_eligible.any()
+
+
+def test_evidence_counts_preserves_unknown_values():
+    from scripts.audit_mainline_signal_gates import evidence_counts
+
+    values = pd.Series([True, False, pd.NA, True, pd.NA], dtype="boolean")
+    assert evidence_counts(values) == {"true": 2, "false": 1, "unknown": 2}
+
+
+def test_evidence_counts_handles_empty_series():
+    from scripts.audit_mainline_signal_gates import evidence_counts
+
+    assert evidence_counts(pd.Series([], dtype="boolean")) == {
+        "true": 0, "false": 0, "unknown": 0
+    }
