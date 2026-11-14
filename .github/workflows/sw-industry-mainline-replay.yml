@@ -7,9 +7,11 @@ on:
       - feat/policy-sentiment-mainline-architecture
     paths:
       - "scripts/replay_sw_mainlines.py"
+      - "tests/test_mainline_validation.py"
       - "src/providers/sw_industry.py"
       - "src/providers/sw_api_industry.py"
       - "src/model/mainline_flows.py"
+      - "src/model/mainline_validation.py"
       - "src/model/market_cycle.py"
       - "src/model/m3_assembler.py"
       - "src/model/policy_catalysts.py"
