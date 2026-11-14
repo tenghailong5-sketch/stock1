@@ -110,7 +110,12 @@ def _parse_package(content: bytes, ymd: str, *, min_priced=None) -> list[dict]:
             if min(prev_close, open_, high, low) < 0 or amount < 0 or volume < 0:
                 raise RuntimeError(f"{market}{code} contains negative price/volume/amount")
             if high < max(open_, low, close) or low > min(open_, high, close):
-                raise RuntimeError(f"{market}{code} has inconsistent OHLC")
+                raise RuntimeError(
+                    f"{market}{code} has inconsistent OHLC: "
+                    f"prev_close={prev_close!r}, open={open_!r}, high={high!r}, "
+                    f"low={low!r}, close={close!r}, seq={seq}, "
+                    f"cod_records={len(cod)//150}, md1_records={len(md1)//512}"
+                )
             raw_name = record[40:72].split(b"\x00")[0]
             try:
                 name = raw_name.decode("gbk").strip()
