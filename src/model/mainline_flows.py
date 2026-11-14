@@ -9,13 +9,21 @@ REQUIRED = {"trade_date", "industry_code", "industry_return_5d",
             "expected_industry_count"}
 
 
-def classify_mainlines(frame: pd.DataFrame) -> pd.DataFrame:
+def classify_mainlines(
+    frame: pd.DataFrame, *,
+    ignition_strength_min: float = 0.80,
+    ignition_turnover_min: float = 0.65,
+) -> pd.DataFrame:
     """Rank relative strength, turnover share expansion and breadth by date.
 
     Output lifecycle is a descriptive cross-sectional heuristic. It requires
     genuine daily industry observations; current membership snapshots alone
     are not historical constituents and cannot establish historical PIT.
     """
+    if not 0 <= ignition_strength_min <= 1:
+        raise ValueError("ignition_strength_min must be within [0,1]")
+    if not 0 <= ignition_turnover_min <= 1:
+        raise ValueError("ignition_turnover_min must be within [0,1]")
     missing = REQUIRED - set(frame.columns)
     if missing:
         raise ValueError("missing mainline fields: " + ",".join(sorted(missing)))
@@ -57,8 +65,8 @@ def classify_mainlines(frame: pd.DataFrame) -> pd.DataFrame:
     out["phase_transition"] = False
     out["phase_reason"] = "three_session_warmup"
     ignition_candidate = (
-        ready & (out.strength_percentile >= 0.8)
-        & (out.turnover_share_percentile >= 0.65)
+        ready & (out.strength_percentile >= ignition_strength_min)
+        & (out.turnover_share_percentile >= ignition_turnover_min)
         & (out.relative_strength_5d > 0)
         & (out.turnover_share_change_3d > 0)
         & (out.relative_strength_change_3d > 0)
