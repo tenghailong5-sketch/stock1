@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import pandas as pd
+import requests
 
 from src.model.mainline_flows import classify_mainlines
 from src.providers.sw_api_industry import (
@@ -16,7 +17,8 @@ from src.providers.sw_api_industry import (
 
 
 def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output")) -> dict:
-    groups = fetch_sw_api_first_level_index_list()
+    session = requests.Session()
+    groups = fetch_sw_api_first_level_index_list(session=session)
     expected = len(groups)
     if expected < 20:
         raise RuntimeError(f"SW first-level industry list unexpectedly small: {expected}")
@@ -26,7 +28,8 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         code, name = row.industry_code, row.industry_name
         try:
             frame = fetch_sw_api_industry_index_history(
-                code, start_date=start_date, end_date=end_date
+                code, start_date=start_date, end_date=end_date,
+                session=session,
             )
             frame["industry_name"] = str(name)
             frames.append(frame)
