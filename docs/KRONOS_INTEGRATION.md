@@ -18,6 +18,17 @@ The adapter:
 - Emits descriptive forecast-path returns/range/volatility/drawdown only.
 - Never manufactures a probability, M5 score, PIT eligibility flag or buy signal.
 
+## Bounded candidate-pool inference
+
+`src/model/kronos_batch.py` adapts the existing `fhm100.history()` daily-bar schema
+(`date`, `available_time`, OHLCV, amount) and runs one shared lazy-loaded predictor
+across a caller-supplied candidate pool. The default operational cap is 60 names;
+set a smaller cap when measuring CPU/memory. Bad symbols are isolated in the
+`errors` result while valid candidates continue. The caller must supply the
+candidate pool, frozen decision timestamp and verified future exchange sessions.
+This batch helper does not invoke the model for the full market and does not
+change FHM ranking or eligibility.
+
 ## Deliberately not wired into the live decision gates yet
 
 The current stock archive labels downloaded history as retrieval-time-only and
