@@ -1,0 +1,31 @@
+name: BaoStock Historical Industry Date Probe
+on:
+  pull_request:
+    paths:
+      - "src/providers/baostock_industry.py"
+      - "scripts/probe_baostock_industry_dates.py"
+      - ".github/workflows/baostock-industry-date-probe.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  historical-date-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install free provider dependencies
+        run: python -m pip install "baostock==0.8.9" "pandas>=2.2.0"
+      - name: Query four historical industry dates
+        run: python scripts/probe_baostock_industry_dates.py
+      - name: Upload dated provider evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baostock-industry-date-probe
+          path: baostock_industry_date_probe.json
+          if-no-files-found: warn
+          retention-days: 30
