@@ -377,7 +377,9 @@ def assemble_market_emotion_history(
             "sentiment_source_id": sentiment.get("source_id"),
             "historical_pit_eligible": False,
         })
-    history = pd.DataFrame(rows).sort_values("trade_date").reset_index(drop=True)
+    history = pd.DataFrame(rows)
+    if not history.empty:
+        history = history.sort_values("trade_date").reset_index(drop=True)
     status = "READY" if len(history) >= min_sessions else "INSUFFICIENT_DATA"
     return {
         "status": status,
