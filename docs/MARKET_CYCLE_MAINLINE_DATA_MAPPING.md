@@ -25,7 +25,8 @@ and M9 validation/monitoring.
 - `data/policy_catalysts/official_policy_events.jsonl` contains four official policy notices from the Ministry of Ecology and Environment, Ministry of Science and Technology, Ministry of Commerce, and National Data Administration. Sector mappings use the 31-code SW first-level index list retrieved from the official SW API.
 - Each policy event requires controlled impact_direction, mapping confidence, confidence_basis, and availability_basis. Date-only sources are conservatively made available at end of publication day; a ministry page with a later web timestamp is not exposed before that page timestamp.
 - These four records validate event visibility and sector mapping contracts; they are a seed set, not a complete historical policy corpus or evidence of predictive alpha.
-- `scripts/replay_sw_mainlines.py` performs a retrospective official-SW industry-index replay using complete first-level index coverage, 5-day relative strength, and industry turnover share. It fails closed if any current first-level industry index history is unavailable.
+- `scripts/replay_sw_mainlines.py` performs a retrospective official-SW industry-index replay using complete first-level index coverage, 5-day relative strength, and industry turnover share. The turnover-share denominator is the sum of the 31 SW first-level index amounts on that date, not a separately sourced exchange-wide turnover field. It fails closed if any current first-level industry index history is unavailable.
+- `src/model/mainline_validation.py` evaluates phase-transition events against subsequent 5/10/20-session industry excess returns. Forward returns are outcome labels only and are never inputs to phase detection or live scoring. This is retrospective outcome validation, not a PIT backtest.
 - Historical constituent membership with original effective/publication timestamps is still required before any PIT stock-level mainline backtest or formal signal.
 
 ## Time and quality gates
@@ -40,7 +41,8 @@ The current forward archive is not retroactively PIT eligible. All outputs in th
 2. Join policy catalysts to industries only after publication/availability checks.
 3. Run mainline classification on contemporaneous daily industry return and turnover share.
 4. Compare inferred IGNITION / PEAK / DECAY dates against manually documented historical episodes, using frozen rules and no future data.
-5. Report event precision/recall, lead/lag, and false alarms; split by bull, bear, and range regimes.
-6. Do not connect these descriptive labels to FHM candidate scores until out-of-sample tests pass.
+5. Evaluate transition dates against subsequent 5/10/20-session excess returns as an outcome-only check; separately report event precision/recall, lead/lag, and false alarms against an independently adjudicated episode set.
+6. Split results by bull, bear, and range regimes.
+7. Do not connect these descriptive labels to FHM candidate scores until out-of-sample tests pass.
 
 The mainline lifecycle uses two consecutive qualifying sessions to confirm each state transition; the transition is stamped on the confirmation session and never backdated. Ignition and peak also require above-median industry turnover-share rank. The replay emits phase segments and a policy-to-subsequent-ignition temporal alignment table. Alignment is descriptive coincidence only, not causality or predictive validation.
