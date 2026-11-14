@@ -151,3 +151,53 @@ def test_raw_market_emotion_assembler_preserves_full_archive_history():
     assert "strong_pool_count" in result["history"].columns
     assert result["history"].highest_observed_limit_up_streak.notna().sum() >= 60
     assert classified.historical_pit_eligible.eq(False).all()
+
+
+def test_emotion_assembler_merges_supplemental_fields_without_replacing_primary_counts(tmp_path):
+    import json
+    from src.model.m3_assembler import assemble_market_emotion_history
+
+    breadth_dir = tmp_path / "market_breadth"
+    sentiment_dir = tmp_path / "market_sentiment"
+    breadth_dir.mkdir()
+    sentiment_dir.mkdir()
+    (breadth_dir / "2026-01-05.jsonl").write_text(json.dumps({
+        "snapshot_time": "2026-01-05T08:00:00Z",
+        "available_time": "2026-01-05T08:00:00Z",
+        "breadth": 0.55, "breadth_coverage": 1.0,
+        "total_amount": 1000, "total_amount_status": "complete_provider_snapshot_sum",
+        "source_id": "primary.breadth",
+    }) + "\\n", encoding="utf-8")
+    rows = [
+        {
+            "trade_date": "2026-01-05",
+            "capture_time": "2026-01-05T08:00:00Z",
+            "available_time": "2026-01-05T08:00:00Z",
+            "limit_up_count": 10, "limit_down_count": 2,
+            "source_id": "kaipanhong.market_emotion_kph",
+        },
+        {
+            "trade_date": "2026-01-05",
+            "capture_time": "2026-01-05T09:00:00Z",
+            "available_time": "2026-01-05T09:00:00Z",
+            "limit_up_count": 12, "limit_down_count": 1,
+            "highest_observed_limit_up_streak": 4,
+            "strong_pool_count": 50,
+            "source_id": "secondary.limit_pool",
+        },
+    ]
+    (sentiment_dir / "2026-01-05.jsonl").write_text(
+        "".join(json.dumps(row) + "\\n" for row in rows), encoding="utf-8"
+    )
+    result = assemble_market_emotion_history(
+        tmp_path, decision_time="2026-01-05T18:00:00+08:00", min_sessions=1,
+    )
+    assert result["status"] == "READY", result
+    row = result["history"].iloc[0]
+    assert row.limit_up_count == 10
+    assert row.limit_down_count == 2
+    assert row.highest_observed_limit_up_streak == 4
+    assert row.strong_pool_count == 50
+    assert row.sentiment_source_id == "kaipanhong.market_emotion_kph"
+    assert row.sentiment_context_source_id == "secondary.limit_pool"
+    assert pd.Timestamp(row.available_time) == pd.Timestamp("2026-01-05T09:00:00Z")
