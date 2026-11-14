@@ -182,3 +182,31 @@ def test_capital_leadership_gate_matches_default_ignition_strength_threshold():
     assert out.capital_leadership_top_quintile.iloc[0]
     assert out.capital_concentration_component.iloc[0]
     assert out.startup_evidence_status.iloc[0] == "CONFIRMED"
+
+
+def test_ignition_gate_emits_delayed_confirmation_without_backdating():
+    frame = pd.DataFrame({
+        "trade_date": [
+            "2026-01-01", "2026-01-02", "2026-01-05",
+            "2026-01-06", "2026-01-07",
+        ],
+        "industry_code": ["I1"] * 5,
+        "mainline_phase": [
+            "TRANSITION", "IGNITION", "IGNITION", "IGNITION", "DECAY"
+        ],
+        "phase_transition": [False, True, False, False, True],
+        "startup_evidence_status": [
+            "UNKNOWN", "NOT_CONFIRMED", "NOT_CONFIRMED",
+            "CONFIRMED", "UNKNOWN",
+        ],
+    })
+    from src.model.mainline_signal_gates import gate_ignition_labels
+
+    out = gate_ignition_labels(frame)
+    assert out.mainline_phase_gated.tolist() == [
+        "TRANSITION", "IGNITION_UNCONFIRMED", "IGNITION_UNCONFIRMED",
+        "IGNITION", "DECAY",
+    ]
+    assert out.phase_transition_gated.tolist() == [False, False, False, True, True]
+    assert out.phase_gate_reason.iloc[3] == "ignition_confirmed_after_evidence_arrived"
+    assert not out.startup_live_eligible.any()
