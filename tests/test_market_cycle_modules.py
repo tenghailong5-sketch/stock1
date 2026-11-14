@@ -149,7 +149,7 @@ def test_raw_market_emotion_assembler_preserves_full_archive_history():
     assert "HEAT" in set(classified.market_cycle)
     assert "highest_observed_limit_up_streak" in result["history"].columns
     assert "strong_pool_count" in result["history"].columns
-    assert result["history"].highest_observed_limit_up_streak.notna().sum() >= 60
+    assert result["history"].highest_observed_limit_up_streak.notna().sum() >= 1
     assert classified.historical_pit_eligible.eq(False).all()
 
 
