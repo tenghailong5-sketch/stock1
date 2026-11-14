@@ -103,3 +103,26 @@ def test_mainline_rejects_incomplete_industry_cross_section():
     }])
     with pytest.raises(ValueError, match="peer universe"):
         classify_mainlines(frame)
+
+def test_official_policy_archive_obeys_publisher_availability_dates():
+    events = pd.read_json(
+        "data/policy_catalysts/official_policy_events.jsonl", lines=True
+    )
+    before_mofcom_page = visible_policy_events(
+        events, decision_time="2026-10-18T23:59:59+08:00"
+    )[0]
+    assert set(before_mofcom_page.event_id) == {
+        "cn_policy_ai_manufacturing_20260109",
+        "cn_policy_new_quality_productivity_20261014",
+    }
+    after_mofcom_page = visible_policy_events(
+        events, decision_time="2026-10-20T23:59:59+08:00"
+    )[0]
+    assert "cn_policy_technology_commerce_20261019" in set(after_mofcom_page.event_id)
+    assert "cn_policy_science_industry_integration_20261021" not in set(after_mofcom_page.event_id)
+    after_all = visible_policy_events(
+        events, decision_time="2026-10-22T23:59:59+08:00"
+    )[0]
+    assert len(after_all) == 4
+    assert after_all.confidence.between(0, 1).all()
+    assert after_all.industry_codes.map(lambda values: len(values) > 0).all()
