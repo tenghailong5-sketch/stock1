@@ -1,8 +1,10 @@
 name: Tencent Resumable Currently-Listed A-Share History Backfill
 
 on:
-  # Full-market historical backfill is intentionally manual-only.
-  # FHM-100 uses its own daily scan and forward-only archive workflows.
+  # Continue one bounded batch every four hours; checkpoint and release artifacts
+  # make each run resumable without committing the large market-data payload.
+  schedule:
+    - cron: '17 */4 * * *'
   workflow_dispatch:
     inputs:
       batch_size:
