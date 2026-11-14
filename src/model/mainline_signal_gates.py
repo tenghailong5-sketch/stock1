@@ -132,16 +132,27 @@ def attach_startup_evidence(
                "strength_3d_percentile", "relative_strength_change_2d"]
     for field in numeric:
         out[field] = pd.to_numeric(out[field], errors="coerce")
+    # Preserve each capital-flow condition separately so a failed composite
+    # gate can be diagnosed without relaxing the frozen confirmation rule.
+    capital_checks = {
+        "capital_turnover_share_positive": ("turnover_share", lambda x: x > 0),
+        "capital_turnover_share_increasing": ("turnover_share_change_3d", lambda x: x > 0),
+        "capital_leadership_top_quintile": ("strength_3d_percentile", lambda x: x >= 0.80),
+        "capital_relative_strength_accelerating": ("relative_strength_change_2d", lambda x: x > 0),
+    }
+    for output_field, (input_field, predicate) in capital_checks.items():
+        values = pd.Series(pd.NA, index=out.index, dtype="boolean")
+        known = out[input_field].notna()
+        values.loc[known] = predicate(out.loc[known, input_field])
+        out[output_field] = values
+
     flow_known = out[numeric].notna().all(axis=1)
     out["capital_concentration_component"] = pd.Series(
         pd.NA, index=out.index, dtype="boolean"
     )
-    out.loc[flow_known, "capital_concentration_component"] = (
-        (out.loc[flow_known, "turnover_share"] > 0)
-        & (out.loc[flow_known, "turnover_share_change_3d"] > 0)
-        & (out.loc[flow_known, "strength_3d_percentile"] >= 0.80)
-        & (out.loc[flow_known, "relative_strength_change_2d"] > 0)
-    )
+    out.loc[flow_known, "capital_concentration_component"] = out.loc[
+        flow_known, list(capital_checks)
+    ].all(axis=1)
     components = [
         "emotion_reversal_component", "policy_catalyst_component",
         "capital_concentration_component",
