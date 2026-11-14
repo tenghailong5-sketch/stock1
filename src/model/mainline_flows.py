@@ -26,8 +26,9 @@ def classify_mainlines(frame: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("mainline input contains missing required observations")
     if (out[["turnover", "market_turnover"]] < 0).any().any():
         raise ValueError("turnover cannot be negative")
-    if (out.expected_industry_count.isna().any()
-            or (pd.to_numeric(out.expected_industry_count, errors="coerce") <= 0).any():
+    if out.expected_industry_count.isna().any() or (
+        pd.to_numeric(out.expected_industry_count, errors="coerce") <= 0
+    ).any():
         raise ValueError("expected_industry_count must be positive")
     out["expected_industry_count"] = pd.to_numeric(
         out["expected_industry_count"], errors="raise"
