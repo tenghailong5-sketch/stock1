@@ -43,15 +43,15 @@ def classify_market_cycle(frame: pd.DataFrame) -> pd.DataFrame:
         promotion = getattr(row, "promotion_rate", float("nan"))
         if row.breadth <= 0.25 and row.limit_down_count >= row.limit_up_count:
             state, why = "ICE", "weak_breadth_and_limit_down_pressure"
-        elif (row.breadth_change_3d > 0.12 and row.limit_up_change_3d > 0
-              and row.limit_balance > 0):
-            state, why = "RECOVERY", "breadth_and_limit_up_rebound"
         elif ((pd.notna(board_fail) and board_fail >= 0.45)
               or (pd.notna(promotion) and promotion < 0.25)
               or (row.breadth < 0.45 and row.limit_down_count > row.limit_up_count)):
             state, why = "EXHAUSTION", "board_failure_or_promotion_collapse"
         elif row.breadth >= 0.68 and row.limit_up_count >= 30:
             state, why = "HEAT", "broad_strength_and_many_limit_ups"
+        elif (row.breadth_change_3d > 0.12 and row.limit_up_change_3d > 0
+              and row.limit_balance > 0):
+            state, why = "RECOVERY", "breadth_and_limit_up_rebound"
         else:
             state, why = "TRANSITION", "mixed_market_signals"
         states.append(state)
