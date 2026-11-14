@@ -1,11 +1,7 @@
 name: CNEquity Beijing Data Qualification
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/probe_cnequity_bj.py"
-      - ".github/workflows/cnequity-bj-probe.yml"
+
 permissions:
   contents: read
 concurrency:
