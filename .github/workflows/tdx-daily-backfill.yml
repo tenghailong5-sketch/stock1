@@ -43,7 +43,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run regression tests
-        run: pytest -q
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m pytest -q
       - name: Download and validate full-market daily package
         id: download
         run: python -m src.collectors.tdx_daily_backfill --date "${TRADE_DATE:-latest}" --output data/market_daily
