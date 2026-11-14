@@ -106,6 +106,23 @@ def confirm_15m_breakout(
         }
     capture_local = capture.tz_convert("Asia/Shanghai")
     bar_end_local = bar_end.tz_convert("Asia/Shanghai")
+    seconds_since_midnight = (
+        capture_local.hour * 3600
+        + capture_local.minute * 60
+        + capture_local.second
+    )
+    in_entry_session = (
+        9 * 3600 + 45 * 60 <= seconds_since_midnight <= 11 * 3600 + 30 * 60
+        or 13 * 3600 + 15 * 60 <= seconds_since_midnight <= 15 * 3600
+    )
+    if not in_entry_session:
+        return {
+            "status": "OUTSIDE_15M_ENTRY_WINDOW", "entry_ready": False,
+            "reason": "15m_entry_confirmation_requires_active_trading_session",
+            "completed_bars": int(len(x)),
+            "available_time": capture_local.isoformat(),
+            "historical_pit_eligible": False,
+        }
     bar_age_minutes = (
         capture_local - bar_end_local
     ).total_seconds() / 60.0
