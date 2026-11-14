@@ -25,3 +25,21 @@ jobs:
           pip install -r requirements.txt
       - name: Run test suite
         run: python -m pytest -q
+      - name: Live CNI 399317 endpoint smoke test
+        run: |
+          python - <<'PY'
+          from src.providers.akshare_cni_industry import fetch_cni_historical_industry
+          frame = fetch_cni_historical_industry()
+          print({
+              "index": "399317",
+              "rows": len(frame),
+              "unique_symbols": int(frame["symbol"].nunique()),
+              "snapshot_dates": int(frame["membership_date"].nunique()),
+              "first_snapshot": str(frame["membership_date"].min().date()),
+              "last_snapshot": str(frame["membership_date"].max().date()),
+              "industries": int(frame["industry_name"].nunique()),
+              "pit_eligible_rows": int(frame["historical_pit_eligible"].sum()),
+          })
+          assert not frame.empty
+          assert frame["historical_pit_eligible"].eq(False).all()
+          PY
