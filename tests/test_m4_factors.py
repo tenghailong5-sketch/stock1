@@ -478,3 +478,54 @@ def test_rank_factor_keeps_infinite_and_malformed_values_missing():
     assert ranked.iloc[0] == pytest.approx(50.0)
     assert ranked.iloc[1] == pytest.approx(100.0)
     assert ranked.iloc[2:].isna().all()
+
+
+def test_industry_relative_strength_returns_only_latest_decision_snapshot():
+    available = pd.Timestamp("2026-01-05T08:00:00Z")
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-02", "2026-01-05"],
+        "industry_code": ["I1", "I1"],
+        "return_5": [0.04, 0.06],
+        "return_20": [0.08, 0.12],
+        "available_time": [available, available],
+    })
+    market = pd.DataFrame({
+        "trade_date": ["2026-01-02", "2026-01-05"],
+        "market_return_5": [0.01, 0.02],
+        "market_return_20": [0.03, 0.04],
+        "available_time": [available, available],
+    })
+    result = industry_relative_strength(
+        with_lineage(industry), with_lineage(market),
+        decision_time="2026-01-05T09:00:00Z",
+    )
+    assert result["trade_date"].dt.strftime("%Y-%m-%d").tolist() == ["2026-01-05"]
+    assert result["industry_excess_5"].iloc[0] == pytest.approx(0.04)
+
+
+def test_residual_strength_returns_only_latest_decision_snapshot():
+    dates = pd.bdate_range("2026-01-01", periods=45)
+    available = pd.Timestamp("2026-03-10T10:00:00Z")
+    market_daily = np.sin(np.arange(len(dates)) * 0.3) * 0.001
+    industry_daily = np.cos(np.arange(len(dates)) * 0.5) * 0.001
+    stock_daily = 0.2 * market_daily + 0.8 * industry_daily + 0.0001
+    stocks = pd.DataFrame({
+        "symbol": ["000001"] * len(dates), "industry_code": ["I1"] * len(dates),
+        "trade_date": dates, "daily_return": stock_daily,
+        "return_5": [0.01] * len(dates), "available_time": [available] * len(dates),
+    })
+    market = pd.DataFrame({
+        "trade_date": dates, "market_return": market_daily,
+        "market_return_5": [0.002] * len(dates), "available_time": [available] * len(dates),
+    })
+    industry = pd.DataFrame({
+        "trade_date": dates, "industry_code": ["I1"] * len(dates),
+        "industry_return": industry_daily, "industry_return_5": [0.003] * len(dates),
+        "available_time": [available] * len(dates),
+    })
+    result = residual_strength(
+        with_lineage(stocks), with_lineage(market), with_lineage(industry),
+        window=60, min_periods=40, decision_time="2026-03-10T11:00:00Z",
+    )
+    assert len(result) == 1
+    assert pd.Timestamp(result["trade_date"].iloc[0]) == dates[-1]
