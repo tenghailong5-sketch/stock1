@@ -44,6 +44,60 @@ def test_parse_full_market_package_and_all_three_markets():
     assert all(row["amount"] == 1000000.0 for row in rows)
 
 
+def test_exchange_index_and_non_equity_symbols_are_excluded():
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w", zipfile.ZIP_DEFLATED) as archive:
+        for market, stock_code, non_equity_code in (
+            ("sh", "600000", "888880"),
+            ("sz", "000001", "399001"),
+            ("bj", "830001", "899999"),
+        ):
+            codes = bytearray()
+            quotes = bytearray()
+            for index, code in enumerate((stock_code, non_equity_code)):
+                record = bytearray(150)
+                record[:6] = code.encode("ascii")
+                struct.pack_into("<H", record, 32, index)
+                name = "测试".encode("gbk")
+                record[40:40 + len(name)] = name
+                codes.extend(record)
+                block = bytearray(512)
+                struct.pack_into("<d", block, 4, 9.5)
+                struct.pack_into("<4d", block, 12, 10.0, 11.0, 9.0, 10.5)
+                struct.pack_into("<Q", block, 56, 100000)
+                struct.pack_into("<d", block, 72, 1000000.0)
+                quotes.extend(block)
+            archive.writestr(f"{market}261113.cod", bytes(codes))
+            archive.writestr(f"{market}261113.md1", bytes(quotes))
+    rows = _parse_package(
+        data.getvalue(), "20261113",
+        min_priced={"sh": 1, "sz": 1, "bj": 1},
+    )
+    assert {(row["market"], row["symbol"]) for row in rows} == {
+        ("sh", "600000"), ("sz", "000001"), ("bj", "830001"),
+    }
+
+
+def test_index_rows_do_not_count_toward_minimum_equity_coverage():
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w", zipfile.ZIP_DEFLATED) as archive:
+        for market, code in (("sh", "888880"), ("sz", "399001"), ("bj", "899999")):
+            record = bytearray(150)
+            record[:6] = code.encode("ascii")
+            block = bytearray(512)
+            struct.pack_into("<d", block, 4, 9.5)
+            struct.pack_into("<4d", block, 12, 10.0, 11.0, 9.0, 10.5)
+            codes_name = f"{market}261113.cod"
+            md1_name = f"{market}261113.md1"
+            archive.writestr(codes_name, bytes(record))
+            archive.writestr(md1_name, bytes(block))
+    with pytest.raises(RuntimeError, match="priced rows 0 below minimum"):
+        _parse_package(
+            data.getvalue(), "20261113",
+            min_priced={"sh": 1, "sz": 1, "bj": 1},
+        )
+
+
 def test_normalization_marks_backfilled_history_not_pit_eligible():
     rows = _parse_package(
         _package(), "20261113", min_priced={"sh": 1, "sz": 1, "bj": 1}
