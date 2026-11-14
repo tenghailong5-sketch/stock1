@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from pathlib import Path
 
 import baostock as bs
@@ -10,18 +11,27 @@ import pandas as pd
 
 QUERY_DATES = ["2023-12-29", "2024-12-31", "2025-12-31", "2026-11-13"]
 records = []
-login = bs.login()
-if str(getattr(login, "error_code", "")) != "0":
-    raise RuntimeError(f"BaoStock login failed: {getattr(login, 'error_msg', '')}")
+
+def retry_call(label, call, attempts=3):
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            response = call()
+            if str(getattr(response, "error_code", "")) == "0":
+                return response
+            last_error = getattr(response, "error_msg", "unknown provider error")
+        except Exception as exc:  # network disconnects can raise from the socket layer
+            last_error = repr(exc)
+        if attempt < attempts:
+            print(f"{label}: attempt {attempt}/{attempts} failed ({last_error}); retrying")
+            time.sleep(10 * attempt)
+    raise RuntimeError(f"{label} failed after {attempts} attempts: {last_error}")
+
+login = retry_call("BaoStock login", bs.login)
 
 try:
     for query_date in QUERY_DATES:
-        result = bs.query_stock_industry(date=query_date)
-        if str(getattr(result, "error_code", "")) != "0":
-            raise RuntimeError(
-                f"{query_date}: query_stock_industry failed: "
-                f"{getattr(result, 'error_msg', '')}"
-            )
+        result = retry_call(f"{query_date} query_stock_industry", lambda: bs.query_stock_industry(date=query_date))
         rows = []
         while result.next():
             rows.append(result.get_row_data())
