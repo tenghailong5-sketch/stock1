@@ -89,6 +89,7 @@ def compare_ignition_thresholds(
     from src.model.mainline_flows import classify_mainlines
 
     required = REQUIRED | {
+        "industry_return_3d", "market_return_3d",
         "industry_return_5d", "market_return_5d", "turnover",
         "market_turnover", "expected_industry_count",
     }
