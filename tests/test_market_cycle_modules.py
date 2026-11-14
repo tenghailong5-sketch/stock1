@@ -26,12 +26,14 @@ def test_policy_events_exclude_not_yet_available_events():
         "event_id": "e1", "published_at": "2026-01-02T08:00:00Z",
         "available_at": "2026-01-02T08:01:00Z", "source_url": "https://gov.cn/x",
         "source_id": "gov.cn", "title": "policy", "catalyst_type": "industrial_policy",
-        "industry_codes": ["I01"],
+        "industry_codes": ["I01"], "impact_direction": "positive",
+        "confidence": 0.8, "confidence_basis": "formal_policy_text_and_explicit_industry_scope",
     }, {
         "event_id": "e2", "published_at": "2026-01-03T08:00:00Z",
         "available_at": "2026-01-03T08:01:00Z", "source_url": "https://gov.cn/y",
         "source_id": "gov.cn", "title": "future", "catalyst_type": "industrial_policy",
-        "industry_codes": ["I02"],
+        "industry_codes": ["I02"], "impact_direction": "positive",
+        "confidence": 0.7, "confidence_basis": "formal_policy_text_and_explicit_industry_scope",
     }])
     visible, audit = visible_policy_events(events, decision_time="2026-01-02T12:00:00Z")
     assert visible.event_id.tolist() == ["e1"]
