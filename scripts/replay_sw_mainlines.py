@@ -11,7 +11,9 @@ import pandas as pd
 import requests
 
 from src.model.mainline_flows import classify_mainlines
-from src.model.mainline_validation import (\n    evaluate_frozen_chronological_holdout, evaluate_mainline_transitions,\n)
+from src.model.mainline_validation import (
+    evaluate_frozen_chronological_holdout, evaluate_mainline_transitions,
+)
 from src.model.market_cycle import classify_market_cycle
 from src.model.m3_assembler import (
     assemble_m3_history, assemble_market_emotion_history,
