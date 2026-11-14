@@ -115,7 +115,7 @@ def test_blocks_ambiguous_multiple_industry_assignments_and_short_stock_history(
         )
 
     short_stocks = stocks.loc[stocks["symbol"] == "000001"].copy()
-    short_stocks = pd.concat([short_stocks, stocks.loc[stocks["symbol"] == "000002"].iloc[:20]])
+    short_stocks = pd.concat([short_stocks, stocks.loc[stocks["symbol"] == "000002"].iloc[:30]])
     with pytest.raises(ValueError, match="insufficient stock history"):
         build_forward_m4_inputs(
             short_stocks, market, industry, _membership(),
