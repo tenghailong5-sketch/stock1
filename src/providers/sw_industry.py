@@ -418,3 +418,73 @@ def fetch_sw_industry_unmapped_history_audit(
         "industry_level1_candidate", "industry_level2_candidate",
         "industry_level3_candidate", "mapping_precision", "mapping_status",
     ])
+
+
+
+def fetch_sw_industry_index_history(
+    symbol: str, *, clock=None, history_fetcher=None
+) -> pd.DataFrame:
+    """Fetch daily SW industry-index history with retrieval-time-only provenance.
+
+    Historical index dates are not treated as historical publication timestamps.
+    The result is suitable for coverage research and forward archiving, but must
+    not enter historical PIT scoring until source availability evidence exists.
+    """
+    code = str(symbol).strip()
+    if len(code) != 6 or not code.isdigit():
+        raise ValueError("SW industry index symbol must be a six-digit code")
+    now = clock or (lambda: datetime.now(timezone.utc))
+    if history_fetcher is None:
+        import akshare as ak
+        history_fetcher = ak.index_hist_sw
+    raw = history_fetcher(symbol=code, period="day")
+    if raw is None or raw.empty:
+        raise ValueError(f"SW industry index history is empty: {code}")
+
+    aliases = {
+        "日期": "trade_date", "date": "trade_date",
+        "收盘": "close", "closeindex": "close",
+        "开盘": "open", "openindex": "open",
+        "最高": "high", "maxindex": "high",
+        "最低": "low", "minindex": "low",
+        "成交量": "volume", "bargainamount": "volume",
+        "成交额": "amount", "bargainsum": "amount",
+    }
+    frame = raw.rename(columns={k: v for k, v in aliases.items() if k in raw.columns}).copy()
+    required = {"trade_date", "close"}
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError("SW industry index history missing columns: " + ",".join(sorted(missing)))
+    frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
+    frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
+    frame = frame.dropna(subset=["trade_date", "close"]).sort_values("trade_date")
+    if frame.empty or frame["trade_date"].duplicated().any():
+        raise ValueError("SW industry index history has no valid rows or duplicate dates")
+    if (frame["close"] <= 0).any():
+        raise ValueError("SW industry index history contains non-positive closes")
+    frame["daily_return"] = frame["close"].pct_change()
+    frame["return_5"] = frame["close"].div(frame["close"].shift(5)).sub(1)
+    frame["return_20"] = frame["close"].div(frame["close"].shift(20)).sub(1)
+    captured = pd.Timestamp(now())
+    if captured.tzinfo is None:
+        raise ValueError("SW industry index retrieval clock must be timezone-aware")
+    captured = captured.tz_convert("UTC")
+    frame["industry_code"] = code
+    frame["available_time"] = captured
+    frame["observed_at"] = captured
+    frame["availability_basis"] = "retrieval_time_only"
+    frame["historical_pit_eligible"] = False
+    frame["source_id"] = "swsresearch.index_publish.trend"
+    frame["source_revision"] = frame.apply(
+        lambda row: hashlib.sha256(
+            f"{code}|{row['trade_date']}|{row['close']}".encode("utf-8")
+        ).hexdigest(), axis=1
+    )
+    frame["snapshot_scope"] = "historical_index_series_retrieved_at_current_time"
+    return frame[[
+        "trade_date", "industry_code", "open", "high", "low", "close",
+        "volume", "amount", "daily_return", "return_5", "return_20",
+        "available_time", "observed_at", "availability_basis",
+        "historical_pit_eligible", "source_id", "source_revision",
+        "snapshot_scope",
+    ]].copy()
