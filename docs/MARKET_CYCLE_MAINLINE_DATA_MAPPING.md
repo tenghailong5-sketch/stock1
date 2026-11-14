@@ -17,7 +17,7 @@ and M9 validation/monitoring.
 
 - Market breadth and turnover: `data/forward_archive/market_breadth/{trade_date}.jsonl`.
 - Limit-pool counts: `data/forward_archive/market_sentiment/{trade_date}.jsonl`.
-- `assemble_market_emotion_history` reads these raw daily archives directly, with the same after-close, source-priority, availability-time, and coverage checks as M3. It does not inherit M3's MA60/volatility warm-up truncation.
+- `assemble_market_emotion_history` reads these raw daily archives directly, with the same after-close, source-priority, availability-time, and coverage checks as M3. It does not inherit M3's MA60/volatility warm-up truncation. It also preserves observed limit-up streak height and strong-pool counts for research. Board-failure and promotion rates remain unavailable in the current archive (zero valid observations); they are not inferred from a closing limit-up pool.
 - Index daily bars: `data/forward_archive/index_daily/{index_symbol}.jsonl`.
 - Industry membership observations: `data/forward_archive/industry_membership/`; retrieval-time observations are forward-only.
 - Existing official SW2021 latest membership snapshot remains forward-only. It must not be backfilled across historical dates.
@@ -26,7 +26,7 @@ and M9 validation/monitoring.
 - Each policy event requires controlled impact_direction, mapping confidence, confidence_basis, and availability_basis. Date-only sources are conservatively made available at end of publication day; a ministry page with a later web timestamp is not exposed before that page timestamp.
 - These four records validate event visibility and sector mapping contracts; they are a seed set, not a complete historical policy corpus or evidence of predictive alpha.
 - `scripts/replay_sw_mainlines.py` performs a retrospective official-SW industry-index replay using complete first-level index coverage, 5-day relative strength, and industry turnover share. The turnover-share denominator is the sum of the 31 SW first-level index amounts on that date, not a separately sourced exchange-wide turnover field. It fails closed if any current first-level industry index history is unavailable.
-- `src/model/mainline_validation.py` evaluates phase-transition events against subsequent 5/10/20-session industry excess returns. Forward returns are outcome labels only and are never inputs to phase detection or live scoring. This is retrospective outcome validation, not a PIT backtest.
+- `src/model/mainline_validation.py` evaluates phase-transition events against subsequent 5/10/20-session industry excess returns and compares ignition-threshold candidates with a chronological 60/40 train/test split. Forward returns are outcome labels only and are never inputs to phase detection or live scoring. This is retrospective outcome validation, not a PIT backtest.
 - Historical constituent membership with original effective/publication timestamps is still required before any PIT stock-level mainline backtest or formal signal.
 
 ## Time and quality gates
