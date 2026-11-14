@@ -556,21 +556,120 @@ def audit_forward_industry_membership(archive_root, expected_symbols, *, decisio
     return selected, audit
 
 
-def build_m5_diagnostic_input(watchlist, market_context):
-    """Pass only independently READY M3 market-environment scores into M5.
+def build_m5_diagnostic_input(watchlist, market_context, mainline=None):
+    """Map only observed live factors into M5; leave unverified factors/gates missing.
 
-    This supplies one defined A/C factor; it does not make either strategy
-    scoreable because all other weighted factors and hard gates remain required.
+    Industry strength comes from the current effective-date SW research overlay
+    and the runtime industry panel. It is retrieval-time research context, not
+    historical PIT evidence. Same-session CLV and 20-day traded value are ranked
+    only within the current bounded research pool. No cross-session price,
+    residual-strength, event, or risk factor is inferred from raw OHLC.
     """
     state = market_context.get("market_state")
     environment = market_context.get("market_environment_score")
+    if watchlist is None or watchlist.empty:
+        return pd.DataFrame(columns=["symbol", "market_state"])
+
+    base = watchlist.copy()
+    symbol_col = "symbol" if "symbol" in base else "代码"
+    if symbol_col not in base:
+        raise ValueError("watchlist requires symbol or 代码")
+    base["symbol"] = base[symbol_col].astype(str).str.strip().str.zfill(6)
+
+    def _cross_section_percentile(column):
+        if column not in base:
+            return pd.Series(np.nan, index=base.index, dtype=float)
+        values = pd.to_numeric(base[column], errors="coerce")
+        valid = values.notna()
+        result = pd.Series(np.nan, index=base.index, dtype=float)
+        if valid.any():
+            result.loc[valid] = values.loc[valid].rank(method="average", pct=True) * 100.0
+        return result
+
+    # Only current effective-date SW mapping is used for descriptive industry
+    # strength. The source is explicitly retrieval-time-only in its audit.
+    industry_strength = pd.Series(np.nan, index=base.index, dtype=float)
+    industry_code_col = "sw_history_industry_code"
+    if industry_code_col in base and mainline is not None and not mainline.empty:
+        required = {"industry_code", "trade_date", "strength_percentile"}
+        if required.issubset(mainline.columns):
+            panel = mainline.copy()
+            panel["industry_code"] = panel["industry_code"].astype(str).str.strip()
+            panel["trade_date"] = pd.to_datetime(panel["trade_date"], errors="coerce")
+            panel["strength_percentile"] = pd.to_numeric(
+                panel["strength_percentile"], errors="coerce"
+            )
+            panel = panel.dropna(subset=["trade_date"])
+            if not panel.empty:
+                latest_date = panel["trade_date"].max()
+                latest = panel.loc[panel["trade_date"].eq(latest_date)]
+                # Ambiguous duplicate industry rows are not resolved by row order.
+                counts = latest.groupby("industry_code").size()
+                unique_codes = counts[counts.eq(1)].index
+                lookup = (
+                    latest.loc[latest.industry_code.isin(unique_codes)]
+                    .set_index("industry_code")["strength_percentile"]
+                    .to_dict()
+                )
+                mapped_codes = base[industry_code_col].astype(str).str.strip()
+                industry_strength = mapped_codes.map(lookup) * 100.0
+                industry_strength = industry_strength.where(
+                    industry_strength.between(0.0, 100.0)
+                )
+
+    structure_rank = _cross_section_percentile("CLV")
+    trade_quality_rank = _cross_section_percentile("20日平均成交额")
+    amount_ma20 = pd.to_numeric(
+        base.get("20日平均成交额", pd.Series(np.nan, index=base.index)),
+        errors="coerce",
+    )
     rows = []
-    for code in watchlist["代码"]:
-        row = {"symbol": str(code), "market_state": state}
+    for idx, stock in base.iterrows():
+        industry_value = industry_strength.loc[idx]
+        row = {
+            "symbol": stock["symbol"],
+            "market_state": state,
+            # A/C factors that have an explicit live observation and a declared
+            # bounded-universe ranking basis.
+            "industry_relative_strength": industry_value,
+            "industry_strength": industry_value,
+            "price_structure": structure_rank.loc[idx],
+            "trade_quality": trade_quality_rank.loc[idx],
+            # A/B/C factors not supported by this run's PIT data remain absent.
+            "industry_top_30pct": (
+                bool(industry_value >= 70.0) if pd.notna(industry_value) else None
+            ),
+            "stock_residual_top_20pct": None,
+            "amount_ma20_ge_100m": (
+                bool(amount_ma20.loc[idx] >= MIN_AMOUNT)
+                if pd.notna(amount_ma20.loc[idx]) else None
+            ),
+            "breakout_or_confirmed_retest": None,
+            "no_high_volume_stall_or_repeated_rejection": None,
+            "pre_pullback_residual_positive": None,
+            "pullback_between_0_5_and_4pct": None,
+            "pullback_volume_le_80pct_prior5d": None,
+            "stop_or_reversal_confirmed": None,
+            "industry_not_weak": (
+                bool(industry_value >= 30.0) if pd.notna(industry_value) else None
+            ),
+            "no_material_negative_event": None,
+            "liquidity_and_risk_pass": None,
+            "m5_factor_scope": "bounded_live_research_pool_percentile",
+            "industry_factor_provenance": (
+                "retrieval_time_only_sw_overlay" if pd.notna(industry_value)
+                else "missing_or_ambiguous_industry_mapping"
+            ),
+        }
         if environment is not None:
-            row["market_environment"] = environment
+            try:
+                score = float(environment)
+                if np.isfinite(score) and 0.0 <= score <= 100.0:
+                    row["market_environment"] = score
+            except (TypeError, ValueError, OverflowError):
+                pass
         rows.append(row)
-    return pd.DataFrame(rows, columns=None)
+    return pd.DataFrame(rows)
 
 
 def empty_scan_result(error):
@@ -826,7 +925,7 @@ def main():
                     ascending=[False,False,False,False,False])
     # M5 remains diagnostic-only. A/C receive the defined M3 market factor
     # only when M3 is independently READY; all other factors and gates remain fail-closed.
-    m5_input = build_m5_diagnostic_input(w, m3)
+    m5_input = build_m5_diagnostic_input(w, m3, runtime_mainline)
     m5 = evaluate_candidates(m5_input, stage="close") if not m5_input.empty else pd.DataFrame(
         columns=["symbol","strategy","stage","score","eligible","candidate_band","minimum_score","reasons"])
     m5.to_csv(OUT/"m5_diagnostics.csv",index=False,encoding="utf-8-sig")
