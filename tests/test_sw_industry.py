@@ -232,3 +232,86 @@ def test_sw_history_ledger_preserves_codes_outside_sw2021_dictionary(monkeypatch
     assert legacy["valid_to"] == current["valid_from"]
     assert current["industry_codebook_status"] == "sw2021_dictionary_match"
     assert result["historical_pit_eligible"].eq(False).all()
+
+def test_sw_index_history_provider_uses_direct_api_when_akshare_adapter_schema_breaks(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    captured = pd.Timestamp("2026-11-14T08:00:00Z")
+    raw = pd.DataFrame([
+        {"swindexcode": "801010", "bargaindate": "2026-11-12",
+         "closeindex": 100.0, "openindex": 98.0, "maxindex": 101.0,
+         "minindex": 97.0, "bargainamount": 10.0, "bargainsum": 20.0},
+        {"swindexcode": "801010", "bargaindate": "2026-11-13",
+         "closeindex": 102.0, "openindex": 100.0, "maxindex": 103.0,
+         "minindex": 99.0, "bargainamount": 12.0, "bargainsum": 24.0},
+    ])
+    fake_ak = SimpleNamespace(
+        index_hist_sw=lambda **kwargs: (_ for _ in ()).throw(KeyError("legacy columns missing"))
+    )
+    monkeypatch.setitem(sys.modules, "akshare", fake_ak)
+    monkeypatch.setattr(sw_industry, "_fetch_sw_index_history_api", lambda symbol: raw.copy())
+    result = sw_industry.fetch_sw_industry_index_history(
+        "801010", clock=lambda: captured
+    )
+    assert result["industry_code"].eq("801010").all()
+    assert result["close"].tolist() == [100.0, 102.0]
+    assert result["availability_basis"].eq("retrieval_time_only").all()
+    assert result["historical_pit_eligible"].eq(False).all()
+    assert result["available_time"].eq(captured).all()
+
+
+def test_sw_index_history_provider_accepts_direct_api_schema_without_optional_fields():
+    captured = pd.Timestamp("2026-11-14T08:00:00Z")
+    raw = pd.DataFrame([
+        {"bargaindate": "2026-11-12", "closeindex": 100.0},
+        {"bargaindate": "2026-11-13", "closeindex": 102.0},
+    ])
+    result = sw_industry.fetch_sw_industry_index_history(
+        "801010", clock=lambda: captured, history_fetcher=lambda **kwargs: raw.copy()
+    )
+    assert result["close"].tolist() == [100.0, 102.0]
+    assert result["open"].isna().all()
+    assert result["volume"].isna().all()
+
+
+
+def test_sw_direct_history_api_requests_correct_endpoint_and_normalizes_payload(monkeypatch):
+    captured = {}
+    class ApiResponse:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"data": [{
+                "swindexcode": "801010", "bargaindate": "2026-11-13",
+                "closeindex": 102.0, "openindex": 100.0, "maxindex": 103.0,
+                "minindex": 99.0, "bargainamount": 12.0, "bargainsum": 24.0,
+            }]}
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return ApiResponse()
+
+    monkeypatch.setattr(sw_industry.requests, "get", fake_get)
+    monkeypatch.setattr(sw_industry, "_trusted_intermediate_bundle", lambda: "/tmp/test-ca.pem")
+    result = sw_industry._fetch_sw_index_history_api("801010")
+    assert captured["url"] == "https://www.swsresearch.com/institute-sw/api/index_publish/trend/"
+    assert captured["params"] == {"swindexcode": "801010", "period": "DAY"}
+    assert captured["verify"] == "/tmp/test-ca.pem"
+    assert result.loc[0, "closeindex"] == 102.0
+    assert result.loc[0, "bargaindate"] == "2026-11-13"
+
+
+def test_sw_direct_history_api_rejects_invalid_response_envelope(monkeypatch):
+    class ApiResponse:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"unexpected": []}
+
+    monkeypatch.setattr(sw_industry.requests, "get", lambda *args, **kwargs: ApiResponse())
+    monkeypatch.setattr(sw_industry, "_trusted_intermediate_bundle", lambda: "/tmp/test-ca.pem")
+    with pytest.raises(ValueError, match="invalid data payload"):
+        sw_industry._fetch_sw_index_history_api("801010")
+
