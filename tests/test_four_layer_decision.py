@@ -96,13 +96,13 @@ def test_neutral_market_scales_risk_budget_without_changing_hard_caps():
 def test_second_position_respects_aggregate_3000_and_correlation_budget():
     result = valid_trade(
         existing_position_count=1, existing_portfolio_risk=2000.0,
-        planned_risk=900.0, same_industry_or_corr_gt_06=False,
+        quantity=500, planned_risk=900.0, same_industry_or_corr_gt_06=False,
     )
     assert result.allowed
     assert result.max_allowed_risk == 1000.0
     correlated = valid_trade(
         existing_position_count=1, existing_portfolio_risk=2000.0,
-        planned_risk=600.0, same_industry_or_corr_gt_06=True,
+        quantity=500, planned_risk=600.0, same_industry_or_corr_gt_06=True,
     )
     assert not correlated.allowed
     assert correlated.max_allowed_risk == 500.0
