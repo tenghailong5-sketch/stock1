@@ -67,3 +67,34 @@ def test_ignition_threshold_grid_uses_chronological_holdout():
     assert results.split_date.nunique() == 1
     assert summary["test_set_used_for_selection"] is False
     assert summary["historical_pit_eligible"] is False
+
+
+
+def test_frozen_chronological_holdout_uses_later_dates_without_tuning():
+    from src.model.mainline_validation import evaluate_frozen_chronological_holdout
+
+    rows = []
+    dates = pd.date_range("2026-01-01", periods=60)
+    for code in ("I1", "I2"):
+        for i, day in enumerate(dates):
+            transition = i in (3, 45)
+            rows.append({
+                "trade_date": day,
+                "industry_code": code,
+                "mainline_phase": "IGNITION" if transition else "TRANSITION",
+                "phase_transition": transition,
+                "industry_close": 100 + i * (1 if code == "I1" else -0.2),
+                "market_close": 100 + i * 0.1,
+            })
+    events, summary = evaluate_frozen_chronological_holdout(
+        pd.DataFrame(rows), horizons=(5, 10), train_fraction=0.6
+    )
+    assert summary["split_date"] == dates[36].date().isoformat()
+    assert summary["train_label_end"] == dates[24].date().isoformat()
+    assert set(events.validation_partition) == {"TRAIN", "HOLDOUT"}
+    assert events.loc[events.validation_partition.eq("TRAIN"), "trade_date"].max() <= pd.Timestamp(summary["train_label_end"])
+    assert events.loc[events.validation_partition.eq("HOLDOUT"), "trade_date"].min() >= pd.Timestamp(summary["split_date"])
+    assert summary["classifier_frozen"] is True
+    assert summary["threshold_search_used"] is False
+    assert summary["holdout_used_for_selection"] is False
+    assert summary["historical_pit_eligible"] is False
