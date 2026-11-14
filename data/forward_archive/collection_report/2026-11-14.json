@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-14T09:41:10.898064+00:00",
+  "captured_at": "2026-11-14T13:20:10.092510+00:00",
   "source_status": {
     "index_000001": "ok: tencent.stock_zh_index_daily_tx; rows=123",
     "index_399001": "ok: tencent.stock_zh_index_daily_tx; rows=123",
@@ -417,7 +417,7 @@
     "shenwan_valid_time_ledger": 0,
     "industry_membership_sources": 19263,
     "market_breadth": 1,
-    "limit_pools": 0,
+    "limit_pools": 1,
     "market_sentiment": 1,
     "market_breadth_history_backfill": 0,
     "market_sentiment_history_backfill": 0
