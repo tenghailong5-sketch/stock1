@@ -52,6 +52,7 @@ def test_mainline_detects_ignition_peak_and_decay():
             share = [0.02, 0.03, 0.04, 0.08, 0.09, 0.09, 0.08, 0.07, 0.06, 0.02, 0.01][i] if j == 0 else 0.02
             rows.append({
                 "trade_date": day, "industry_code": f"I{j}",
+                "industry_return_3d": strength, "market_return_3d": 0,
                 "industry_return_5d": strength, "market_return_5d": 0,
                 "turnover": share * 1000, "market_turnover": 1000,
                 "expected_industry_count": 5,
@@ -68,6 +69,7 @@ def test_mainline_detects_ignition_peak_and_decay():
 def test_mainline_rejects_missing_values():
     frame = pd.DataFrame([{
         "trade_date": "2026-01-01", "industry_code": "I1",
+        "industry_return_3d": None, "market_return_3d": 0,
         "industry_return_5d": None, "market_return_5d": 0,
         "turnover": 1, "market_turnover": 10, "expected_industry_count": 1,
     }])
@@ -97,6 +99,7 @@ def test_real_m3_archive_replays_market_emotion_history():
 def test_mainline_rejects_incomplete_industry_cross_section():
     frame = pd.DataFrame([{
         "trade_date": "2026-01-01", "industry_code": "I1",
+        "industry_return_3d": 1, "market_return_3d": 0,
         "industry_return_5d": 1, "market_return_5d": 0,
         "turnover": 100, "market_turnover": 1000,
         "expected_industry_count": 5,
