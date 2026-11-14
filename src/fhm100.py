@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json, os, traceback, time, uuid, hashlib
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import akshare as ak
 import numpy as np
@@ -780,7 +781,7 @@ def main():
             if "trade_date" not in calendar.columns:
                 raise ValueError("official trading calendar missing trade_date")
             sessions = pd.to_datetime(calendar["trade_date"], errors="coerce").dropna().sort_values()
-            decision_market_date = now.astimezone(timezone.utc).astimezone(__import__('zoneinfo').ZoneInfo('Asia/Shanghai')).date()
+            decision_market_date = now.astimezone(ZoneInfo('Asia/Shanghai')).date()
             future_sessions = sessions[sessions.dt.date > decision_market_date].head(5)
             if len(future_sessions) < 5:
                 raise ValueError("official calendar has fewer than five future sessions")
