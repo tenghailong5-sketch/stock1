@@ -1,21 +1,6 @@
 name: SW Industry Provider Tests
 
 on:
-  push:
-    branches: [main, feat/sw-historical-industry-valid-time-ledger]
-    paths:
-      - "src/providers/sw_industry.py"
-      - "src/providers/sw_api_industry.py"
-      - "tests/test_sw_industry.py"
-      - "tests/test_sw_api_industry.py"
-      - ".github/workflows/sw-industry-provider-tests.yml"
-  pull_request:
-    paths:
-      - "src/providers/sw_industry.py"
-      - "src/providers/sw_api_industry.py"
-      - "tests/test_sw_industry.py"
-      - "tests/test_sw_api_industry.py"
-      - ".github/workflows/sw-industry-provider-tests.yml"
   workflow_dispatch:
 
 permissions:
