@@ -301,7 +301,7 @@ def fetch_sw_industry_valid_time_ledger(
 
 
 def fetch_sw_industry_unmapped_history_audit(
-    *, session=None, timeout: int = 60
+    *, session=None, timeout: int = 60, current_symbols=None
 ) -> pd.DataFrame:
     """Audit valid historical stock rows whose industry codes are absent from SW2021.
 
@@ -354,11 +354,20 @@ def fetch_sw_industry_unmapped_history_audit(
             "industry_code": code,
             "row_count": item["row_count"],
             "symbol_count": len(item["symbols"]),
+            "current_member_symbol_count": (
+                len(item["symbols"] & set(current_symbols))
+                if current_symbols is not None else pd.NA
+            ),
+            "not_current_member_symbol_count": (
+                len(item["symbols"] - set(current_symbols))
+                if current_symbols is not None else pd.NA
+            ),
             "valid_from_min": item["valid_from_min"],
             "valid_from_max": item["valid_from_max"],
             "mapping_status": "unmapped_outside_sw2021_dictionary",
         })
     return pd.DataFrame(result, columns=[
-        "industry_code", "row_count", "symbol_count", "valid_from_min",
-        "valid_from_max", "mapping_status",
+        "industry_code", "row_count", "symbol_count",
+        "current_member_symbol_count", "not_current_member_symbol_count",
+        "valid_from_min", "valid_from_max", "mapping_status",
     ])
