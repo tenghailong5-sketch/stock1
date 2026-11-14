@@ -236,7 +236,10 @@ def fetch_sw_industry_valid_time_ledger(
     for row in rows:
         symbol = _text(row[symbol_idx])
         industry_code = _text(row[industry_idx]).zfill(6)
-        if len(symbol) != 6 or not symbol.isdigit() or industry_code not in code_map:
+        if (
+            len(symbol) != 6 or not symbol.isdigit()
+            or len(industry_code) != 6 or not industry_code.isdigit()
+        ):
             continue
         raw_date = row[date_idx]
         if isinstance(raw_date, (int, float)):
@@ -253,11 +256,17 @@ def fetch_sw_industry_valid_time_ledger(
             else:
                 parsed_update = pd.to_datetime(_text(raw_update), errors="coerce")
                 update_date = "" if pd.isna(parsed_update) else str(parsed_update.date())
-        level1, level2, level3 = code_map[industry_code]
+        codebook_match = industry_code in code_map
+        level1, level2, level3 = code_map.get(industry_code, ("", "", ""))
         records.append({
             "symbol": symbol, "industry_code": industry_code,
             "industry_name": level3, "industry_level1": level1,
-            "industry_level2": level2, "valid_from": pd.Timestamp(valid_from).normalize(),
+            "industry_level2": level2,
+            "industry_codebook_status": (
+                "sw2021_dictionary_match" if codebook_match
+                else "outside_sw2021_dictionary"
+            ),
+            "valid_from": pd.Timestamp(valid_from).normalize(),
             "source_update_date": update_date,
         })
 
@@ -292,8 +301,9 @@ def fetch_sw_industry_valid_time_ledger(
     frame["snapshot_id"] = str(uuid.uuid4())
     return frame[[
         "symbol", "industry_code", "industry_name", "industry_level1",
-        "industry_level2", "valid_from", "valid_to", "source_update_date",
-        "snapshot_id", "observed_at", "available_time", "availability_basis",
+        "industry_level2", "industry_codebook_status", "valid_from", "valid_to",
+        "source_update_date", "snapshot_id", "observed_at", "available_time",
+        "availability_basis",
         "historical_pit_eligible", "source_id", "snapshot_scope", "source_revision",
     ]]
 
