@@ -98,5 +98,10 @@ def test_real_archived_market_aggregates_can_be_replayed_but_are_not_pit():
     assert out.historical_pit_eligible.eq(False).all()
     # Archived rows were retrieved retrospectively; they cannot be used as if
     # they had been available at each original trading-session close.
-    assert (pd.to_datetime(out.available_time, utc=True).dt.date >
-            pd.to_datetime(out.trade_date).dt.date).all()
+    assert all(
+        pd.Timestamp(row["available_time"]) > max(
+            pd.Timestamp(breadth[day]["snapshot_time"]),
+            pd.Timestamp(sentiment[day]["capture_time"]),
+        )
+        for day, row in zip(days, out.to_dict(orient="records"))
+    )
