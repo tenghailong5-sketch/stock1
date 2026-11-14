@@ -13,6 +13,7 @@ def test_ignition_threshold_grid_uses_chronological_holdout():
             share = (0.02 + cycle / 1000) if j == 0 else 0.02
             rows.append({
                 "trade_date": day, "industry_code": f"I{j}",
+                "industry_return_3d": strength, "market_return_3d": 0.0,
                 "industry_return_5d": strength, "market_return_5d": 0.0,
                 "turnover": share * 1000, "market_turnover": 1000,
                 "expected_industry_count": 5,
