@@ -122,3 +122,35 @@ def test_blocks_ambiguous_multiple_industry_assignments_and_short_stock_history(
             expected_symbols=["000001", "000002"],
             benchmark_symbol="000001", decision_time=CUTOFF,
         )
+
+
+def test_partial_stock_archive_obeys_configured_coverage_threshold():
+    stocks, market, industry = _inputs()
+    partial = stocks.loc[stocks["symbol"] == "000001"].copy()
+
+    with pytest.raises(ValueError, match="coverage below configured threshold"):
+        build_forward_m4_inputs(
+            partial, market, industry, _membership(),
+            expected_symbols=["000001", "000002"],
+            benchmark_symbol="000001", decision_time=CUTOFF,
+        )
+
+    result = build_forward_m4_inputs(
+        partial, market, industry, _membership(),
+        expected_symbols=["000001", "000002"],
+        benchmark_symbol="000001", decision_time=CUTOFF,
+        min_stock_coverage=0.5,
+    )
+    assert result["stock_coverage"] == 0.5
+    assert result["missing_stock_symbols"] == ["000002"]
+    assert set(result["stock_returns"]["symbol"]) == {"000001"}
+
+
+def test_missing_market_identity_column_fails_with_clear_error():
+    stocks, market, industry = _inputs()
+    with pytest.raises(ValueError, match="market bars require index_symbol"):
+        build_forward_m4_inputs(
+            stocks, market.drop(columns=["index_symbol"]), industry, _membership(),
+            expected_symbols=["000001", "000002"],
+            benchmark_symbol="000001", decision_time=CUTOFF,
+        )

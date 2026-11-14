@@ -57,6 +57,8 @@ def build_forward_m4_inputs(
     if membership_time > cutoff.tz_convert("UTC"):
         raise ValueError("membership snapshot was not available at decision_time")
 
+    if "index_symbol" not in market_bars.columns:
+        raise ValueError("market bars require index_symbol to select the explicit benchmark")
     stock = build_stock_daily_returns(stock_bars, decision_time=cutoff)
     market_input = market_bars.loc[
         market_bars["index_symbol"].astype(str).str.strip() == str(benchmark_symbol).strip()
@@ -70,11 +72,17 @@ def build_forward_m4_inputs(
     required_symbols = set(symbols)
     available_symbols = set(stock_counts.index.astype(str))
     missing_symbols = required_symbols - available_symbols
-    if missing_symbols:
-        raise ValueError("stock archive missing expected symbols: " + ",".join(sorted(missing_symbols)))
+    coverage = len(required_symbols & available_symbols) / len(required_symbols)
+    if coverage < float(min_stock_coverage):
+        raise ValueError(
+            "stock universe coverage below configured threshold: "
+            f"{coverage:.6f} < {float(min_stock_coverage):.6f}"
+        )
     # At least 41 derived rows provide 40 prior daily observations plus a 5-session
     # target return for the default residual model's minimum regression sample.
-    short_history = sorted(s for s in symbols if int(stock_counts.loc[s]) < 41)
+    # Symbols absent from the archive are tracked separately; only observed symbols
+    # are checked for sufficient history when a partial-coverage diagnostic is allowed.
+    short_history = sorted(s for s in available_symbols & required_symbols if int(stock_counts.loc[s]) < 41)
     if short_history:
         raise ValueError("insufficient stock history for residual model: " + ",".join(short_history))
 
@@ -127,10 +135,6 @@ def build_forward_m4_inputs(
     if not check["_industry"].eq("both").all():
         raise ValueError("industry index dates do not cover all stock return dates")
 
-    coverage = len(required_symbols & set(stock["symbol"])) / len(required_symbols)
-    if coverage < float(min_stock_coverage):
-        raise ValueError("stock universe coverage below configured threshold")
-
     return {
         "stock_returns": stock.sort_values(["symbol", "trade_date"]).reset_index(drop=True),
         "market_returns": market.sort_values("trade_date").reset_index(drop=True),
@@ -138,6 +142,7 @@ def build_forward_m4_inputs(
         "membership_audit": membership_audit,
         "stock_universe_size": len(required_symbols),
         "stock_coverage": coverage,
+        "missing_stock_symbols": sorted(missing_symbols),
         "benchmark_symbol": str(benchmark_symbol).strip(),
         "historical_pit_eligible": False,
         "status": "ready_forward_only_diagnostic",
