@@ -326,6 +326,7 @@ def fetch_sw_api_industry_index_history(
     captured = captured.tz_convert("UTC")
     frame["industry_code"] = code
     frame["daily_return"] = frame["close"].pct_change()
+    frame["return_3"] = frame["close"].div(frame["close"].shift(3)).sub(1)
     frame["return_5"] = frame["close"].div(frame["close"].shift(5)).sub(1)
     frame["return_20"] = frame["close"].div(frame["close"].shift(20)).sub(1)
     frame["available_time"] = captured
