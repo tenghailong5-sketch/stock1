@@ -11,7 +11,7 @@ import pandas as pd
 import requests
 
 from src.model.mainline_flows import classify_mainlines
-from src.model.mainline_validation import evaluate_mainline_transitions
+from src.model.mainline_validation import (\n    evaluate_frozen_chronological_holdout, evaluate_mainline_transitions,\n)
 from src.model.market_cycle import classify_market_cycle
 from src.model.m3_assembler import (
     assemble_m3_history, assemble_market_emotion_history,
@@ -105,6 +105,12 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     )
     validation_events, validation_summary = evaluate_mainline_transitions(
         validation_input, horizons=(5, 10, 20)
+    )
+    holdout_events, holdout_summary = evaluate_frozen_chronological_holdout(
+        validation_input, horizons=(5, 10, 20), train_fraction=0.60,
+    )
+    holdout_events.to_csv(
+        output_dir / "sw_mainline_frozen_holdout_events.csv", index=False
     )
     # Keep the current classifier frozen: no threshold search or test-period tuning.
     validation_path = output_dir / "sw_mainline_transition_validation.csv"
@@ -311,6 +317,8 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "policy_ignition_alignment_counts": {str(k): int(v) for k, v in alignment_counts.items()},
         "outcome_validation": validation_summary,
         "outcome_validation_events": int(len(validation_events)),
+        "frozen_chronological_holdout": holdout_summary,
+        "frozen_holdout_events": int(len(holdout_events)),
         "outcome_validation_output": str(validation_path),
         "ignition_threshold_research": "DISABLED_FROZEN_CLASSIFIER_NO_THRESHOLD_SEARCH",
         "market_m3_status": m3_result.get("status"),
