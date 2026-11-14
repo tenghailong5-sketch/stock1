@@ -152,6 +152,10 @@ def test_aggregates_turnover_only_after_complete_pit_bar_and_membership_join():
     }
     assert audit["status"] == "ready"
     assert audit["historical_pit_eligible"] is True
+    assert set(result["trade_date"].dt.strftime("%Y-%m-%d")) == {"2026-11-10"}
+    assert result["availability_basis"].eq("source_published_at").all()
+    assert result["historical_pit_eligible"].all()
+    assert result["available_time"].max() <= pd.Timestamp(DECISION).tz_convert("UTC")
 
 
 def test_retrieval_time_historical_bars_are_not_pit_eligible():
