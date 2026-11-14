@@ -1,4 +1,4 @@
-import pandas as pd
+from pathlib import Path\nimport pandas as pd
 import pytest
 
 from src.model.market_cycle import classify_market_cycle
@@ -106,3 +106,21 @@ def test_real_archived_market_aggregates_can_be_replayed_but_are_not_pit():
         )
         for day, row in zip(days, out.to_dict(orient="records"))
     )
+
+def test_real_m3_archive_replays_market_emotion_history():
+    from src.model.m3_assembler import assemble_m3_history
+
+    archive = Path("data/forward_archive")
+    result = assemble_m3_history(
+        archive, index_symbol="000001",
+        decision_time="2026-11-15T23:59:00+08:00",
+    )
+    assert result["status"] == "READY", result
+    history = result["history"].rename(columns={
+        "limit_up_cnt": "limit_up_count",
+        "limit_down_cnt": "limit_down_count",
+    })
+    classified = classify_market_cycle(history)
+    assert len(classified) >= 60
+    assert classified.market_cycle.ne("UNKNOWN").sum() >= 55
+    assert classified.historical_pit_eligible.eq(False).all()
