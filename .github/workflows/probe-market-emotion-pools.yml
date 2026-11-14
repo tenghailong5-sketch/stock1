@@ -1,13 +1,8 @@
 name: Probe Historical Market Emotion Pools
 
 on:
+  # Data collection and historical replay run only when explicitly requested.
   workflow_dispatch:
-  push:
-    branches:
-      - feat/policy-sentiment-mainline-architecture
-    paths:
-      - "scripts/probe_market_emotion_pools.py"
-      - ".github/workflows/probe-market-emotion-pools.yml"
 
 permissions:
   contents: read
