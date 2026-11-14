@@ -71,23 +71,29 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     market = market.rename(columns={"close": "market_close"})
 
     panel["trade_date"] = pd.to_datetime(panel["trade_date"], errors="coerce").dt.normalize()
+    panel["industry_return_3d"] = pd.to_numeric(panel["return_3"], errors="coerce")
     panel["industry_return_5d"] = pd.to_numeric(panel["return_5"], errors="coerce")
     panel["industry_close"] = pd.to_numeric(panel["close"], errors="coerce")
     panel["turnover"] = pd.to_numeric(panel["amount"], errors="coerce")
     daily_total = panel.groupby("trade_date")["turnover"].sum().rename("market_turnover")
     panel = panel.merge(daily_total, on="trade_date", how="left", validate="many_to_one")
     panel = panel.merge(
-        market[["trade_date", "market_return_5d", "market_close"]],
+        market[["trade_date", "market_return_3d", "market_return_5d", "market_close"]],
         on="trade_date", how="left", validate="many_to_one",
     )
-    panel = panel.dropna(subset=["industry_return_5d", "market_return_5d", "turnover", "market_turnover"])
+    panel = panel.dropna(subset=[
+        "industry_return_3d", "market_return_3d",
+        "industry_return_3d", "market_return_3d",
+        "industry_return_5d", "market_return_5d", "turnover", "market_turnover",
+    ])
     panel["expected_industry_count"] = expected
     panel["historical_pit_eligible"] = False
     if panel.empty:
         raise RuntimeError("no aligned industry/market history remains after date joins")
 
     phases = classify_mainlines(panel[[
-        "trade_date", "industry_code", "industry_return_5d", "market_return_5d",
+        "trade_date", "industry_code", "industry_return_3d", "market_return_3d",
+        "industry_return_5d", "market_return_5d",
         "turnover", "market_turnover", "expected_industry_count",
         "industry_name", "available_time", "source_id", "source_revision",
     ]])
