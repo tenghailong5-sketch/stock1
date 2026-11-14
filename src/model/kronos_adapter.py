@@ -212,7 +212,7 @@ class KronosAdapter:
         if (future <= last_bar).any():
             raise ValueError("future timestamps must be later than the last input bar")
         cutoff = pd.Timestamp(decision_time).tz_convert("Asia/Shanghai").tz_localize(None)
-        if (future <= cutoff.normalize()).any():
+        if (future.normalize() <= cutoff.normalize()).any():
             raise ValueError("future timestamps must be after the decision session")
 
         predictor = self._get_predictor()
