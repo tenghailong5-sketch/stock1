@@ -42,4 +42,4 @@ The current forward archive is not retroactively PIT eligible. All outputs in th
 5. Report event precision/recall, lead/lag, and false alarms; split by bull, bear, and range regimes.
 6. Do not connect these descriptive labels to FHM candidate scores until out-of-sample tests pass.
 
-The mainline lifecycle uses two consecutive qualifying sessions to confirm each state transition; the transition is stamped on the confirmation session and never backdated. This avoids single-day phase flicker and look-ahead leakage. The live replay produces phase segments for inspection. These are retrospective labels, not an out-of-sample predictive validation.
+The mainline lifecycle uses two consecutive qualifying sessions to confirm each state transition; the transition is stamped on the confirmation session and never backdated. Ignition and peak also require above-median industry turnover-share rank. The replay emits phase segments and a policy-to-subsequent-ignition temporal alignment table. Alignment is descriptive coincidence only, not causality or predictive validation.
