@@ -16,8 +16,10 @@ from src.collectors.forward_archive import append_jsonl_atomic
 from src.providers.akshare_pit import normalize_daily_history_snapshot
 from src.model.runtime_mainline import scan_runtime_mainlines
 from src.model.live_decision_integration import (
+    aggregate_archived_stock_turnover,
     build_live_decision_gate_audit, summarize_gate_blockers,
 )
+from src.model.mainline_flows import attach_pit_stock_turnover_concentration
 
 OUT=Path("output"); OUT.mkdir(exist_ok=True)
 MIN_AMOUNT=100_000_000
@@ -700,6 +702,40 @@ def main():
     )
     (OUT/"industry_membership_forward_audit.json").write_text(
         json.dumps(industry_audit, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
+
+    # PR128: aggregate individual stock traded value by PIT industry membership,
+    # then attach concentration/share changes to the M3 mainline panel.
+    latest_stock_day = (
+        pd.to_datetime(w["trade_date"], errors="coerce").max()
+        if not w.empty and "trade_date" in w else
+        pd.to_datetime(runtime_mainline["trade_date"], errors="coerce").max()
+        if not runtime_mainline.empty and "trade_date" in runtime_mainline else
+        pd.NaT
+    )
+    pit_stock_turnover = pd.DataFrame(columns=[
+        "trade_date", "industry_code", "turnover", "available_time",
+        "decision_time", "availability_basis", "historical_pit_eligible",
+    ])
+    stock_turnover_audit = {
+        "status": "no_target_trade_date", "historical_pit_eligible": False,
+    }
+    if pd.notna(latest_stock_day) and expected_symbols:
+        pit_stock_turnover, stock_turnover_audit = aggregate_archived_stock_turnover(
+            Path("data/forward_archive"), expected_symbols,
+            trade_date=latest_stock_day, decision_time=now,
+        )
+    if not runtime_mainline.empty:
+        runtime_mainline = attach_pit_stock_turnover_concentration(
+            runtime_mainline, pit_stock_turnover
+        )
+    runtime_mainline.to_csv(
+        OUT/"runtime_mainline_with_stock_concentration.csv",
+        index=False, encoding="utf-8-sig",
+    )
+    (OUT/"stock_turnover_concentration_audit.json").write_text(
+        json.dumps(stock_turnover_audit, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
     )
     # Cross-sectional quick score is an exploratory ranking only. It uses raw
     # unadjusted history and is not an official FHM-100 A/B/C score.
