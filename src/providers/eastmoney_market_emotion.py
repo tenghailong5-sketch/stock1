@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from datetime import datetime, timezone
 from typing import Callable, Iterable
 
@@ -24,6 +25,8 @@ def fetch_market_emotion_pool_history(
     broken_board_fetcher: Callable,
     strong_pool_fetcher: Callable,
     clock: Callable | None = None,
+    pause_seconds: float = 0.15,
+    sleep_fn: Callable = time.sleep,
 ) -> pd.DataFrame:
     """Build daily limit-streak, board-failure, promotion and strong-pool metrics.
 
@@ -134,4 +137,6 @@ def fetch_market_emotion_pool_history(
             previous_limit_up = limit_up.copy()
         else:
             previous_limit_up = None
+        if pause_seconds > 0:
+            sleep_fn(pause_seconds)
     return pd.DataFrame(rows)
