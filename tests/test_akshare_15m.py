@@ -38,6 +38,7 @@ def test_no_breakout_does_not_confirm():
     raw = sample()
     raw.loc[4, "收盘"] = 10.3
     raw.loc[4, "开盘"] = 10.3
+    raw.loc[4, "最低"] = 10.25
     bars = normalize_15m_bars(
         raw, symbol="600000", captured_at="2026-11-13T03:20:00Z"
     )
