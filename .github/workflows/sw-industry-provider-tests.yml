@@ -108,9 +108,17 @@ jobs:
           comparable = current.index.intersection(latest.index)
           mismatch = latest.loc[comparable].ne(current.loc[comparable])
           if mismatch.any():
+              bad_symbols = list(latest.loc[comparable][mismatch].index[:20])
+              diagnostics = ledger[ledger["symbol"].isin(bad_symbols)].sort_values(
+                  ["symbol", "valid_from"], kind="stable"
+              ).groupby("symbol").tail(4)[
+                  ["symbol", "industry_code", "industry_codebook_status", "valid_from", "source_update_date"]
+              ]
               raise SystemExit(
                   "SW history latest industry differs from current snapshot: "
-                  f"{latest.loc[comparable][mismatch].head(10).to_dict()}"
+                  f"ledger={latest.loc[comparable][mismatch].head(20).to_dict()} "
+                  f"current={current.loc[bad_symbols].to_dict()} "
+                  f"history_tail={diagnostics.to_dict('records')}"
               )
           historical_only = latest.index.difference(current.index)
 
