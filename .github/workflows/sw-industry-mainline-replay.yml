@@ -15,12 +15,9 @@ on:
       - "src/model/policy_catalysts.py"
       - "data/policy_catalysts/official_policy_events.jsonl"
       - ".github/workflows/sw-industry-mainline-replay.yml"
-  pull_request:
-    paths:
-      - "scripts/replay_sw_mainlines.py"
-      - "src/providers/sw_industry.py"
-      - "src/model/mainline_flows.py"
-      - ".github/workflows/sw-industry-mainline-replay.yml"
+concurrency:
+  group: sw-mainline-replay-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
