@@ -41,5 +41,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sw-mainline-phase-replay
-          path: output/sw_mainline_phase_*
+          path: output/sw_mainline_*
           if-no-files-found: warn
