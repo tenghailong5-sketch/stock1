@@ -11,7 +11,9 @@ import requests
 
 from src.model.mainline_flows import classify_mainlines
 from src.model.market_cycle import classify_market_cycle
-from src.model.m3_assembler import assemble_m3_history
+from src.model.m3_assembler import (
+    assemble_m3_history, assemble_market_emotion_history,
+)
 from src.model.policy_catalysts import visible_policy_events
 from src.providers.sw_api_industry import (
     fetch_sw_api_first_level_index_list,
@@ -91,11 +93,16 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     )
     if m3_result.get("status") != "READY":
         raise RuntimeError("M3 historical market archive is not ready: " + str(m3_result.get("status")))
-    market_history = m3_result["history"].rename(columns={
-        "limit_up_cnt": "limit_up_count",
-        "limit_down_cnt": "limit_down_count",
-    })
-    market_cycles = classify_market_cycle(market_history)
+    emotion_result = assemble_market_emotion_history(
+        Path("data/forward_archive"), decision_time=market_decision_time.isoformat(),
+        min_sessions=60,
+    )
+    if emotion_result.get("status") != "READY":
+        raise RuntimeError(
+            "raw market emotion archive is not ready: "
+            + str(emotion_result.get("valid_sessions"))
+        )
+    market_cycles = classify_market_cycle(emotion_result["history"])
     market_cycles["trade_date"] = pd.to_datetime(market_cycles.trade_date).dt.normalize()
     market_cycle_map = market_cycles.set_index("trade_date")["market_cycle"].to_dict()
     phases["trade_date"] = pd.to_datetime(phases.trade_date).dt.normalize()
@@ -198,6 +205,9 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "policy_event_industry_pairs": int(len(alignment)),
         "policy_ignition_alignment_counts": {str(k): int(v) for k, v in alignment_counts.items()},
         "market_m3_status": m3_result.get("status"),
+        "market_emotion_archive_status": emotion_result.get("status"),
+        "market_emotion_archive_sessions": int(emotion_result.get("valid_sessions", 0)),
+        "market_emotion_quality_warnings": emotion_result.get("quality_warnings", []),
         "market_cycle_sessions": int(len(market_cycles)),
         "market_cycle_counts": {
             str(k): int(v) for k, v in market_cycles.market_cycle.value_counts().to_dict().items()
