@@ -5,6 +5,8 @@ an incomplete policy archive cannot be interpreted as a negative catalyst.
 """
 from __future__ import annotations
 
+from bisect import bisect_left
+
 import pandas as pd
 
 
@@ -106,20 +108,33 @@ def attach_startup_evidence(
     # Only explicitly positive, source-backed policy events can support an
     # ignition. Mixed/negative/unclear events are not positive startup evidence.
     events = events[events.impact_direction.eq("positive")].copy()
-    dates = sorted(out.trade_date.unique())
+    dates = sorted(pd.Timestamp(date) for date in out.trade_date.unique())
     date_position = {date: i for i, date in enumerate(dates)}
+    # A policy event is usable at the first trading-session close (15:00
+    # Shanghai time) at or after its actual availability timestamp. This
+    # moves weekend/holiday and post-close publications forward, preventing
+    # both missed events and same-day look-ahead.
+    session_close_cutoffs = [
+        date.tz_localize("Asia/Shanghai") + pd.Timedelta(hours=15)
+        for date in dates
+    ]
+    event_sessions = []
+    for event in events.itertuples(index=False):
+        event_pos = bisect_left(session_close_cutoffs, event.available_at)
+        if event_pos < len(dates):
+            event_sessions.append((
+                event_pos,
+                {str(code) for code in event.industry_codes},
+            ))
     matched = []
     for row in out.itertuples(index=False):
-        pos = date_position[row.trade_date]
+        pos = date_position[pd.Timestamp(row.trade_date)]
         first = max(0, pos - policy_window_sessions + 1)
-        window_dates = set(dates[first:pos + 1])
-        cutoff = pd.Timestamp(row.trade_date).tz_localize("Asia/Shanghai") + pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
-        visible = events[
-            events.available_at.le(cutoff.tz_convert("UTC"))
-            & events.industry_codes.map(lambda codes: str(row.industry_code) in {str(c) for c in codes})
-        ]
-        event_days = visible.available_at.dt.tz_convert("Asia/Shanghai").dt.normalize().dt.tz_localize(None)
-        matched.append(bool(event_days.isin(window_dates).any()))
+        industry_code = str(row.industry_code)
+        matched.append(any(
+            first <= event_pos <= pos and industry_code in event_codes
+            for event_pos, event_codes in event_sessions
+        ))
     policy_values = pd.Series(matched, index=out.index, dtype="boolean")
     # A positively matched, source-backed event is known even when the archive
     # is incomplete. Only absence is UNKNOWN until archive completeness is
