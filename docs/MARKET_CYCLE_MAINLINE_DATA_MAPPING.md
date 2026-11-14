@@ -19,9 +19,11 @@ and M9 validation/monitoring.
 - Limit-pool counts: `data/forward_archive/market_sentiment/{trade_date}.jsonl`.
 - Index daily bars: `data/forward_archive/index_daily/{index_symbol}.jsonl`.
 - Industry membership observations: `data/forward_archive/industry_membership/`; retrieval-time observations are forward-only.
-- Existing official SW2021 latest snapshot remains forward-only. It must not be backfilled across historical dates.
+- Existing official SW2021 latest membership snapshot remains forward-only. It must not be backfilled across historical dates.
+- SW first-level index history is retrieved through `ak.index_realtime_sw(symbol="一级行业")` for the current index-code list and `ak.sw_index_daily` for each index's historical close and turnover. Retrieval time is recorded; original historical availability is not supplied, so replay remains retrospective/non-PIT.
 - Policy event archive is a new required input; each event also requires controlled impact_direction and a numeric confidence plus confidence_basis audit trail. Until source-backed event records are collected, the policy engine reports no visible events rather than synthesizing them.
-- Historical industry index/turnover series and historical constituent membership with original effective/publication timestamps are required for a valid historical mainline test.
+- `scripts/replay_sw_mainlines.py` performs a retrospective industry-index replay using complete first-level index coverage, 5-day relative strength, and industry turnover share. It fails closed if any current first-level industry index history is unavailable.
+- Historical constituent membership with original effective/publication timestamps is still required before any PIT stock-level mainline backtest or formal signal.
 
 ## Time and quality gates
 
