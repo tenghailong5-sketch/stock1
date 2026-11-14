@@ -5,7 +5,8 @@ import pandas as pd
 
 
 REQUIRED = {"event_id", "published_at", "available_at", "source_url",
-            "source_id", "title", "catalyst_type", "industry_codes"}
+            "source_id", "title", "catalyst_type", "industry_codes",
+            "impact_direction", "confidence", "confidence_basis"}
 
 
 def visible_policy_events(events: pd.DataFrame, *, decision_time) -> tuple[pd.DataFrame, dict]:
@@ -26,6 +27,14 @@ def visible_policy_events(events: pd.DataFrame, *, decision_time) -> tuple[pd.Da
         raise ValueError("invalid policy-event records; source and industry mapping are mandatory")
     if (out.published_at > out.available_at).any():
         raise ValueError("event cannot be available before publication")
+    if not out.impact_direction.isin({"positive", "negative", "mixed", "unclear"}).all():
+        raise ValueError("impact_direction must use the controlled event vocabulary")
+    confidence = pd.to_numeric(out.confidence, errors="coerce")
+    if confidence.isna().any() or ((confidence < 0) | (confidence > 1)).any():
+        raise ValueError("confidence must be a numeric value within [0,1]")
+    if out.confidence_basis.astype(str).str.strip().eq("").any():
+        raise ValueError("confidence_basis is required for auditability")
+    out["confidence"] = confidence
     cutoff = cutoff.tz_convert("UTC")
     visible = out.loc[(out.published_at <= cutoff) & (out.available_at <= cutoff)].copy()
     visible["historical_pit_eligible"] = False
