@@ -19,7 +19,7 @@ def evaluate_mainline_transitions(frame: pd.DataFrame, *, horizons=(5, 10, 20)) 
     missing = REQUIRED - set(frame.columns)
     if missing:
         raise ValueError("missing validation fields: " + ",".join(sorted(missing)))
-    if not horizons or any(not isinstance(h, int) or h < 1 for h in horizons):
+    if not horizons or any(isinstance(h, bool) or not isinstance(h, int) or h < 1 for h in horizons):
         raise ValueError("horizons must contain positive integer trading-session counts")
     out = frame.copy()
     out["trade_date"] = pd.to_datetime(out.trade_date, errors="coerce")
@@ -97,7 +97,7 @@ def compare_ignition_thresholds(
     missing = required - set(frame.columns)
     if missing:
         raise ValueError("missing threshold research fields: " + ",".join(sorted(missing)))
-    if not isinstance(horizon, int) or horizon < 1:
+    if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon < 1:
         raise ValueError("horizon must be a positive integer")
     if not 0.5 <= train_fraction <= 0.8:
         raise ValueError("train_fraction must be within [0.5,0.8]")
