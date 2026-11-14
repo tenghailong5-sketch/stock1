@@ -14,6 +14,15 @@ from src.model.mainline_signal_gates import (
 )
 
 
+def evidence_counts(mask: pd.Series) -> dict[str, int]:
+    """Count boolean evidence without collapsing missing values into False."""
+    return {
+        "true": int(mask.eq(True).fillna(False).sum()),  # noqa: E712
+        "false": int(mask.eq(False).fillna(False).sum()),  # noqa: E712
+        "unknown": int(mask.isna().sum()),
+    }
+
+
 def main() -> None:
     output = Path("output")
     phases = pd.read_csv(output / "sw_mainline_phase_replay.csv")
@@ -31,13 +40,6 @@ def main() -> None:
     lifecycle = gate_ignition_labels(lifecycle)
     ignition_candidate = lifecycle["mainline_phase_candidate"].eq("IGNITION")
     confirmed = lifecycle["startup_evidence_status"].eq("CONFIRMED").fillna(False)
-
-    def evidence_counts(mask: pd.Series) -> dict[str, int]:
-        return {
-            "true": int((mask == True).sum()),  # noqa: E712
-            "false": int((mask == False).sum()),  # noqa: E712
-            "unknown": int(mask.isna().sum()),
-        }
 
     gate_fields = [
         "emotion_reversal_component",
