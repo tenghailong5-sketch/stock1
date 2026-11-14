@@ -298,3 +298,67 @@ def fetch_sw_industry_valid_time_ledger(
     ]]
 
 
+
+
+def fetch_sw_industry_unmapped_history_audit(
+    *, session=None, timeout: int = 60
+) -> pd.DataFrame:
+    """Audit valid historical stock rows whose industry codes are absent from SW2021.
+
+    These rows are preserved as an audit output, not force-mapped into the
+    SW2021 taxonomy and not included in the SW2021 valid-time ledger.
+    """
+    client = session or requests
+    stock_content = _download_xls(client, STOCK_URL, timeout)
+    code_content = _download_xls(client, CODE_URL, timeout)
+    code_headers, code_rows = _sheet_rows(code_content)
+    code_idx = _column(code_headers, "行业代码")
+    known_codes = {
+        _text(row[code_idx]).zfill(6)
+        for row in code_rows
+        if _text(row[code_idx])
+    }
+
+    headers, rows = _sheet_rows(stock_content)
+    symbol_idx = _column(headers, "股票代码")
+    date_idx = _column(headers, "计入日期")
+    industry_idx = _column(headers, "行业代码")
+    counts: dict[str, dict] = {}
+    for row in rows:
+        symbol = _text(row[symbol_idx])
+        if len(symbol) != 6 or not symbol.isdigit():
+            continue
+        raw_date = row[date_idx]
+        if isinstance(raw_date, (int, float)):
+            valid_from = pd.Timestamp("1899-12-30") + pd.to_timedelta(float(raw_date), unit="D")
+        else:
+            valid_from = pd.to_datetime(_text(raw_date), errors="coerce")
+        if pd.isna(valid_from):
+            continue
+        code = _text(row[industry_idx]).zfill(6)
+        if not code or code in known_codes:
+            continue
+        item = counts.setdefault(code, {"industry_code": code, "row_count": 0, "symbols": set(),
+                                         "valid_from_min": pd.NaT, "valid_from_max": pd.NaT})
+        item["row_count"] += 1
+        item["symbols"].add(symbol)
+        date = pd.Timestamp(valid_from).normalize()
+        if pd.isna(item["valid_from_min"]) or date < item["valid_from_min"]:
+            item["valid_from_min"] = date
+        if pd.isna(item["valid_from_max"]) or date > item["valid_from_max"]:
+            item["valid_from_max"] = date
+
+    result = []
+    for code, item in sorted(counts.items()):
+        result.append({
+            "industry_code": code,
+            "row_count": item["row_count"],
+            "symbol_count": len(item["symbols"]),
+            "valid_from_min": item["valid_from_min"],
+            "valid_from_max": item["valid_from_max"],
+            "mapping_status": "unmapped_outside_sw2021_dictionary",
+        })
+    return pd.DataFrame(result, columns=[
+        "industry_code", "row_count", "symbol_count", "valid_from_min",
+        "valid_from_max", "mapping_status",
+    ])
