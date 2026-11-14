@@ -291,3 +291,37 @@ def test_m5_industry_factor_fails_closed_on_ambiguous_latest_industry_rows():
     assert pd.isna(frame.loc[0, "industry_relative_strength"])
     assert frame.loc[0, "industry_top_30pct"] is None
     assert frame.loc[0, "industry_factor_provenance"] == "missing_or_ambiguous_industry_mapping"
+
+def test_m5_diagnostic_input_handles_non_unique_watchlist_index():
+    watchlist = pd.DataFrame([
+        {
+            "代码": "000001", "sw_history_industry_code": "801010",
+            "CLV": 0.9, "20日平均成交额": 200_000_000,
+        },
+        {
+            "代码": "000002", "sw_history_industry_code": "801020",
+            "CLV": 0.4, "20日平均成交额": 80_000_000,
+        },
+    ], index=[7, 7])
+    mainline = pd.DataFrame([
+        {
+            "industry_code": "801010", "trade_date": "2026-11-13",
+            "strength_percentile": 0.92,
+        },
+        {
+            "industry_code": "801020", "trade_date": "2026-11-13",
+            "strength_percentile": 0.35,
+        },
+    ])
+
+    frame = fhm100.build_m5_diagnostic_input(
+        watchlist,
+        {"market_state": "RISK_ON", "market_environment_score": 88.0},
+        mainline,
+    )
+
+    assert frame["symbol"].tolist() == ["000001", "000002"]
+    assert frame["industry_relative_strength"].tolist() == [92.0, 35.0]
+    assert frame["price_structure"].tolist() == [100.0, 50.0]
+    assert frame["trade_quality"].tolist() == [100.0, 50.0]
+
