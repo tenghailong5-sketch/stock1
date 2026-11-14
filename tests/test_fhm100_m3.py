@@ -197,3 +197,20 @@ def test_forward_industry_audit_accepts_one_combined_eastmoney_batch(tmp_path):
         "akshare.stock_individual_info_em",
     }
     assert audit["historical_pit_eligible"] is False
+
+
+
+def test_forward_industry_audit_accepts_official_sw2021_snapshot(tmp_path):
+    _write_forward_industry_batch(
+        tmp_path,
+        ["swsresearch.sw2021_stock_classification"] * 3,
+    )
+    selected, audit = fhm100.audit_forward_industry_membership(
+        tmp_path,
+        ["000001", "600000", "000002"],
+        decision_time=pd.Timestamp("2026-11-13T13:00:00Z"),
+    )
+    assert audit["status"] == "ready_forward_only"
+    assert audit["selected_symbol_count"] == 3
+    assert set(selected["source_id"]) == {"swsresearch.sw2021_stock_classification"}
+    assert audit["historical_pit_eligible"] is False
