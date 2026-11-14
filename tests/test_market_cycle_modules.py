@@ -52,6 +52,7 @@ def test_mainline_detects_ignition_peak_and_decay():
                 "trade_date": day, "industry_code": f"I{j}",
                 "industry_return_5d": strength, "market_return_5d": 0,
                 "turnover": share * 1000, "market_turnover": 1000,
+                "expected_industry_count": 5,
             })
     out = classify_mainlines(pd.DataFrame(rows))
     focus = out[out.industry_code == "I0"].reset_index(drop=True)
@@ -64,7 +65,7 @@ def test_mainline_rejects_missing_values():
     frame = pd.DataFrame([{
         "trade_date": "2026-01-01", "industry_code": "I1",
         "industry_return_5d": None, "market_return_5d": 0,
-        "turnover": 1, "market_turnover": 10,
+        "turnover": 1, "market_turnover": 10, "expected_industry_count": 1,
     }])
     with pytest.raises(ValueError):
         classify_mainlines(frame)
