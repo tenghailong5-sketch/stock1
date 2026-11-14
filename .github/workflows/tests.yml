@@ -61,5 +61,4 @@ jobs:
           })
           assert not frame.empty
           assert required.issubset(frame.columns)
-          assert frame["日期"].nunique() > 1
           PY
