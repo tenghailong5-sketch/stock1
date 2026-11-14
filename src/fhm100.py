@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json, os, traceback, time, uuid, hashlib
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import akshare as ak
 import numpy as np
@@ -354,12 +355,14 @@ def history(code,start,archive_root=Path("data/forward_archive")):
         raise ValueError("daily history lineage could not be attached to every bar")
     return h
 
-def scan(u,archive_root=Path("data/forward_archive")):
+def scan(u,archive_root=Path("data/forward_archive"),history_sink=None):
     rows=[]; errors=[]; start=(datetime.now()-pd.Timedelta(days=160)).strftime("%Y%m%d")
     for _,s in u.iterrows():
         try:
             h=history(s.code,start,archive_root=archive_root)
             if h is None: raise ValueError("insufficient history or schema mismatch")
+            if history_sink is not None:
+                history_sink[str(s.code).zfill(6)] = h.copy()
             # M4 price primitives use the raw bars captured in this run.
             # Retrieval timestamps do not certify historical PIT availability.
             decision_at = datetime.now(timezone.utc)
@@ -648,7 +651,8 @@ def main():
         (OUT/"history_pool_audit.json").write_text(
             json.dumps(history_pool_audit, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        w,e=scan(history_universe)
+        kronos_histories = {}
+        w,e=scan(history_universe, history_sink=kronos_histories)
         # [live-scan] verify all-failed history reporting and archive persistence
         w=ensure_watchlist_schema(w)
         if not w.empty:
@@ -765,6 +769,45 @@ def main():
     m5_readiness.to_csv(OUT/"m5_factor_readiness.csv", index=False, encoding="utf-8-sig")
     m5_blockers = summarize_m5_blockers(m5)
     m5_blockers.to_csv(OUT/"m5_blocker_summary.csv",index=False,encoding="utf-8-sig")
+
+    # Optional Kronos research sidecar. It runs only when explicitly enabled,
+    # uses the exact history snapshots already fetched above, and never alters
+    # candidate ordering, M5 scores, or decision-gate authorization.
+    kronos_audit = {"status": "DISABLED", "historical_pit_eligible": False}
+    if os.getenv("FHM_KRONOS_ENABLED", "0").strip().lower() in {"1", "true", "yes"}:
+        try:
+            from src.model.kronos_batch import forecast_candidate_pool
+            calendar = ak.tool_trade_date_hist_sina()
+            if "trade_date" not in calendar.columns:
+                raise ValueError("official trading calendar missing trade_date")
+            sessions = pd.to_datetime(calendar["trade_date"], errors="coerce").dropna().sort_values()
+            decision_market_date = now.astimezone(ZoneInfo('Asia/Shanghai')).date()
+            future_sessions = sessions[sessions.dt.date > decision_market_date].head(5)
+            if len(future_sessions) < 5:
+                raise ValueError("official calendar has fewer than five future sessions")
+            candidate_rows = w.copy()
+            if "快速初筛分" in candidate_rows:
+                candidate_rows = candidate_rows.sort_values("快速初筛分", ascending=False)
+            candidate_symbols = candidate_rows["symbol"].astype(str).str.zfill(6).drop_duplicates().head(20).tolist()
+            selected_histories = {symbol: kronos_histories[symbol] for symbol in candidate_symbols if symbol in kronos_histories}
+            kronos_result = forecast_candidate_pool(
+                selected_histories, decision_time=now,
+                future_timestamps=future_sessions.tolist(), max_candidates=20,
+            )
+            kronos_result["status"] = "RESEARCH_ONLY_" + str(kronos_result.get("status"))
+            kronos_audit = kronos_result
+            pd.DataFrame([
+                {"symbol": symbol, **result.get("metrics", {})}
+                for symbol, result in kronos_result.get("results", {}).items()
+            ]).to_csv(OUT/"kronos_forecasts.csv", index=False, encoding="utf-8-sig")
+        except Exception as exc:
+            kronos_audit = {
+                "status": "UNAVAILABLE", "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
+                "historical_pit_eligible": False, "trading_signal": False,
+            }
+    (OUT/"kronos_audit.json").write_text(
+        json.dumps(kronos_audit, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
 
     # Execute M2 -> M3 -> M5 -> M8 on every strategy row. Missing PIT,
     # factor, 15-minute or portfolio-risk inputs remain explicit blockers.
