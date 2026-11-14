@@ -113,6 +113,8 @@ def test_frozen_holdout_rejects_empty_or_nonpositive_horizons():
         evaluate_frozen_chronological_holdout(frame, horizons=())
     with pytest.raises(ValueError, match="horizons must contain positive integer"):
         evaluate_frozen_chronological_holdout(frame, horizons=(0,))
+    with pytest.raises(ValueError, match="horizons must contain positive integer"):
+        evaluate_frozen_chronological_holdout(frame, horizons=(True,))
 
 
 def test_frozen_holdout_rejects_missing_validation_columns_before_date_access():
