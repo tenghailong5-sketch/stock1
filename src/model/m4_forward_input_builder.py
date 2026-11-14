@@ -72,9 +72,9 @@ def build_forward_m4_inputs(
     missing_symbols = required_symbols - available_symbols
     if missing_symbols:
         raise ValueError("stock archive missing expected symbols: " + ",".join(sorted(missing_symbols)))
-    # 46 closes yield at least 40 prior daily observations plus a 5-session
+    # 61 closes yield at least 40 prior daily observations plus a 5-session
     # target return for the default residual model's minimum regression sample.
-    short_history = sorted(s for s in symbols if int(stock_counts.loc[s]) < 45)
+    short_history = sorted(s for s in symbols if int(stock_counts.loc[s]) < 61)
     if short_history:
         raise ValueError("insufficient stock history for residual model: " + ",".join(short_history))
 
