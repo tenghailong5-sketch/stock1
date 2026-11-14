@@ -56,6 +56,20 @@ def test_prepare_history_excludes_late_and_future_rows():
     assert audit["availability_rule"] == "available_time<=decision_time"
 
 
+def test_prepare_history_excludes_future_timestamp_even_if_availability_is_backdated():
+    frame = _history()
+    future = frame.iloc[[-1]].copy()
+    future["timestamp"] = pd.Timestamp("2026-12-01")
+    future["available_time"] = pd.Timestamp("2026-10-01T12:00:00+08:00")
+    frame = pd.concat([frame, future], ignore_index=True)
+    cutoff = pd.Timestamp("2026-10-27T15:00:00+08:00")
+    model_frame, stamps, audit = prepare_kronos_history(
+        frame, decision_time=cutoff, lookback=256,
+    )
+    assert pd.Timestamp("2026-12-01") not in pd.DatetimeIndex(stamps)
+    assert audit["future_or_late_rows_excluded"] >= 1
+
+
 def test_prepare_history_rejects_unzoned_availability_and_invalid_ohlc():
     frame = _history()
     frame["available_time"] = pd.to_datetime(frame["timestamp"])
