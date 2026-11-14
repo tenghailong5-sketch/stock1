@@ -104,3 +104,25 @@ def test_fetch_sw_first_level_index_list_retries_transient_timeout(monkeypatch):
     assert len(result) == 21
     assert session.calls == 2
 
+
+def test_recent_official_sw_universe_snapshot_is_validated(tmp_path):
+    import json
+    from src.providers.sw_api_industry import fetch_sw_api_first_level_index_list
+    from scripts.replay_sw_mainlines import _load_recent_sw_universe
+
+    observed = pd.Timestamp.now(tz="UTC").isoformat()
+    path = tmp_path / "universe.jsonl"
+    rows = [
+        {
+            "industry_code": f"80{i:04d}",
+            "industry_name": f"industry-{i}",
+            "observed_at": observed,
+            "source_id": "swsresearch.index_publish.current",
+            "historical_pit_eligible": False,
+        }
+        for i in range(1, 22)
+    ]
+    path.write_text("\\n".join(json.dumps(row) for row in rows) + "\\n", encoding="utf-8")
+    result = _load_recent_sw_universe(path)
+    assert len(result) == 21
+    assert result.industry_code.is_unique
