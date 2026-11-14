@@ -245,7 +245,12 @@ def _pit_frame(frame: pd.DataFrame, decision_time, name: str,
 def industry_relative_strength(stock_industry_returns: pd.DataFrame,
                                market_returns: pd.DataFrame,
                                decision_time=None) -> pd.DataFrame:
-    """Return 5d/20d industry excess returns with PIT-validated source rows."""
+    """Return the latest 5d/20d industry excess-return snapshot available at decision_time.
+
+    Historical replay must call this function once per historical decision_time;
+    this function intentionally does not emit a historical factor time series
+    under one current availability cutoff.
+    """
     required = {"trade_date", "industry_code", "return_5", "return_20"}
     if required - set(stock_industry_returns.columns):
         raise ValueError("industry returns missing required columns")
@@ -272,17 +277,23 @@ def industry_relative_strength(stock_industry_returns: pd.DataFrame,
         x[column] = values.where(np.isfinite(values))
     x["industry_excess_5"] = x["return_5"] - x["market_return_5"]
     x["industry_excess_20"] = x["return_20"] - x["market_return_20"]
+    # Do not expose older factor rows under one present-day availability cutoff.
+    # Historical replay must call this function separately for each decision.
+    if not x.empty:
+        x = x.loc[x["trade_date"].eq(x["trade_date"].max())].copy()
     return x
 
 
 def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
                       industry_returns: pd.DataFrame, window: int = 60,
                       min_periods: int = 40, decision_time=None) -> pd.DataFrame:
-    """Compute 5d residual return using beta fitted on prior daily returns.
+    """Compute the latest 5d residual return using trailing daily beta estimates.
 
-    Beta regression uses non-overlapping one-session observations from dates
-    strictly before the target date; target residual applies those betas to
-    the target's 5-session stock, market and industry returns.
+    Beta regression uses non-overlapping one-session observations strictly
+    before the latest target date. Only that latest decision snapshot is
+    returned. Historical replay must call this function separately at each
+    historical decision_time; older residuals under one present-day cutoff
+    would leak later-retrieved observations into backtests.
     """
     required = {"symbol", "trade_date", "industry_code", "return_5", "daily_return"}
     if required - set(stock_returns.columns):
@@ -334,7 +345,8 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
                 continue
             residual.append(float(current[0] - beta[1]*current[1] - beta[2]*current[2]))
         g["residual_return_5"] = residual
-        output.append(g)
+        # Do not expose older target dates under the same present-day cutoff.
+        output.append(g.tail(1))
     return pd.concat(output, ignore_index=True) if output else x.assign(residual_return_5=np.nan)
 
 def rank_factor(values: pd.Series, higher_is_better: bool = True) -> pd.Series:
