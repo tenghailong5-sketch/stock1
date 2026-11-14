@@ -74,7 +74,7 @@ def test_capital_gate_exposes_each_condition_without_relaxing_composite():
     out = attach_startup_evidence(industry, emotion, policy)
     assert out.capital_turnover_share_positive.iloc[0]
     assert out.capital_turnover_share_increasing.iloc[0]
-    assert not out.capital_leadership_top_quintile.iloc[0]
+    assert not out.capital_leadership_at_ignition_threshold.iloc[0]
     assert out.capital_relative_strength_accelerating.iloc[0]
     assert not out.capital_concentration_component.iloc[0]
     assert out.startup_evidence_status.iloc[0] == "NOT_CONFIRMED"
@@ -179,7 +179,7 @@ def test_capital_leadership_gate_matches_default_ignition_strength_threshold():
         "impact_direction": ["positive"],
     })
     out = attach_startup_evidence(industry, emotion, policy)
-    assert out.capital_leadership_top_quintile.iloc[0]
+    assert out.capital_leadership_at_ignition_threshold.iloc[0]
     assert out.capital_concentration_component.iloc[0]
     assert out.startup_evidence_status.iloc[0] == "CONFIRMED"
 
