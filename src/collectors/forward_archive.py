@@ -270,6 +270,22 @@ def _collect_sw_index_history(industry_snapshot, fetcher, *, clock=None):
     return records_by_code, failures
 
 
+def _summarize_sw_index_history(records_by_code):
+    """Summarize retrieved coverage without implying historical PIT availability."""
+    summary = {}
+    for code, rows in sorted(records_by_code.items()):
+        dates = sorted({str(row.get("trade_date", ""))[:10] for row in rows if row.get("trade_date") is not None})
+        summary[code] = {
+            "row_count": len(rows),
+            "unique_trade_date_count": len(dates),
+            "first_trade_date": dates[0] if dates else None,
+            "last_trade_date": dates[-1] if dates else None,
+            "historical_pit_eligible_row_count": sum(bool(row.get("historical_pit_eligible")) for row in rows),
+            "availability_basis_values": sorted({str(row.get("availability_basis")) for row in rows if row.get("availability_basis") is not None}),
+        }
+    return summary
+
+
 def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = True, retry_sleep=time.sleep, industry_clock=None, observation_clock=None, allow_partial: bool = False, historical_market_fetcher=None, baostock_module=None, sw_industry_fetcher=None, sw_valid_time_ledger_fetcher=None, sw_index_history_fetcher=None, baidu_industry_fetcher=None, sw_api_industry_fetcher=None, cninfo_industry_fetcher=None) -> dict[str, int]:
     ak_module = _RetryingProvider(ak_module, sleep_fn=retry_sleep)
     captured = pd.Timestamp(
@@ -967,6 +983,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
                 "shenwan_industry_index_history_code_count": len(sw_index_history_records),
                 "shenwan_industry_index_history_row_count": sum(map(len, sw_index_history_records.values())),
                 "shenwan_industry_index_history_failed_codes": sw_index_history_failures,
+                "shenwan_industry_index_history_by_code": _summarize_sw_index_history(sw_index_history_records),
                 "shenwan_api_coverage": sw_api_coverage,
                 "shenwan_api_error": _error_detail(sw_api_error),
                 "shenwan_api_failed_industry_count": (
