@@ -20,14 +20,14 @@ def test_emotion_audit_reports_missing_fields_without_zero_fill():
     assert audit["zero_filled"] == 0
 
 
-def test_startup_requires_all_three_observed_components_and_policy_completeness():
+def test_positive_policy_match_is_known_but_absence_stays_unknown_in_incomplete_archive():
     industry = pd.DataFrame({
-        "trade_date": ["2026-01-02"],
-        "industry_code": ["I1"],
-        "turnover_share": [0.12],
-        "turnover_share_change_3d": [0.03],
-        "strength_3d_percentile": [0.95],
-        "relative_strength_change_2d": [0.02],
+        "trade_date": ["2026-01-02", "2026-01-02"],
+        "industry_code": ["I1", "I2"],
+        "turnover_share": [0.12, 0.12],
+        "turnover_share_change_3d": [0.03, 0.03],
+        "strength_3d_percentile": [0.95, 0.95],
+        "relative_strength_change_2d": [0.02, 0.02],
     })
     emotion = pd.DataFrame({
         "trade_date": ["2026-01-01", "2026-01-02"],
@@ -37,13 +37,16 @@ def test_startup_requires_all_three_observed_components_and_policy_completeness(
         "available_at": ["2026-01-02T08:00:00Z"],
         "industry_codes": [["I1"]],
     })
-    unknown = attach_startup_evidence(industry, emotion, policy)
-    assert unknown.startup_evidence_status.iloc[0] == "UNKNOWN"
-    confirmed = attach_startup_evidence(
+    partial = attach_startup_evidence(industry, emotion, policy)
+    assert partial.policy_catalyst_component.iloc[0] == True
+    assert pd.isna(partial.policy_catalyst_component.iloc[1])
+    assert partial.startup_evidence_status.tolist() == ["CONFIRMED", "UNKNOWN"]
+    complete = attach_startup_evidence(
         industry, emotion, policy, policy_archive_complete=True
     )
-    assert confirmed.startup_evidence_status.iloc[0] == "CONFIRMED"
-    assert not confirmed.startup_live_eligible.any()
+    assert complete.policy_catalyst_component.tolist() == [True, False]
+    assert complete.startup_evidence_status.tolist() == ["CONFIRMED", "NOT_CONFIRMED"]
+    assert not partial.startup_live_eligible.any()
 
 
 def test_peak_and_decay_are_independent_and_missing_stays_unknown():
