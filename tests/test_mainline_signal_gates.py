@@ -158,3 +158,27 @@ def test_policy_event_uses_first_trading_close_after_weekend_or_post_close():
     monday = out[out.trade_date.eq(pd.Timestamp("2026-01-05"))]
     assert friday.policy_catalyst_component.tolist() == [False, False]
     assert monday.policy_catalyst_component.tolist() == [True, True]
+
+
+def test_capital_leadership_gate_matches_default_ignition_strength_threshold():
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-02"],
+        "industry_code": ["I1"],
+        "turnover_share": [0.04],
+        "turnover_share_change_3d": [0.01],
+        "strength_3d_percentile": [0.677],
+        "relative_strength_change_2d": [0.02],
+    })
+    emotion = pd.DataFrame({
+        "trade_date": ["2026-01-01", "2026-01-02"],
+        "market_cycle": ["ICE", "RECOVERY"],
+    })
+    policy = pd.DataFrame({
+        "available_at": ["2026-01-02T06:00:00Z"],
+        "industry_codes": [["I1"]],
+        "impact_direction": ["positive"],
+    })
+    out = attach_startup_evidence(industry, emotion, policy)
+    assert out.capital_leadership_top_quintile.iloc[0]
+    assert out.capital_concentration_component.iloc[0]
+    assert out.startup_evidence_status.iloc[0] == "CONFIRMED"
