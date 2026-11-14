@@ -53,6 +53,33 @@ def test_only_positive_policy_match_is_known_under_incomplete_archive():
     assert not partial.startup_live_eligible.any()
 
 
+def test_capital_gate_exposes_each_condition_without_relaxing_composite():
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-02"],
+        "industry_code": ["I1"],
+        "turnover_share": [0.04],
+        "turnover_share_change_3d": [0.01],
+        "strength_3d_percentile": [0.60],
+        "relative_strength_change_2d": [0.02],
+    })
+    emotion = pd.DataFrame({
+        "trade_date": ["2026-01-01", "2026-01-02"],
+        "market_cycle": ["ICE", "RECOVERY"],
+    })
+    policy = pd.DataFrame({
+        "available_at": ["2026-01-02T08:00:00Z"],
+        "industry_codes": [["I1"]],
+        "impact_direction": ["positive"],
+    })
+    out = attach_startup_evidence(industry, emotion, policy)
+    assert out.capital_turnover_share_positive.iloc[0]
+    assert out.capital_turnover_share_increasing.iloc[0]
+    assert not out.capital_leadership_top_quintile.iloc[0]
+    assert out.capital_relative_strength_accelerating.iloc[0]
+    assert not out.capital_concentration_component.iloc[0]
+    assert out.startup_evidence_status.iloc[0] == "NOT_CONFIRMED"
+
+
 def test_peak_and_decay_are_independent_and_missing_stays_unknown():
     frame = pd.DataFrame({
         "strength_percentile": [0.95, 0.2, None],
