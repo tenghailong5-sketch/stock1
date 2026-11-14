@@ -98,3 +98,20 @@ def test_frozen_chronological_holdout_uses_later_dates_without_tuning():
     assert summary["threshold_search_used"] is False
     assert summary["holdout_used_for_selection"] is False
     assert summary["historical_pit_eligible"] is False
+
+
+def test_frozen_holdout_rejects_empty_or_nonpositive_horizons():
+    from src.model.mainline_validation import evaluate_frozen_chronological_holdout
+
+    frame = pd.DataFrame({"trade_date": ["2026-01-01"]})
+    with pytest.raises(ValueError, match="horizons must contain positive integer"):
+        evaluate_frozen_chronological_holdout(frame, horizons=())
+    with pytest.raises(ValueError, match="horizons must contain positive integer"):
+        evaluate_frozen_chronological_holdout(frame, horizons=(0,))
+
+
+def test_frozen_holdout_rejects_missing_validation_columns_before_date_access():
+    from src.model.mainline_validation import evaluate_frozen_chronological_holdout
+
+    with pytest.raises(ValueError, match="missing validation fields"):
+        evaluate_frozen_chronological_holdout(pd.DataFrame({"close": [1]}))
