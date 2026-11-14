@@ -99,5 +99,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sw2021-live-snapshot
-          path: |\n            sw2021-live-snapshot.csv\n            sw2021-historical-valid-time-ledger.csv
+          path: |
+            sw2021-live-snapshot.csv
+            sw2021-historical-valid-time-ledger.csv
           retention-days: 7
