@@ -85,7 +85,7 @@ def main():
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if os.getenv("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
-            handle.write(f"trade_date={result['trade_date']}\\n")
+            handle.write(f"trade_date={result['trade_date']}\n")
 
 
 if __name__ == "__main__":
