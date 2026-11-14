@@ -1,11 +1,7 @@
 name: Free Data Provider Qualification
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/probe_baostock.py"
-      - ".github/workflows/data-provider-probe.yml"
+
 permissions:
   contents: read
 concurrency:
