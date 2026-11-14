@@ -64,3 +64,39 @@ def test_mainline_rejects_missing_values():
     }])
     with pytest.raises(ValueError):
         classify_mainlines(frame)
+
+def test_real_archived_market_aggregates_can_be_replayed_but_are_not_pit():
+    from pathlib import Path
+    import json
+
+    root = Path("data/forward_archive")
+    breadth_files = sorted((root / "market_breadth").glob("*.jsonl"))
+    sentiment_files = sorted((root / "market_sentiment").glob("*.jsonl"))
+    assert len(breadth_files) >= 100
+    breadth = {}
+    sentiment = {}
+    for path in breadth_files:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        assert len(rows) == 1
+        breadth[path.stem] = rows[0]
+    for path in sentiment_files:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        assert len(rows) == 1
+        sentiment[path.stem] = rows[0]
+    days = sorted(set(breadth) & set(sentiment))
+    assert len(days) >= 100
+    frame = pd.DataFrame([{
+        "trade_date": day,
+        "breadth": breadth[day]["breadth"],
+        "limit_up_count": sentiment[day]["limit_up_count"],
+        "limit_down_count": sentiment[day]["limit_down_count"],
+        "available_time": max(breadth[day]["available_time"], sentiment[day]["available_time"]),
+        "historical_pit_eligible": False,
+    } for day in days])
+    out = classify_market_cycle(frame)
+    assert out.market_cycle.ne("UNKNOWN").sum() >= 90
+    assert out.historical_pit_eligible.eq(False).all()
+    # Archived rows were retrieved retrospectively; they cannot be used as if
+    # they had been available at each original trading-session close.
+    assert (pd.to_datetime(out.available_time, utc=True).dt.date >
+            pd.to_datetime(out.trade_date).dt.date).all()
