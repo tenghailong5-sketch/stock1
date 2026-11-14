@@ -126,3 +126,19 @@ def test_official_policy_archive_obeys_publisher_availability_dates():
     assert len(after_all) == 4
     assert after_all.confidence.between(0, 1).all()
     assert after_all.industry_codes.map(lambda values: len(values) > 0).all()
+
+def test_raw_market_emotion_assembler_preserves_full_archive_history():
+    from src.model.m3_assembler import assemble_market_emotion_history
+
+    result = assemble_market_emotion_history(
+        Path("data/forward_archive"),
+        decision_time="2026-11-14T23:59:59+08:00",
+        min_sessions=100,
+    )
+    assert result["status"] == "READY", result
+    assert result["valid_sessions"] >= 100
+    classified = classify_market_cycle(result["history"])
+    assert classified.market_cycle.ne("UNKNOWN").sum() >= 95
+    assert "ICE" in set(classified.market_cycle)
+    assert "HEAT" in set(classified.market_cycle)
+    assert classified.historical_pit_eligible.eq(False).all()
