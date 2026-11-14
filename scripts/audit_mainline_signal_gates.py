@@ -10,6 +10,7 @@ from src.model.mainline_signal_gates import (
     audit_emotion_history,
     attach_startup_evidence,
     evaluate_peak_and_decay_independently,
+    gate_ignition_labels,
 )
 
 
@@ -26,14 +27,10 @@ def main() -> None:
         phases, emotion, policy, policy_archive_complete=False
     )
     lifecycle = evaluate_peak_and_decay_independently(startup)
-    # The legacy phase classifier's IGNITION is a candidate only. Do not expose
-    # it as a confirmed start unless all three independent evidence gates pass.
-    lifecycle["mainline_phase_candidate"] = lifecycle["mainline_phase"]
-    lifecycle["mainline_phase_gated"] = lifecycle["mainline_phase_candidate"]
+    # Legacy IGNITION remains a candidate until all three independent gates pass.
+    lifecycle = gate_ignition_labels(lifecycle)
     ignition_candidate = lifecycle["mainline_phase_candidate"].eq("IGNITION")
     confirmed = lifecycle["startup_evidence_status"].eq("CONFIRMED").fillna(False)
-    lifecycle.loc[ignition_candidate & ~confirmed, "mainline_phase_gated"] = "IGNITION_UNCONFIRMED"
-    lifecycle["startup_live_eligible"] = False
     lifecycle.to_csv(output / "sw_mainline_independent_evidence.csv", index=False)
     audit = {
         "emotion_data_availability": audit_emotion_history(emotion),
