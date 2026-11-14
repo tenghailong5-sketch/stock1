@@ -1,28 +1,8 @@
 name: SW Industry Mainline Historical Replay
 
 on:
+  # Data collection and historical replay run only when explicitly requested.
   workflow_dispatch:
-  push:
-    branches:
-      - feat/policy-sentiment-mainline-architecture
-    paths:
-      - "scripts/replay_sw_mainlines.py"
-      - "scripts/audit_mainline_signal_gates.py"
-      - "tests/test_mainline_validation.py"
-      - "tests/test_mainline_threshold_research.py"
-      - "tests/test_mainline_signal_gates.py"
-      - "src/providers/sw_industry.py"
-      - "src/providers/sw_api_industry.py"
-      - "src/providers/eastmoney_market_emotion.py"
-      - "tests/test_eastmoney_market_emotion.py"
-      - "src/model/mainline_flows.py"
-      - "src/model/mainline_validation.py"
-      - "src/model/mainline_signal_gates.py"
-      - "src/model/market_cycle.py"
-      - "src/model/m3_assembler.py"
-      - "src/model/policy_catalysts.py"
-      - "data/policy_catalysts/official_policy_events.jsonl"
-      - ".github/workflows/sw-industry-mainline-replay.yml"
 concurrency:
   group: sw-mainline-replay-${{ github.ref }}
   cancel-in-progress: true
