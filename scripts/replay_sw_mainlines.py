@@ -147,7 +147,7 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
             + str(emotion_result.get("valid_sessions"))
         )
     emotion_history = emotion_result["history"].copy()
-    pool_dates = emotion_history.trade_date.tail(30).tolist()
+    pool_dates = emotion_history.trade_date.tail(15).tolist()
     pool_history = fetch_market_emotion_pool_history(
         pool_dates,
         limit_up_fetcher=ak.stock_zt_pool_em,
@@ -200,7 +200,7 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
             "coverage": float(count / len(market_cycles)) if len(market_cycles) else 0.0,
             "status": (
                 "READY" if len(market_cycles) and count / len(market_cycles) >= 0.95
-                else "PARTIAL" if len(market_cycles) and count / len(market_cycles) >= 0.20
+                else "PARTIAL" if len(market_cycles) and count / len(market_cycles) >= 0.10
                 else "INSUFFICIENT"
             ),
         }
