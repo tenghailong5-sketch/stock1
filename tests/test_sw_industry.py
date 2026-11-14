@@ -170,3 +170,31 @@ def test_sw_history_unmapped_codes_are_audited_not_mapped(monkeypatch):
     assert result.iloc[0]["current_member_symbol_count"] == 1
     assert result.iloc[0]["not_current_member_symbol_count"] == 1
     assert result.iloc[0]["mapping_status"] == "unmapped_outside_sw2021_dictionary"
+    assert result.iloc[0]["mapping_precision"] == "unresolved_no_unique_sw2021_prefix"
+    assert result.iloc[0]["industry_level3_candidate"] == ""
+
+
+
+def test_sw_history_unmapped_audit_exposes_only_unique_prefix_candidates(monkeypatch):
+    def fake_sheet_rows(content):
+        if content.endswith(b"code-file"):
+            return (["行业代码", "一级行业名称", "二级行业名称", "三级行业名称"],
+                    iter([["110101", "农林牧渔", "种植业", "种子"],
+                          ["110102", "农林牧渔", "种植业", "粮食种植"],
+                          ["220201", "基础化工", "化学原料", "纯碱"]]))
+        return (["股票代码", "计入日期", "行业代码"],
+                iter([["000001", 45000, "110199"],
+                      ["000002", 45001, "990001"]]))
+    monkeypatch.setattr(sw_industry, "_sheet_rows", fake_sheet_rows)
+    result = sw_industry.fetch_sw_industry_unmapped_history_audit(
+        session=Session(), current_symbols={"000001"}
+    ).set_index("industry_code")
+    candidate = result.loc["110199"]
+    assert candidate["industry_level1_candidate"] == "农林牧渔"
+    assert candidate["industry_level2_candidate"] == "种植业"
+    assert candidate["industry_level3_candidate"] == ""
+    assert candidate["mapping_precision"] == "level2_prefix_candidate_unverified"
+    unresolved = result.loc["990001"]
+    assert unresolved["industry_level1_candidate"] == ""
+    assert unresolved["industry_level2_candidate"] == ""
+    assert unresolved["mapping_precision"] == "unresolved_no_unique_sw2021_prefix"
