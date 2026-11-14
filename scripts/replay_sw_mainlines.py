@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 import akshare as ak
@@ -33,6 +34,7 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
             )
             frame["industry_name"] = str(name)
             frames.append(frame)
+            time.sleep(0.2)
         except Exception as exc:
             failures.append(f"{code}:{type(exc).__name__}:{str(exc)[:180]}")
     if failures:
