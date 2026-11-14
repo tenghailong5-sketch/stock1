@@ -1,0 +1,31 @@
+name: Probe Historical Market Emotion Pools
+
+on:
+  # Data collection and historical replay run only when explicitly requested.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Probe recent and historical trading dates
+        run: python scripts/probe_market_emotion_pools.py
+      - name: Upload provider probe
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-emotion-pool-probe
+          path: output/market_emotion_pool_probe.json
+          if-no-files-found: warn

@@ -61,6 +61,7 @@ def test_fetch_sw_index_history_normalizes_official_payload_and_provenance():
     )
     assert len(result) == 7
     assert result.industry_code.eq("801010").all()
+    assert result.iloc[-1].return_3 == pytest.approx(110 / 103 - 1)
     assert result.iloc[-1].return_5 == pytest.approx(110 / 101 - 1)
     assert result.iloc[-1].amount == 1060
     assert result.historical_pit_eligible.eq(False).all()
@@ -79,3 +80,48 @@ def test_fetch_sw_index_history_rejects_invalid_code_and_empty_data():
             "801010", start_date="20261102", end_date="20261108",
             session=FakeSession({TREND_URL: {"data": []}}),
         )
+
+def test_fetch_sw_first_level_index_list_retries_transient_timeout(monkeypatch):
+    import requests
+
+    class FlakySession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise requests.exceptions.ReadTimeout("temporary upstream timeout")
+            rows = [
+                {"swindexcode": f"80{i:04d}", "swindexname": f"industry-{i}"}
+                for i in range(1, 22)
+            ]
+            return FakeResponse({"data": {"results": rows, "count": len(rows)}})
+
+    monkeypatch.setattr("src.providers.sw_api_industry.time.sleep", lambda _: None)
+    session = FlakySession()
+    result = fetch_sw_api_first_level_index_list(session=session)
+    assert len(result) == 21
+    assert session.calls == 2
+
+
+def test_recent_official_sw_universe_snapshot_is_validated(tmp_path):
+    import json
+    from scripts.replay_sw_mainlines import _load_recent_sw_universe
+
+    observed = pd.Timestamp.now(tz="UTC").isoformat()
+    path = tmp_path / "universe.jsonl"
+    rows = [
+        {
+            "industry_code": f"80{i:04d}",
+            "industry_name": f"industry-{i}",
+            "observed_at": observed,
+            "source_id": "swsresearch.index_publish.current",
+            "historical_pit_eligible": False,
+        }
+        for i in range(1, 22)
+    ]
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    result = _load_recent_sw_universe(path)
+    assert len(result) == 21
+    assert result.industry_code.is_unique

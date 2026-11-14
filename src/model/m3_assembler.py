@@ -293,6 +293,7 @@ def assemble_market_emotion_history(
             breadth_by_date[day] = max(preferred or eligible, key=lambda item: item[0])[1]
 
     sentiment_by_date = {}
+    sentiment_context_by_date = {}
     for path in sorted((root / "market_sentiment").glob("*.jsonl")):
         for row in _read_jsonl(path):
             day = str(row.get("trade_date", ""))
@@ -318,12 +319,31 @@ def assemble_market_emotion_history(
                     or (preferred and not old_preferred)
                     or (preferred == old_preferred and captured > old[0])
                 ):
-                    sentiment_by_date[day] = (captured, row)
+                    sentiment_by_date[day] = (captured, row, available)
+
+                optional_fields = (
+                    "board_failure_rate", "promotion_rate",
+                    "highest_observed_limit_up_streak", "strong_pool_count",
+                    "limit_up_streak_observed_count", "limit_up_streak_missing_count",
+                    "opened_rate", "opened_rate_status",
+                )
+                if any(row.get(field) is not None for field in optional_fields):
+                    old_context = sentiment_context_by_date.get(day)
+                    if old_context is None or captured > old_context[0]:
+                        sentiment_context_by_date[day] = (captured, row, available)
+
 
     rows, warnings = [], []
     for day in sorted(set(breadth_by_date) & set(sentiment_by_date)):
         breadth = breadth_by_date[day]
-        sentiment_captured, sentiment = sentiment_by_date[day]
+        sentiment_captured, sentiment, sentiment_available = sentiment_by_date[day]
+        context_pair = sentiment_context_by_date.get(day)
+        if context_pair is None:
+            context_captured, sentiment_context, context_available = (
+                sentiment_captured, sentiment, sentiment_available
+            )
+        else:
+            context_captured, sentiment_context, context_available = context_pair
         coverage = pd.to_numeric(breadth.get("breadth_coverage"), errors="coerce")
         amount = pd.to_numeric(breadth.get("total_amount"), errors="coerce")
         breadth_ratio = pd.to_numeric(breadth.get("breadth"), errors="coerce")
@@ -357,8 +377,19 @@ def assemble_market_emotion_history(
             sentiment.get("available_time", sentiment.get("capture_time")),
             "sentiment available_time",
         )
-        board_failure = pd.to_numeric(sentiment.get("board_failure_rate"), errors="coerce")
-        promotion = pd.to_numeric(sentiment.get("promotion_rate"), errors="coerce")
+        board_failure = pd.to_numeric(sentiment_context.get("board_failure_rate"), errors="coerce")
+        promotion = pd.to_numeric(sentiment_context.get("promotion_rate"), errors="coerce")
+        highest_streak = pd.to_numeric(
+            sentiment_context.get("highest_observed_limit_up_streak"), errors="coerce"
+        )
+        strong_pool = pd.to_numeric(sentiment_context.get("strong_pool_count"), errors="coerce")
+        streak_observed = pd.to_numeric(
+            sentiment_context.get("limit_up_streak_observed_count"), errors="coerce"
+        )
+        streak_missing = pd.to_numeric(
+            sentiment_context.get("limit_up_streak_missing_count"), errors="coerce"
+        )
+        opened_rate = pd.to_numeric(sentiment_context.get("opened_rate"), errors="coerce")
         rows.append({
             "trade_date": pd.Timestamp(day),
             "breadth": float(breadth_ratio),
@@ -370,9 +401,29 @@ def assemble_market_emotion_history(
             "promotion_rate": (
                 float(promotion) if pd.notna(promotion) and 0 <= promotion <= 1 else np.nan
             ),
+            "highest_observed_limit_up_streak": (
+                float(highest_streak) if pd.notna(highest_streak) and highest_streak >= 0 else np.nan
+            ),
+            "strong_pool_count": (
+                float(strong_pool) if pd.notna(strong_pool) and strong_pool >= 0 else np.nan
+            ),
+            "limit_up_streak_observed_count": (
+                float(streak_observed) if pd.notna(streak_observed) and streak_observed >= 0 else np.nan
+            ),
+            "limit_up_streak_missing_count": (
+                float(streak_missing) if pd.notna(streak_missing) and streak_missing >= 0 else np.nan
+            ),
+            "opened_rate": (
+                float(opened_rate) if pd.notna(opened_rate) and 0 <= opened_rate <= 1 else np.nan
+            ),
+            "opened_rate_status": sentiment_context.get("opened_rate_status"),
+            "sentiment_context_source_id": sentiment_context.get("source_id"),
+            "sentiment_context_available_time": context_available,
             "total_amount": float(amount),
             "breadth_coverage": float(coverage),
-            "available_time": max(breadth_available, sentiment_available),
+            "available_time": max(
+                breadth_available, sentiment_available, context_available
+            ),
             "breadth_source_id": breadth.get("source_id"),
             "sentiment_source_id": sentiment.get("source_id"),
             "historical_pit_eligible": False,

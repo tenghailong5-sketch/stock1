@@ -52,6 +52,7 @@ def test_mainline_detects_ignition_peak_and_decay():
             share = [0.02, 0.03, 0.04, 0.08, 0.09, 0.09, 0.08, 0.07, 0.06, 0.02, 0.01][i] if j == 0 else 0.02
             rows.append({
                 "trade_date": day, "industry_code": f"I{j}",
+                "industry_return_3d": strength, "market_return_3d": 0,
                 "industry_return_5d": strength, "market_return_5d": 0,
                 "turnover": share * 1000, "market_turnover": 1000,
                 "expected_industry_count": 5,
@@ -68,6 +69,7 @@ def test_mainline_detects_ignition_peak_and_decay():
 def test_mainline_rejects_missing_values():
     frame = pd.DataFrame([{
         "trade_date": "2026-01-01", "industry_code": "I1",
+        "industry_return_3d": None, "market_return_3d": 0,
         "industry_return_5d": None, "market_return_5d": 0,
         "turnover": 1, "market_turnover": 10, "expected_industry_count": 1,
     }])
@@ -97,6 +99,7 @@ def test_real_m3_archive_replays_market_emotion_history():
 def test_mainline_rejects_incomplete_industry_cross_section():
     frame = pd.DataFrame([{
         "trade_date": "2026-01-01", "industry_code": "I1",
+        "industry_return_3d": 1, "market_return_3d": 0,
         "industry_return_5d": 1, "market_return_5d": 0,
         "turnover": 100, "market_turnover": 1000,
         "expected_industry_count": 5,
@@ -114,6 +117,16 @@ def test_official_policy_archive_obeys_publisher_availability_dates():
     assert set(before_mofcom_page.event_id) == {
         "cn_policy_ai_manufacturing_20260109",
         "cn_policy_new_quality_productivity_20261014",
+        "cn_policy_smart_factory_20260717",
+        "cn_policy_new_battery_20260928",
+        "cn_policy_smart_connected_ev_20260910",
+        "cn_policy_ai_software_20260911",
+        "cn_policy_electronic_info_plan_20260915",
+        "cn_policy_pharma_industry_plan_20260918",
+        "cn_policy_ai_energy_20260509",
+        "cn_policy_ai_information_communication_20260610",
+        "cn_policy_ai_consumption_20260618",
+        "cn_policy_industry_decarbonization_20260615",
     }
     after_mofcom_page = visible_policy_events(
         events, decision_time="2026-10-20T23:59:59+08:00"
@@ -123,8 +136,20 @@ def test_official_policy_archive_obeys_publisher_availability_dates():
     after_all = visible_policy_events(
         events, decision_time="2026-10-22T23:59:59+08:00"
     )[0]
-    assert len(after_all) == 4
+    assert len(after_all) == 14
+    assert {
+        "cn_policy_smart_factory_20260717",
+        "cn_policy_new_battery_20260928",
+        "cn_policy_smart_connected_ev_20260910",
+        "cn_policy_ai_software_20260911",
+        "cn_policy_electronic_info_plan_20260915",
+        "cn_policy_pharma_industry_plan_20260918",
+    }.issubset(set(after_all.event_id))
     assert after_all.confidence.between(0, 1).all()
+    assert after_all.availability_basis.isin({
+        "publisher_timestamp", "publisher_date_eod_conservative",
+        "document_date_plus_publication_date",
+    }).all()
     assert after_all.industry_codes.map(lambda values: len(values) > 0).all()
 
 def test_raw_market_emotion_assembler_preserves_full_archive_history():
@@ -141,4 +166,73 @@ def test_raw_market_emotion_assembler_preserves_full_archive_history():
     assert classified.market_cycle.ne("UNKNOWN").sum() >= 95
     assert "ICE" in set(classified.market_cycle)
     assert "HEAT" in set(classified.market_cycle)
+    assert "highest_observed_limit_up_streak" in result["history"].columns
+    assert "strong_pool_count" in result["history"].columns
+    assert result["history"].highest_observed_limit_up_streak.notna().sum() >= 1
     assert classified.historical_pit_eligible.eq(False).all()
+
+
+def test_emotion_assembler_merges_supplemental_fields_without_replacing_primary_counts(tmp_path):
+    import json
+    from src.model.m3_assembler import assemble_market_emotion_history
+
+    breadth_dir = tmp_path / "market_breadth"
+    sentiment_dir = tmp_path / "market_sentiment"
+    breadth_dir.mkdir()
+    sentiment_dir.mkdir()
+    (breadth_dir / "2026-01-05.jsonl").write_text(json.dumps({
+        "snapshot_time": "2026-01-05T08:00:00Z",
+        "available_time": "2026-01-05T08:00:00Z",
+        "breadth": 0.55, "breadth_coverage": 1.0,
+        "total_amount": 1000, "total_amount_status": "complete_provider_snapshot_sum",
+        "source_id": "primary.breadth",
+    }) + "\n", encoding="utf-8")
+    rows = [
+        {
+            "trade_date": "2026-01-05",
+            "capture_time": "2026-01-05T08:00:00Z",
+            "available_time": "2026-01-05T08:00:00Z",
+            "limit_up_count": 10, "limit_down_count": 2,
+            "source_id": "kaipanhong.market_emotion_kph",
+        },
+        {
+            "trade_date": "2026-01-05",
+            "capture_time": "2026-01-05T09:00:00Z",
+            "available_time": "2026-01-05T09:00:00Z",
+            "limit_up_count": 12, "limit_down_count": 1,
+            "highest_observed_limit_up_streak": 4,
+            "strong_pool_count": 50,
+            "source_id": "secondary.limit_pool",
+        },
+    ]
+    (sentiment_dir / "2026-01-05.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+    result = assemble_market_emotion_history(
+        tmp_path, decision_time="2026-01-05T18:00:00+08:00", min_sessions=1,
+    )
+    assert result["status"] == "READY", result
+    row = result["history"].iloc[0]
+    assert row.limit_up_count == 10
+    assert row.limit_down_count == 2
+    assert row.highest_observed_limit_up_streak == 4
+    assert row.strong_pool_count == 50
+    assert row.sentiment_source_id == "kaipanhong.market_emotion_kph"
+    assert row.sentiment_context_source_id == "secondary.limit_pool"
+    assert pd.Timestamp(row.available_time) == pd.Timestamp("2026-01-05T09:00:00Z")
+
+
+def test_market_cycle_uses_validated_board_failure_and_promotion_rates():
+    frame = pd.DataFrame({
+        "trade_date": pd.date_range("2026-01-01", periods=4),
+        "breadth": [0.55, 0.56, 0.57, 0.58],
+        "limit_up_count": [20, 21, 22, 23],
+        "limit_down_count": [5, 5, 4, 4],
+        "board_failure_rate": [None, None, None, 0.50],
+        "promotion_rate": [None, None, None, 0.60],
+    })
+    result = classify_market_cycle(frame)
+    assert result.iloc[-1].market_cycle == "EXHAUSTION"
+    assert result.iloc[-1].cycle_reason == "board_failure_or_promotion_collapse"
+    assert result.iloc[-1].market_cycle_data_basis == "breadth_limit_and_board_metrics"
+    assert result.iloc[0].market_cycle_data_basis == "breadth_and_limit_counts_only"

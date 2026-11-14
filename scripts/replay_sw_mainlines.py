@@ -6,24 +6,68 @@ import json
 import time
 from pathlib import Path
 
+import akshare as ak
 import pandas as pd
 import requests
 
 from src.model.mainline_flows import classify_mainlines
+from src.model.mainline_validation import (
+    evaluate_frozen_chronological_holdout, evaluate_mainline_transitions,
+)
 from src.model.market_cycle import classify_market_cycle
 from src.model.m3_assembler import (
     assemble_m3_history, assemble_market_emotion_history,
 )
 from src.model.policy_catalysts import visible_policy_events
+from src.providers.eastmoney_market_emotion import fetch_market_emotion_pool_history
 from src.providers.sw_api_industry import (
     fetch_sw_api_first_level_index_list,
     fetch_sw_api_industry_index_history,
 )
 
 
+def _load_recent_sw_universe(path: Path, *, max_age_days: int = 7) -> pd.DataFrame:
+    """Load a recent, previously verified official taxonomy snapshot on API outage."""
+    if not path.exists():
+        raise RuntimeError("cached SW first-level industry universe is missing")
+    cached = pd.read_json(path, lines=True)
+    required = {"industry_code", "industry_name", "observed_at", "source_id"}
+    missing = required - set(cached.columns)
+    if missing:
+        raise RuntimeError("cached SW universe missing fields: " + ",".join(sorted(missing)))
+    cached["industry_code"] = cached.industry_code.astype(str)
+    cached["industry_name"] = cached.industry_name.astype(str)
+    observed = pd.to_datetime(cached.observed_at, errors="coerce", utc=True)
+    if observed.isna().any() or observed.nunique() != 1:
+        raise RuntimeError("cached SW universe has invalid or inconsistent snapshot time")
+    age = pd.Timestamp.now(tz="UTC") - observed.iloc[0]
+    if age < pd.Timedelta(0) or age > pd.Timedelta(days=max_age_days):
+        raise RuntimeError("cached SW universe snapshot is stale")
+    if (
+        cached.industry_code.duplicated().any()
+        or (~cached.industry_code.str.fullmatch(r"\d{6}")).any()
+        or cached.industry_name.str.strip().eq("").any()
+        or not cached.source_id.eq("swsresearch.index_publish.current").all()
+    ):
+        raise RuntimeError("cached SW universe contains invalid or duplicate industries")
+    result = cached[["industry_code", "industry_name"]].copy()
+    if len(result) < 20:
+        raise RuntimeError("cached SW first-level industry universe is incomplete")
+    return result
+
+
 def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output")) -> dict:
     session = requests.Session()
-    groups = fetch_sw_api_first_level_index_list(session=session)
+    universe_source = "official_api_live"
+    universe_fallback_reason = None
+    try:
+        groups = fetch_sw_api_first_level_index_list(session=session)
+    except requests.exceptions.RequestException as exc:
+        groups = _load_recent_sw_universe(
+            Path("data/forward_archive/sw_industry_universe/2026-11-14.jsonl")
+        )
+        universe_source = "recent_verified_official_snapshot_fallback"
+        universe_fallback_reason = f"{type(exc).__name__}: {str(exc)[:180]}"
     expected = len(groups)
     if expected < 20:
         raise RuntimeError(f"SW first-level industry list unexpectedly small: {expected}")
@@ -39,6 +83,12 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
             frame["industry_name"] = str(name)
             frames.append(frame)
             time.sleep(0.2)
+        except requests.exceptions.RequestException as exc:
+            failures.append(f"{code}:{type(exc).__name__}:{str(exc)[:180]}")
+            raise RuntimeError(
+                "SW industry history endpoint is unavailable; stopping early "
+                f"after transient network failure for {code}"
+            ) from exc
         except Exception as exc:
             failures.append(f"{code}:{type(exc).__name__}:{str(exc)[:180]}")
     if failures:
@@ -64,28 +114,56 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     market["trade_date"] = pd.to_datetime(market["trade_date"], errors="coerce").dt.normalize()
     market["close"] = pd.to_numeric(market["close"], errors="coerce")
     market = market.dropna(subset=["trade_date", "close"]).sort_values("trade_date")
+    market["market_return_3d"] = market["close"].div(market["close"].shift(3)).sub(1)
     market["market_return_5d"] = market["close"].div(market["close"].shift(5)).sub(1)
+    market = market.rename(columns={"close": "market_close"})
 
     panel["trade_date"] = pd.to_datetime(panel["trade_date"], errors="coerce").dt.normalize()
+    panel["industry_return_3d"] = pd.to_numeric(panel["return_3"], errors="coerce")
     panel["industry_return_5d"] = pd.to_numeric(panel["return_5"], errors="coerce")
+    panel["industry_close"] = pd.to_numeric(panel["close"], errors="coerce")
     panel["turnover"] = pd.to_numeric(panel["amount"], errors="coerce")
     daily_total = panel.groupby("trade_date")["turnover"].sum().rename("market_turnover")
     panel = panel.merge(daily_total, on="trade_date", how="left", validate="many_to_one")
     panel = panel.merge(
-        market[["trade_date", "market_return_5d"]],
+        market[["trade_date", "market_return_3d", "market_return_5d", "market_close"]],
         on="trade_date", how="left", validate="many_to_one",
     )
-    panel = panel.dropna(subset=["industry_return_5d", "market_return_5d", "turnover", "market_turnover"])
+    panel = panel.dropna(subset=[
+        "industry_return_3d", "market_return_3d",
+        "industry_return_5d", "market_return_5d", "turnover", "market_turnover",
+    ])
     panel["expected_industry_count"] = expected
     panel["historical_pit_eligible"] = False
     if panel.empty:
         raise RuntimeError("no aligned industry/market history remains after date joins")
 
     phases = classify_mainlines(panel[[
-        "trade_date", "industry_code", "industry_return_5d", "market_return_5d",
+        "trade_date", "industry_code", "industry_return_3d", "market_return_3d",
+        "industry_return_5d", "market_return_5d",
         "turnover", "market_turnover", "expected_industry_count",
         "industry_name", "available_time", "source_id", "source_revision",
     ]])
+    validation_input = panel[[
+        "trade_date", "industry_code", "industry_close", "market_close",
+    ]].merge(
+        phases[["trade_date", "industry_code", "mainline_phase", "phase_transition"]],
+        on=["trade_date", "industry_code"], how="inner", validate="one_to_one",
+    )
+    validation_events, validation_summary = evaluate_mainline_transitions(
+        validation_input, horizons=(5, 10, 20)
+    )
+    holdout_events, holdout_summary = evaluate_frozen_chronological_holdout(
+        validation_input, horizons=(5, 10, 20), train_fraction=0.60,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    holdout_events.to_csv(
+        output_dir / "sw_mainline_frozen_holdout_events.csv", index=False
+    )
+    # Keep the current classifier frozen: no threshold search or test-period tuning.
+    validation_path = output_dir / "sw_mainline_transition_validation.csv"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    validation_events.to_csv(validation_path, index=False)
     market_decision_time = pd.Timestamp.now(tz="Asia/Shanghai")
     m3_result = assemble_m3_history(
         Path("data/forward_archive"), index_symbol="000001",
@@ -102,11 +180,77 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
             "raw market emotion archive is not ready: "
             + str(emotion_result.get("valid_sessions"))
         )
-    market_cycles = classify_market_cycle(emotion_result["history"])
+    emotion_history = emotion_result["history"].copy()
+    pool_dates = emotion_history.trade_date.tail(15).tolist()
+    pool_history = fetch_market_emotion_pool_history(
+        pool_dates,
+        limit_up_fetcher=ak.stock_zt_pool_em,
+        broken_board_fetcher=ak.stock_zt_pool_zbgc_em,
+        strong_pool_fetcher=ak.stock_zt_pool_strong_em,
+    )
+    pool_history["trade_date"] = pd.to_datetime(pool_history.trade_date).dt.normalize()
+    emotion_history["trade_date"] = pd.to_datetime(emotion_history.trade_date).dt.normalize()
+    pool_history = pool_history.rename(columns={
+        "available_time": "pool_history_available_time",
+        "availability_basis": "pool_history_availability_basis",
+        "historical_pit_eligible": "pool_history_pit_eligible",
+        "source_revision": "pool_history_source_revision",
+    })
+    emotion_history = emotion_history.merge(
+        pool_history, on="trade_date", how="left", validate="one_to_one",
+        suffixes=("", "_pool"),
+    )
+    for field in (
+        "highest_observed_limit_up_streak", "strong_pool_count",
+        "board_failure_rate", "promotion_rate",
+    ):
+        pool_field = field + "_pool"
+        if pool_field in emotion_history.columns:
+            emotion_history[field] = emotion_history[pool_field].combine_first(
+                emotion_history[field]
+            )
+    if "pool_history_available_time" in emotion_history.columns:
+        emotion_history["available_time"] = emotion_history.apply(
+            lambda row: max(
+                row.available_time, row.pool_history_available_time
+            ) if pd.notna(row.pool_history_available_time) else row.available_time,
+            axis=1,
+        )
+    pool_history_path = output_dir / "sw_mainline_market_emotion_pool_history.csv"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pool_history.to_csv(pool_history_path, index=False)
+    market_cycles = classify_market_cycle(emotion_history)
     market_cycles["trade_date"] = pd.to_datetime(market_cycles.trade_date).dt.normalize()
+    market_cycle_path = output_dir / "sw_mainline_market_cycle_history.csv"
+    market_cycles.to_csv(market_cycle_path, index=False)
+    emotion_field_counts = {
+        field: int(market_cycles[field].notna().sum())
+        for field in (
+            "highest_observed_limit_up_streak", "strong_pool_count",
+            "board_failure_rate", "promotion_rate", "opened_rate",
+        )
+    }
+    emotion_field_coverage = {
+        field: {
+            "observations": count,
+            "coverage": float(count / len(market_cycles)) if len(market_cycles) else 0.0,
+            "status": (
+                "READY" if len(market_cycles) and count / len(market_cycles) >= 0.95
+                else "PARTIAL" if len(market_cycles) and count / len(market_cycles) >= 0.10
+                else "INSUFFICIENT"
+            ),
+        }
+        for field, count in emotion_field_counts.items()
+    }
     market_cycle_map = market_cycles.set_index("trade_date")["market_cycle"].to_dict()
+    market_cycle_basis_map = market_cycles.set_index("trade_date")[
+        "market_cycle_data_basis"
+    ].to_dict()
     phases["trade_date"] = pd.to_datetime(phases.trade_date).dt.normalize()
     phases["market_cycle"] = phases.trade_date.map(market_cycle_map).fillna("UNKNOWN")
+    phases["market_cycle_data_basis"] = phases.trade_date.map(
+        market_cycle_basis_map
+    ).fillna("UNKNOWN")
     phases["market_cycle_pit_eligible"] = False
     phases["historical_pit_eligible"] = False
     phases["availability_basis"] = "retrieval_time_only"
@@ -211,6 +355,8 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     summary = {
         "status": "RETROSPECTIVE_REPLAY_COMPLETE",
         "industry_count": expected,
+        "industry_universe_source": universe_source,
+        "industry_universe_fallback_reason": universe_fallback_reason,
         "complete_trade_dates": int(phases.trade_date.nunique()),
         "rows": int(len(phases)),
         "phase_counts": {str(k): int(v) for k, v in counts.items()},
@@ -219,6 +365,12 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "visible_policy_events": int(len(visible_events)),
         "policy_event_industry_pairs": int(len(alignment)),
         "policy_ignition_alignment_counts": {str(k): int(v) for k, v in alignment_counts.items()},
+        "outcome_validation": validation_summary,
+        "outcome_validation_events": int(len(validation_events)),
+        "frozen_chronological_holdout": holdout_summary,
+        "frozen_holdout_events": int(len(holdout_events)),
+        "outcome_validation_output": str(validation_path),
+        "ignition_threshold_research": "DISABLED_FROZEN_CLASSIFIER_NO_THRESHOLD_SEARCH",
         "market_m3_status": m3_result.get("status"),
         "market_emotion_archive_status": emotion_result.get("status"),
         "market_emotion_archive_sessions": int(emotion_result.get("valid_sessions", 0)),
@@ -230,6 +382,35 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         ),
         "board_failure_rate_observations": int(market_cycles.board_failure_rate.notna().sum()),
         "promotion_rate_observations": int(market_cycles.promotion_rate.notna().sum()),
+        "limit_streak_observations": int(
+            market_cycles.highest_observed_limit_up_streak.notna().sum()
+        ),
+        "strong_pool_observations": int(market_cycles.strong_pool_count.notna().sum()),
+        "opened_rate_observations": int(market_cycles.opened_rate.notna().sum()),
+        "opened_rate_status_counts": {
+            str(k): int(v) for k, v in market_cycles.opened_rate_status.value_counts(
+                dropna=False
+            ).to_dict().items()
+        },
+        "market_emotion_field_coverage": emotion_field_coverage,
+        "market_emotion_advanced_context_status": (
+            "READY" if all(
+                item["status"] == "READY"
+                for item in emotion_field_coverage.values()
+            ) else "PARTIAL" if any(
+                item["status"] == "PARTIAL"
+                for item in emotion_field_coverage.values()
+            ) else "INSUFFICIENT"
+        ),
+        "market_emotion_pool_history_rows": int(len(pool_history)),
+        "market_emotion_pool_history_ready_rows": int(
+            pool_history.pool_history_status.eq("READY").sum()
+        ),
+        "market_emotion_pool_history_output": str(pool_history_path),
+        "market_cycle_history_output": str(market_cycle_path),
+        "market_cycle_data_basis_counts": {
+            str(k): int(v) for k, v in market_cycles.market_cycle_data_basis.value_counts().to_dict().items()
+        },
         "market_cycle_counts": {
             str(k): int(v) for k, v in market_cycles.market_cycle.value_counts().to_dict().items()
         },
