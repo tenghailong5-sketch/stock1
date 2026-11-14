@@ -89,27 +89,34 @@ jobs:
           if ledger["historical_pit_eligible"].ne(False).any():
               raise SystemExit("SW historical ledger incorrectly marks rows PIT-eligible")
 
-          latest = (
-              ledger.sort_values(["symbol", "valid_from"], kind="stable")
+          # Match the snapshot's selection rule: latest row with a code in
+          # the SW2021 dictionary. Preserve outside-dictionary rows in ledger,
+          # but do not let them override the mapped current-membership check.
+          mapped_history = ledger.loc[
+              ledger["industry_codebook_status"].eq("sw2021_dictionary_match")
+          ]
+          latest_mapped = (
+              mapped_history.sort_values(["symbol", "valid_from"], kind="stable")
               .drop_duplicates("symbol", keep="last")
               .set_index("symbol")["industry_code"]
               .sort_index()
           )
           current = snapshot.set_index("symbol")["industry_code"].sort_index()
-          if not latest.index.equals(current.index):
-              missing_current = sorted(set(current.index) - set(latest.index))[:10]
-              missing_history = sorted(set(latest.index) - set(current.index))[:10]
+          missing_history = sorted(set(current.index) - set(latest_mapped.index))
+          if missing_history:
               raise SystemExit(
-                  "SW history/current symbol universe mismatch: "
-                  f"missing_history={missing_current} missing_current={missing_history}"
+                  "Current SW members missing from mapped historical ledger: "
+                  f"{missing_history[:20]}"
               )
-          mismatch = latest.ne(current)
+          comparable = current.index.intersection(latest_mapped.index)
+          mismatch = latest_mapped.loc[comparable].ne(current.loc[comparable])
           if mismatch.any():
               raise SystemExit(
-                  "SW history latest industry differs from current snapshot: "
-                  f"{latest[mismatch].head(10).to_dict()}"
+                  "SW mapped history latest industry differs from current snapshot: "
+                  f"{latest_mapped.loc[comparable][mismatch].head(10).to_dict()}"
               )
-
+          historical_only = latest_mapped.index.difference(current.index)
+          
           Path("sw2021-historical-valid-time-ledger.csv").write_text(
               ledger.to_csv(index=False), encoding="utf-8"
           )
@@ -131,7 +138,8 @@ jobs:
               f"valid_from_max={ledger['valid_from'].max().date()} "
               f"multi_record_symbols={int(multi.sum())} "
               f"closed_intervals={int(closed.sum())} "
-              f"current_symbol_match={len(current)} "
+              f"current_symbol_match={len(comparable)} "
+              f"historical_only_symbols={len(historical_only)} "
               f"latest_industry_mismatches={int(mismatch.sum())} "
               f"pit_eligible={int(ledger['historical_pit_eligible'].sum())}"
           )
