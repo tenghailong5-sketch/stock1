@@ -102,7 +102,7 @@ def normalize_cni_historical_industry(
 
 
 def fetch_cni_historical_industry(
-    index_symbols, *, ak_module=None, fetched_at=None
+    index_symbols=(CNI_BROAD_A_SHARE_INDEX,), *, ak_module=None, fetched_at=None
 ) -> pd.DataFrame:
     """Fetch explicit CNI index universes; fail as a whole on any failed index.
 
