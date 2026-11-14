@@ -570,7 +570,7 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None):
     if watchlist is None or watchlist.empty:
         return pd.DataFrame(columns=["symbol", "market_state"])
 
-    base = watchlist.copy()
+    base = watchlist.copy().reset_index(drop=True)
     symbol_col = "symbol" if "symbol" in base else "代码"
     if symbol_col not in base:
         raise ValueError("watchlist requires symbol or 代码")
