@@ -5,7 +5,8 @@ import pandas as pd
 
 
 REQUIRED = {"trade_date", "industry_code", "industry_return_5d",
-            "market_return_5d", "turnover", "market_turnover"}
+            "market_return_5d", "turnover", "market_turnover",
+            "expected_industry_count"}
 
 
 def classify_mainlines(frame: pd.DataFrame) -> pd.DataFrame:
@@ -25,6 +26,20 @@ def classify_mainlines(frame: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("mainline input contains missing required observations")
     if (out[["turnover", "market_turnover"]] < 0).any().any():
         raise ValueError("turnover cannot be negative")
+    if (out.expected_industry_count.isna().any()
+            or (pd.to_numeric(out.expected_industry_count, errors="coerce") <= 0).any():
+        raise ValueError("expected_industry_count must be positive")
+    out["expected_industry_count"] = pd.to_numeric(
+        out["expected_industry_count"], errors="raise"
+    ).astype(int)
+    if out.duplicated(["trade_date", "industry_code"]).any():
+        raise ValueError("duplicate industry/date rows are not allowed")
+    observed_counts = out.groupby("trade_date")["industry_code"].nunique()
+    expected_counts = out.groupby("trade_date")["expected_industry_count"].nunique()
+    if expected_counts.ne(1).any() or (
+        observed_counts != out.groupby("trade_date")["expected_industry_count"].first()
+    ).any():
+        raise ValueError("incomplete or inconsistent industry peer universe")
     if (out.market_turnover <= 0).any():
         raise ValueError("market_turnover must be positive")
     out["relative_strength_5d"] = out.industry_return_5d - out.market_return_5d
