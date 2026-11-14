@@ -18,6 +18,19 @@ def _valid_pool(frame, required: set[str]) -> bool:
     return isinstance(frame, pd.DataFrame) and required.issubset(set(frame.columns))
 
 
+
+def _fetch_with_retry(fetcher: Callable, ymd: str):
+    last_error = None
+    for attempt in range(3):
+        try:
+            return fetcher(date=ymd)
+        except Exception as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+    raise last_error
+
+
 def fetch_market_emotion_pool_history(
     trade_dates: Iterable,
     *,
@@ -42,17 +55,17 @@ def fetch_market_emotion_pool_history(
         ymd = pd.Timestamp(day).strftime("%Y%m%d")
         errors = []
         try:
-            limit_up = limit_up_fetcher(date=ymd)
+            limit_up = _fetch_with_retry(limit_up_fetcher, ymd)
         except Exception as exc:
             limit_up = None
             errors.append("limit_up:" + type(exc).__name__)
         try:
-            broken = broken_board_fetcher(date=ymd)
+            broken = _fetch_with_retry(broken_board_fetcher, ymd)
         except Exception as exc:
             broken = None
             errors.append("broken_board:" + type(exc).__name__)
         try:
-            strong = strong_pool_fetcher(date=ymd)
+            strong = _fetch_with_retry(strong_pool_fetcher, ymd)
         except Exception as exc:
             strong = None
             errors.append("strong_pool:" + type(exc).__name__)
