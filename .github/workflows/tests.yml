@@ -1,0 +1,64 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run test suite
+        run: python -m pytest -q
+      - name: Live CNI 399317 endpoint smoke test
+        run: |
+          python - <<'PY'
+          from src.providers.akshare_cni_industry import fetch_cni_historical_industry
+          frame = fetch_cni_historical_industry()
+          print({
+              "index": "399317",
+              "rows": len(frame),
+              "unique_symbols": int(frame["symbol"].nunique()),
+              "snapshot_dates": int(frame["membership_date"].nunique()),
+              "first_snapshot": str(frame["membership_date"].min().date()),
+              "last_snapshot": str(frame["membership_date"].max().date()),
+              "industries": int(frame["industry_name"].nunique()),
+              "pit_eligible_rows": int(frame["historical_pit_eligible"].sum()),
+          })
+          assert not frame.empty
+          assert frame["historical_pit_eligible"].eq(False).all()
+          PY
+      - name: Live CNI historical constituent endpoint smoke test
+        run: |
+          python - <<'PY'
+          import akshare as ak
+
+          required = {"日期", "样本代码", "所属行业"}
+          frame = ak.index_detail_hist_cni(symbol="399005")
+          print({
+              "index": "399005",
+              "historical_rows": len(frame),
+              "unique_symbols": int(frame["样本代码"].nunique()) if "样本代码" in frame else 0,
+              "snapshot_dates": int(frame["日期"].nunique()) if "日期" in frame else 0,
+              "first_snapshot": str(frame["日期"].min()) if "日期" in frame else None,
+              "last_snapshot": str(frame["日期"].max()) if "日期" in frame else None,
+              "industries": int(frame["所属行业"].nunique()) if "所属行业" in frame else 0,
+          })
+          assert not frame.empty
+          assert required.issubset(frame.columns)
+          PY
