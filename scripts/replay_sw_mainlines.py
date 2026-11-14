@@ -187,6 +187,8 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     pool_history.to_csv(pool_history_path, index=False)
     market_cycles = classify_market_cycle(emotion_history)
     market_cycles["trade_date"] = pd.to_datetime(market_cycles.trade_date).dt.normalize()
+    market_cycle_path = output_dir / "sw_mainline_market_cycle_history.csv"
+    market_cycles.to_csv(market_cycle_path, index=False)
     emotion_field_counts = {
         field: int(market_cycles[field].notna().sum())
         for field in (
@@ -207,8 +209,14 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         for field, count in emotion_field_counts.items()
     }
     market_cycle_map = market_cycles.set_index("trade_date")["market_cycle"].to_dict()
+    market_cycle_basis_map = market_cycles.set_index("trade_date")[
+        "market_cycle_data_basis"
+    ].to_dict()
     phases["trade_date"] = pd.to_datetime(phases.trade_date).dt.normalize()
     phases["market_cycle"] = phases.trade_date.map(market_cycle_map).fillna("UNKNOWN")
+    phases["market_cycle_data_basis"] = phases.trade_date.map(
+        market_cycle_basis_map
+    ).fillna("UNKNOWN")
     phases["market_cycle_pit_eligible"] = False
     phases["historical_pit_eligible"] = False
     phases["availability_basis"] = "retrieval_time_only"
@@ -366,6 +374,10 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
             pool_history.pool_history_status.eq("READY").sum()
         ),
         "market_emotion_pool_history_output": str(pool_history_path),
+        "market_cycle_history_output": str(market_cycle_path),
+        "market_cycle_data_basis_counts": {
+            str(k): int(v) for k, v in market_cycles.market_cycle_data_basis.value_counts().to_dict().items()
+        },
         "market_cycle_counts": {
             str(k): int(v) for k, v in market_cycles.market_cycle.value_counts().to_dict().items()
         },
