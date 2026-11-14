@@ -130,6 +130,7 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         max_turnover_share_percentile=("turnover_share_percentile", "max"),
     ).reset_index()
     segments = segments[segments.mainline_phase.isin(["IGNITION", "PEAK", "DECAY"])]
+    segments["historical_pit_eligible"] = False
     segments_path = output_dir / "sw_mainline_phase_segments.csv"
     segments.to_csv(segments_path, index=False)
 
@@ -188,6 +189,7 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
                 ),
                 "trade_session_lag": lag_sessions,
                 "alignment_status": status,
+                "historical_pit_eligible": False,
                 "interpretation": "temporal_coincidence_only_not_causal_validation",
             })
     alignment = pd.DataFrame(alignment_rows)
@@ -225,6 +227,8 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "end_date": str(phases.trade_date.max().date()),
         "historical_pit_eligible": False,
         "output": str(csv_path),
+        "phase_segments_output": str(segments_path),
+        "policy_alignment_output": str(alignment_path),
     }
     (output_dir / "sw_mainline_phase_replay_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
