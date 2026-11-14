@@ -107,10 +107,10 @@ def test_rolling_percentile_uses_midrank_for_ties_and_extremes():
     assert _rolling_percentile(tied).iloc[-1] == pytest.approx(0.5)
 
     increasing = pd.Series(range(60), dtype=float)
-    assert _rolling_percentile(increasing).iloc[-1] == pytest.approx(1.0)
+    assert _rolling_percentile(increasing).iloc[-1] == pytest.approx(59.5 / 60)
 
     decreasing = pd.Series(range(60, 0, -1), dtype=float)
-    assert _rolling_percentile(decreasing).iloc[-1] == pytest.approx(1 / 60)
+    assert _rolling_percentile(decreasing).iloc[-1] == pytest.approx(0.5 / 60)
 
     invalid = pd.Series([1.0] * 59 + [np.inf])
     assert pd.isna(_rolling_percentile(invalid).iloc[-1])
