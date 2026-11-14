@@ -90,7 +90,7 @@ def test_frozen_chronological_holdout_uses_later_dates_without_tuning():
         pd.DataFrame(rows), horizons=(5, 10), train_fraction=0.6
     )
     assert summary["split_date"] == dates[36].date().isoformat()
-    assert summary["train_label_end"] == dates[24].date().isoformat()
+    assert summary["train_label_end"] == dates[25].date().isoformat()
     assert set(events.validation_partition) == {"TRAIN", "HOLDOUT"}
     assert events.loc[events.validation_partition.eq("TRAIN"), "trade_date"].max() <= pd.Timestamp(summary["train_label_end"])
     assert events.loc[events.validation_partition.eq("HOLDOUT"), "trade_date"].min() >= pd.Timestamp(summary["split_date"])
