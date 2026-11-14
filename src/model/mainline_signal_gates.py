@@ -11,7 +11,7 @@ import pandas as pd
 EMOTION_FIELDS = (
     "breadth", "limit_up_count", "limit_down_count",
     "highest_observed_limit_up_streak", "strong_pool_count",
-    "board_failure_rate", "promotion_rate",
+    "board_failure_rate", "promotion_rate", "opened_rate",
 )
 
 
