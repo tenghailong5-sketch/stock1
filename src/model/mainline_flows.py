@@ -51,17 +51,20 @@ def classify_mainlines(frame: pd.DataFrame) -> pd.DataFrame:
     out["turnover_share_change_3d"] = out.groupby("industry_code").turnover_share.diff(3)
     out["relative_strength_change_3d"] = out.groupby("industry_code").relative_strength_5d.diff(3)
     out["strength_percentile"] = out.groupby("trade_date").relative_strength_5d.rank(pct=True)
+    out["turnover_share_percentile"] = out.groupby("trade_date").turnover_share.rank(pct=True)
     ready = out.turnover_share_change_3d.notna() & out.relative_strength_change_3d.notna()
     out["mainline_phase"] = "UNKNOWN"
     out["phase_transition"] = False
     out["phase_reason"] = "three_session_warmup"
     ignition_candidate = (
         ready & (out.strength_percentile >= 0.8)
+        & (out.turnover_share_percentile >= 0.5)
         & (out.turnover_share_change_3d > 0)
         & (out.relative_strength_change_3d > 0)
     )
     peak_candidate = (
         ready & (out.strength_percentile >= 0.8)
+        & (out.turnover_share_percentile >= 0.5)
         & (out.turnover_share_change_3d <= 0)
         & (out.relative_strength_change_3d <= 0)
     )
