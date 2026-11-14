@@ -68,7 +68,7 @@ jobs:
           import pandas as pd
           from src.providers.sw_industry import (
               fetch_sw_current_industry_membership_snapshot,
-              fetch_sw_industry_valid_time_ledger,
+              fetch_sw_industry_valid_time_ledger,\n              fetch_sw_industry_unmapped_history_audit,
           )
 
           snapshot = fetch_sw_current_industry_membership_snapshot()
@@ -133,5 +133,5 @@ jobs:
           name: sw2021-live-snapshot
           path: |
             sw2021-live-snapshot.csv
-            sw2021-historical-valid-time-ledger.csv
+            sw2021-historical-valid-time-ledger.csv\n            sw-history-unmapped-code-audit.csv
           retention-days: 7
