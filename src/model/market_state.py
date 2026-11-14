@@ -20,7 +20,13 @@ REQUIRED = {
 def _rolling_percentile(values: pd.Series, window: int = 60) -> pd.Series:
     def rank_last(x):
         current = x[-1]
-        return float(np.mean(x <= current)) if np.isfinite(current) else np.nan
+        if not np.isfinite(current) or not np.isfinite(x).all():
+            return np.nan
+        # Mid-rank ties: an all-equal 60-session window is neutral (50th
+        # percentile), not an artificial 100th-percentile extreme.
+        less = np.count_nonzero(x < current)
+        equal = np.count_nonzero(x == current)
+        return float((less + 0.5 * equal) / len(x))
     return values.astype(float).rolling(window, min_periods=window).apply(rank_last, raw=True)
 
 
