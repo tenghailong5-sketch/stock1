@@ -103,7 +103,12 @@ def test_frozen_chronological_holdout_uses_later_dates_without_tuning():
 def test_frozen_holdout_rejects_empty_or_nonpositive_horizons():
     from src.model.mainline_validation import evaluate_frozen_chronological_holdout
 
-    frame = pd.DataFrame({"trade_date": ["2026-01-01"]})
+    dates = pd.date_range("2026-01-01", periods=40)
+    frame = pd.DataFrame([{
+        "trade_date": day, "industry_code": "I1",
+        "mainline_phase": "TRANSITION", "phase_transition": False,
+        "industry_close": 100 + i, "market_close": 100 + i * 0.1,
+    } for i, day in enumerate(dates)])
     with pytest.raises(ValueError, match="horizons must contain positive integer"):
         evaluate_frozen_chronological_holdout(frame, horizons=())
     with pytest.raises(ValueError, match="horizons must contain positive integer"):
