@@ -10,6 +10,8 @@ import pandas as pd
 import requests
 
 from src.model.mainline_flows import classify_mainlines
+from src.model.market_cycle import classify_market_cycle
+from src.model.m3_assembler import assemble_m3_history
 from src.model.policy_catalysts import visible_policy_events
 from src.providers.sw_api_industry import (
     fetch_sw_api_first_level_index_list,
@@ -82,6 +84,23 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "turnover", "market_turnover", "expected_industry_count",
         "industry_name", "available_time", "source_id", "source_revision",
     ]])
+    market_decision_time = pd.Timestamp.now(tz="Asia/Shanghai")
+    m3_result = assemble_m3_history(
+        Path("data/forward_archive"), index_symbol="000001",
+        decision_time=market_decision_time.isoformat(),
+    )
+    if m3_result.get("status") != "READY":
+        raise RuntimeError("M3 historical market archive is not ready: " + str(m3_result.get("status")))
+    market_history = m3_result["history"].rename(columns={
+        "limit_up_cnt": "limit_up_count",
+        "limit_down_cnt": "limit_down_count",
+    })
+    market_cycles = classify_market_cycle(market_history)
+    market_cycles["trade_date"] = pd.to_datetime(market_cycles.trade_date).dt.normalize()
+    market_cycle_map = market_cycles.set_index("trade_date")["market_cycle"].to_dict()
+    phases["trade_date"] = pd.to_datetime(phases.trade_date).dt.normalize()
+    phases["market_cycle"] = phases.trade_date.map(market_cycle_map).fillna("UNKNOWN")
+    phases["market_cycle_pit_eligible"] = False
     phases["historical_pit_eligible"] = False
     phases["availability_basis"] = "retrieval_time_only"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -156,6 +175,10 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
                 "industry_name": industry_names.get(str(code), "UNMAPPED"),
                 "first_possible_trade_date": first_possible_day,
                 "first_ignition_date": first_ignition,
+                "market_cycle_on_first_ignition": (
+                    market_cycle_map.get(first_ignition, "UNKNOWN")
+                    if pd.notna(first_ignition) else "UNKNOWN"
+                ),
                 "trade_session_lag": lag_sessions,
                 "alignment_status": status,
                 "interpretation": "temporal_coincidence_only_not_causal_validation",
@@ -174,6 +197,13 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         "visible_policy_events": int(len(visible_events)),
         "policy_event_industry_pairs": int(len(alignment)),
         "policy_ignition_alignment_counts": {str(k): int(v) for k, v in alignment_counts.items()},
+        "market_m3_status": m3_result.get("status"),
+        "market_cycle_sessions": int(len(market_cycles)),
+        "market_cycle_counts": {
+            str(k): int(v) for k, v in market_cycles.market_cycle.value_counts().to_dict().items()
+        },
+        "market_cycle_decision_time": market_decision_time.isoformat(),
+        "market_cycle_historical_pit_eligible": False,
         "policy_availability_audit": policy_audit,
         "policy_alignment_interpretation": "temporal_coincidence_only_not_causal_validation",
         "phase_first_dates": {
