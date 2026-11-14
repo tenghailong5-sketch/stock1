@@ -61,6 +61,7 @@ def prepare_kronos_history(
         raise ValueError("decision_time must be timezone-aware")
     cutoff_utc = cutoff.tz_convert("UTC")
 
+    original_count = len(frame)
     data = frame.copy()
     available = pd.to_datetime(data["available_time"], errors="coerce")
     if available.isna().any() or available.dt.tz is None:
@@ -74,6 +75,7 @@ def prepare_kronos_history(
     decision_local = cutoff.tz_convert("Asia/Shanghai").tz_localize(None)
     data["timestamp"] = timestamps
     data = data.loc[data["timestamp"] <= decision_local].copy()
+    eligible_count_before_lookback = len(data)
     if data.empty:
         raise ValueError("no non-future bars remain at decision_time")
     if data["timestamp"].duplicated().any():
@@ -104,7 +106,8 @@ def prepare_kronos_history(
         "input_first_bar_time": data["timestamp"].iloc[0].isoformat(),
         "input_last_bar_time": data["timestamp"].iloc[-1].isoformat(),
         "decision_time": cutoff.isoformat(),
-        "future_or_late_rows_excluded": int(len(frame) - len(data)),
+        "future_or_late_rows_excluded": int(original_count - eligible_count_before_lookback),
+        "older_rows_trimmed_for_lookback": int(eligible_count_before_lookback - len(data)),
         "availability_rule": "available_time<=decision_time",
     }
     return data[list(MODEL_COLUMNS)].copy(), x_timestamp, audit
