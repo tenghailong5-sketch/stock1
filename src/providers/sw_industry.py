@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import ssl
+from functools import lru_cache
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ INTERMEDIATE_URL = (
 INTERMEDIATE_SHA256 = "05DC9EDC0FDDF A975A1432EF806EC780078B5362AD45AF76DB15C907630DB25D".replace(" ", "")
 
 
+@lru_cache(maxsize=1)
 def _trusted_intermediate_bundle(*, timeout: int = 15) -> str:
     """Append the pinned GeoTrust intermediate CA to certifi's normal trust roots."""
     response = requests.get(INTERMEDIATE_URL, timeout=timeout)
@@ -421,6 +423,27 @@ def fetch_sw_industry_unmapped_history_audit(
 
 
 
+def _fetch_sw_index_history_api(symbol: str, *, timeout: int = 30) -> pd.DataFrame:
+    """Read the public SW trend API directly when AKShare's column adapter breaks."""
+    url = "https://www.swsresearch.com/institute-sw/api/index_publish/trend/"
+    params = {"swindexcode": str(symbol), "period": "DAY"}
+    response = requests.get(
+        url,
+        params=params,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+        },
+        timeout=timeout,
+        verify=_trusted_intermediate_bundle(),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        raise ValueError("SW trend API returned an invalid data payload")
+    return pd.DataFrame(payload["data"])
+
+
 def fetch_sw_industry_index_history(
     symbol: str, *, clock=None, history_fetcher=None
 ) -> pd.DataFrame:
@@ -434,15 +457,26 @@ def fetch_sw_industry_index_history(
     if len(code) != 6 or not code.isdigit():
         raise ValueError("SW industry index symbol must be a six-digit code")
     now = clock or (lambda: datetime.now(timezone.utc))
-    if history_fetcher is None:
+    use_native_adapter = history_fetcher is None
+    if use_native_adapter:
         import akshare as ak
         history_fetcher = ak.index_hist_sw
-    raw = history_fetcher(symbol=code, period="day")
+    try:
+        raw = history_fetcher(symbol=code, period="day")
+    except KeyError:
+        if not use_native_adapter:
+            raise
+        # AKShare's wrapper selects legacy Chinese columns; if the upstream
+        # payload changes, it raises before returning the underlying data.
+        raw = _fetch_sw_index_history_api(code)
     if raw is None or raw.empty:
-        raise ValueError(f"SW industry index history is empty: {code}")
+        if use_native_adapter:
+            raw = _fetch_sw_index_history_api(code)
+        if raw is None or raw.empty:
+            raise ValueError(f"SW industry index history is empty: {code}")
 
     aliases = {
-        "日期": "trade_date", "date": "trade_date",
+        "日期": "trade_date", "date": "trade_date", "bargaindate": "trade_date",
         "收盘": "close", "closeindex": "close",
         "开盘": "open", "openindex": "open",
         "最高": "high", "maxindex": "high",
@@ -455,6 +489,11 @@ def fetch_sw_industry_index_history(
     missing = required - set(frame.columns)
     if missing:
         raise ValueError("SW industry index history missing columns: " + ",".join(sorted(missing)))
+    # Some index families omit optional OHLC/volume fields. Keep those values
+    # explicitly missing; close is sufficient for the return-factor adapter.
+    for column in ("open", "high", "low", "volume", "amount"):
+        if column not in frame:
+            frame[column] = pd.NA
     frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
     frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
     frame = frame.dropna(subset=["trade_date", "close"]).sort_values("trade_date")
