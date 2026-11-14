@@ -210,3 +210,43 @@ def test_ignition_gate_emits_delayed_confirmation_without_backdating():
     assert out.phase_transition_gated.tolist() == [False, False, False, True, True]
     assert out.phase_gate_reason.iloc[3] == "ignition_confirmed_after_evidence_arrived"
     assert not out.startup_live_eligible.any()
+
+
+def test_startup_capital_gate_uses_pit_stock_turnover_when_supplied():
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-02", "2026-01-02"],
+        "industry_code": ["I1", "I2"],
+        "expected_industry_count": [2, 2],
+        "turnover_share": [0.9, 0.1],
+        "turnover_share_change_3d": [0.02, 0.01],
+        "strength_3d_percentile": [0.95, 0.80],
+        "relative_strength_change_2d": [0.03, 0.02],
+    })
+    emotion = pd.DataFrame({
+        "trade_date": ["2026-01-01", "2026-01-02"],
+        "market_cycle": ["ICE", "RECOVERY"],
+    })
+    policy = pd.DataFrame({
+        "available_at": ["2026-01-02T06:00:00Z"],
+        "industry_codes": [["I1"]],
+        "impact_direction": ["positive"],
+    })
+    pit = pd.DataFrame({
+        "trade_date": ["2026-01-02", "2026-01-02"],
+        "industry_code": ["I1", "I2"],
+        "turnover": [40.0, 60.0],
+        "available_time": ["2026-01-02T06:30:00Z"] * 2,
+        "decision_time": ["2026-01-02T07:00:00Z"] * 2,
+        "availability_basis": ["source_published_at"] * 2,
+        "historical_pit_eligible": [True, True],
+    })
+    out = attach_startup_evidence(
+        industry, emotion, policy, pit_stock_turnover=pit
+    )
+    first = out.set_index("industry_code").loc["I1"]
+    assert first["stock_turnover_share"] == 0.4
+    assert first["capital_concentration_basis"] == "pit_stock_turnover_share"
+    assert bool(first["capital_turnover_share_positive"])
+    # The much larger index-turnover share is not substituted for stock-level data.
+    assert first["turnover_share"] == 0.9
+    assert not out["startup_live_eligible"].any()
