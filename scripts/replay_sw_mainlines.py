@@ -108,6 +108,7 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     )
     threshold_input = panel[[
         "trade_date", "industry_code", "industry_close", "market_close",
+        "industry_return_3d", "market_return_3d",
         "industry_return_5d", "market_return_5d", "turnover",
         "market_turnover", "expected_industry_count",
     ]].merge(
