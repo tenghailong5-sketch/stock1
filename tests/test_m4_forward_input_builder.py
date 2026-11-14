@@ -8,7 +8,7 @@ CUTOFF = "2026-11-14T12:00:00Z"
 AVAILABLE = "2026-11-14T10:00:00Z"
 
 
-def _bars(identity_col, identity, periods=50):
+def _bars(identity_col, identity, periods=70):
     dates = pd.date_range("2026-09-01", periods=periods, freq="B")
     return pd.DataFrame({
         "trade_date": dates,
