@@ -56,7 +56,7 @@ def main() -> None:
         "policy_catalyst_component",
         "capital_turnover_share_positive",
         "capital_turnover_share_increasing",
-        "capital_leadership_top_quintile",
+        "capital_leadership_at_ignition_threshold",
         "capital_relative_strength_accelerating",
         "capital_concentration_component",
     ]
