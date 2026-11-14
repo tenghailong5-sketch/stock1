@@ -6,7 +6,9 @@ The optional upstream Kronos package is imported only when a model is loaded.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Sequence
+import sys
 
 import numpy as np
 import pandas as pd
@@ -22,6 +24,7 @@ class KronosConfig:
     model_name: str = "NeoQuasar/Kronos-small"
     tokenizer_name: str = "NeoQuasar/Kronos-Tokenizer-base"
     device: str = "cpu"
+    repo_path: str | None = None
     lookback: int = 256
     sample_count: int = 1
     temperature: float = 1.0
@@ -169,6 +172,10 @@ class KronosAdapter:
 
     def _get_predictor(self):
         if self.predictor is None:
+            if self.config.repo_path:
+                upstream_root = str(Path(self.config.repo_path).expanduser().resolve())
+                if upstream_root not in sys.path:
+                    sys.path.insert(0, upstream_root)
             try:
                 from model import Kronos, KronosPredictor, KronosTokenizer
             except ImportError as exc:
