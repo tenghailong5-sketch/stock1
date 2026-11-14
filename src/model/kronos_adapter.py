@@ -123,6 +123,8 @@ def summarize_forecast(prediction: pd.DataFrame, *, last_close: float) -> dict:
         raise ValueError("Kronos prediction is empty or non-finite")
     if (values[list(PRICE_COLUMNS)] <= 0).any().any():
         raise ValueError("Kronos predicted prices must be positive")
+    if (values[["volume", "amount"]] < 0).any().any():
+        raise ValueError("Kronos predicted volume and amount cannot be negative")
     if (values["high"] < values[["open", "close", "low"]].max(axis=1)).any():
         raise ValueError("Kronos predicted high violates OHLC")
     if (values["low"] > values[["open", "close", "high"]].min(axis=1)).any():
