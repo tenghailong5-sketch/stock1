@@ -28,6 +28,11 @@ INTERMEDIATE_URL = (
 )
 # Published SHA-1 certificate thumbprint from DigiCert/Microsoft CA-chain records.
 INTERMEDIATE_SHA1 = "60707270F2100EE2B771FEC9EFFAD8C9BFFE3358"
+GEOTRUST_INTERMEDIATE_URL = (
+    "http://cacerts.digicert.cn/"
+    "GeoTrustG2TLSCNRSA4096SHA2562022CA1.crt"
+)
+GEOTRUST_INTERMEDIATE_SHA256 = "05DC9EDC0FDDF A975A1432EF806EC780078B5362AD45AF76DB15C907630DB25D".replace(" ", "")
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -39,30 +44,41 @@ HEADERS = {
 
 
 def _trusted_intermediate_bundle(*, timeout: int = 15) -> str:
-    """Build a temporary CA bundle; never disable certificate verification."""
-    response = requests.get(INTERMEDIATE_URL, timeout=timeout)
-    response.raise_for_status()
-    payload = response.content
-    if payload.startswith(b"-----BEGIN CERTIFICATE-----"):
-        pem = payload
-        der = ssl.PEM_cert_to_DER_cert(payload.decode("ascii"))
-    else:
-        der = payload
-        pem = ssl.DER_cert_to_PEM_cert(payload).encode("ascii")
-    fingerprint = hashlib.sha1(der).hexdigest().upper()
-    if fingerprint != INTERMEDIATE_SHA1:
-        raise RuntimeError(
-            "DigiCert intermediate certificate fingerprint mismatch: " + fingerprint
-        )
-
+    """Build a certifi bundle with pinned SW-host intermediates; never disable TLS."""
     base_bundle = Path(requests.certs.where()).read_bytes()
+    pinned = [
+        (INTERMEDIATE_URL, "sha1", INTERMEDIATE_SHA1),
+        (GEOTRUST_INTERMEDIATE_URL, "sha256", GEOTRUST_INTERMEDIATE_SHA256),
+    ]
+    certificates = []
+    failures = []
+    for url, algorithm, expected in pinned:
+        try:
+            response = requests.get(url, timeout=timeout)
+            response.raise_for_status()
+            payload = response.content
+            if payload.startswith(b"-----BEGIN CERTIFICATE-----"):
+                pem = payload
+                der = ssl.PEM_cert_to_DER_cert(payload.decode("ascii"))
+            else:
+                der = payload
+                pem = ssl.DER_cert_to_PEM_cert(payload).encode("ascii")
+            actual = hashlib.sha1(der).hexdigest().upper() if algorithm == "sha1" else hashlib.sha256(der).hexdigest().upper()
+            if actual != expected:
+                raise RuntimeError("pinned SW intermediate certificate fingerprint mismatch: " + actual)
+            certificates.append(pem)
+        except Exception as exc:
+            failures.append(f"{url}: {type(exc).__name__}: {exc}")
+    if not certificates:
+        raise RuntimeError("unable to retrieve any pinned SW intermediate: " + " | ".join(failures))
     handle = tempfile.NamedTemporaryFile(
         prefix="fhm-sw-ca-", suffix=".pem", delete=False
     )
     try:
         handle.write(base_bundle)
-        handle.write(b"\n")
-        handle.write(pem)
+        for pem in certificates:
+            handle.write(b"\n")
+            handle.write(pem)
         handle.flush()
         return handle.name
     finally:
