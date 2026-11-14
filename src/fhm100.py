@@ -522,6 +522,10 @@ def audit_forward_industry_membership(archive_root, expected_symbols, *, decisio
         "akshare.stock_board_industry_cons_em",
         "akshare.stock_individual_info_em",
         "baostock.query_stock_industry",
+        # Official SW2021 XLS snapshot is the selected complete taxonomy in the
+        # forward collector. Excluding it here silently downgraded a 100%
+        # snapshot to Sina's partial 46.9% snapshot during the daily audit.
+        "swsresearch.sw2021_stock_classification",
     }
     membership = membership.loc[
         membership["source_id"].astype(str).isin(supported_sources)
