@@ -134,6 +134,21 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         )
     market_cycles = classify_market_cycle(emotion_result["history"])
     market_cycles["trade_date"] = pd.to_datetime(market_cycles.trade_date).dt.normalize()
+    emotion_field_counts = {
+        field: int(market_cycles[field].notna().sum())
+        for field in (
+            "highest_observed_limit_up_streak", "strong_pool_count",
+            "board_failure_rate", "promotion_rate", "opened_rate",
+        )
+    }
+    emotion_field_coverage = {
+        field: {
+            "observations": count,
+            "coverage": float(count / len(market_cycles)) if len(market_cycles) else 0.0,
+            "status": "READY" if len(market_cycles) and count / len(market_cycles) >= 0.95 else "INSUFFICIENT",
+        }
+        for field, count in emotion_field_counts.items()
+    }
     market_cycle_map = market_cycles.set_index("trade_date")["market_cycle"].to_dict()
     phases["trade_date"] = pd.to_datetime(phases.trade_date).dt.normalize()
     phases["market_cycle"] = phases.trade_date.map(market_cycle_map).fillna("UNKNOWN")
@@ -275,6 +290,13 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
                 dropna=False
             ).to_dict().items()
         },
+        "market_emotion_field_coverage": emotion_field_coverage,
+        "market_emotion_advanced_context_status": (
+            "READY" if all(
+                item["status"] == "READY"
+                for item in emotion_field_coverage.values()
+            ) else "INSUFFICIENT"
+        ),
         "market_cycle_counts": {
             str(k): int(v) for k, v in market_cycles.market_cycle.value_counts().to_dict().items()
         },
