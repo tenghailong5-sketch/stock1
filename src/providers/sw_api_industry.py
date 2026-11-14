@@ -1,8 +1,8 @@
 """Forward-only current SW industry membership via the official SW index API.
 
 TLS verification stays enabled. If the SW host omits its intermediate CA, the
-adapter downloads the published DigiCert intermediate, checks its pinned SHA-1
-fingerprint, and adds it to a temporary copy of the normal trust bundle.
+adapter downloads pinned DigiCert/GeoTrust intermediates and adds verified
+certificates to a temporary copy of the normal trust bundle.
 """
 from __future__ import annotations
 
