@@ -23,6 +23,7 @@ def classify_market_cycle(frame: pd.DataFrame) -> pd.DataFrame:
     if out[list(REQUIRED - {"trade_date"})].isna().any().any():
         out["market_cycle"] = "UNKNOWN"
         out["cycle_reason"] = "required_market_observation_missing"
+        out["market_cycle_data_basis"] = "incomplete_required_inputs"
         return out
     if ((out.breadth < 0) | (out.breadth > 1)).any():
         raise ValueError("breadth must be within [0,1]")
@@ -58,5 +59,13 @@ def classify_market_cycle(frame: pd.DataFrame) -> pd.DataFrame:
         reasons.append(why)
     out["market_cycle"] = states
     out["cycle_reason"] = reasons
+    advanced_available = pd.Series(False, index=out.index)
+    for field in ("board_failure_rate", "promotion_rate"):
+        if field in out.columns:
+            advanced_available |= pd.to_numeric(out[field], errors="coerce").notna()
+    out["market_cycle_data_basis"] = advanced_available.map({
+        True: "breadth_limit_and_board_metrics",
+        False: "breadth_and_limit_counts_only",
+    })
     out["historical_pit_eligible"] = False
     return out
