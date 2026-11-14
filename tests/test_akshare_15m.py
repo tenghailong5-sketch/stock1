@@ -77,9 +77,9 @@ def test_previous_session_breakout_cannot_authorize_current_session_entry():
 
 def test_same_session_but_over_age_15m_bar_is_rejected():
     bars = normalize_15m_bars(
-        sample(), symbol="600000", captured_at="2026-11-13T04:00:00Z"
+        sample(), symbol="600000", captured_at="2026-11-13T03:25:00Z"
     )
-    result = confirm_15m_breakout(bars, max_bar_age_minutes=30)
+    result = confirm_15m_breakout(bars, max_bar_age_minutes=5)
     assert result["entry_ready"] is False
     assert result["status"] == "STALE_15M_CONFIRMATION"
 
