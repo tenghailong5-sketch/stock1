@@ -38,5 +38,9 @@ forecast factor.
 
 The existing scan requirements remain unchanged. Kronos and its PyTorch /
 Hugging Face dependencies are loaded only when the adapter is asked to load a
-real predictor. Keep model installation and weight download out of the normal
-daily scan until resource use and reproducibility have been measured.
+real predictor. Place a pinned upstream Kronos checkout outside the stock1
+repository and set `KronosConfig(repo_path="/path/to/Kronos")`; the adapter adds
+that directory to the import path only at model-load time. The default weights
+are downloaded from Hugging Face on first load, so keep model installation and
+weight download out of the normal daily scan until resource use and
+reproducibility have been measured.
