@@ -70,7 +70,7 @@ def attach_startup_evidence(
     missing = required_emotion - set(emotion.columns)
     if missing:
         raise ValueError("missing startup emotion fields: " + ",".join(sorted(missing)))
-    required_policy = {"available_at", "industry_codes"}
+    required_policy = {"available_at", "industry_codes", "impact_direction"}
     missing = required_policy - set(policy_events.columns)
     if missing:
         raise ValueError("missing startup policy fields: " + ",".join(sorted(missing)))
@@ -97,6 +97,9 @@ def attach_startup_evidence(
 
     events = policy_events.copy()
     events["available_at"] = pd.to_datetime(events.available_at, errors="coerce", utc=True)
+    # Only explicitly positive, source-backed policy events can support an
+    # ignition. Mixed/negative/unclear events are not positive startup evidence.
+    events = events[events.impact_direction.eq("positive")].copy()
     if events.available_at.isna().any():
         raise ValueError("policy available_at contains invalid timestamps")
     if events.industry_codes.map(lambda x: not isinstance(x, (list, tuple, set))).any():
