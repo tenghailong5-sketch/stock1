@@ -43,8 +43,8 @@ def test_mainline_detects_ignition_peak_and_decay():
     # Five peer industries create a valid cross-sectional percentile each day.
     for i, day in enumerate(dates):
         for j in range(5):
-            strength = [0, 1, 3, 5, 4][i] if j == 0 else -j
-            share = [0.05, 0.06, 0.08, 0.08, 0.05][i] if j == 0 else 0.02
+            strength = [4, 5, 5, 4, -2][i] if j == 0 else -j
+            share = [0.08, 0.08, 0.08, 0.08, 0.03][i] if j == 0 else 0.02
             rows.append({
                 "trade_date": day, "industry_code": f"I{j}",
                 "industry_return_5d": strength, "market_return_5d": 0,
