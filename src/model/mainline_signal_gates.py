@@ -87,8 +87,10 @@ def attach_startup_evidence(
         raise ValueError("emotion history must have unique valid trade dates")
     emo = emo.sort_values("trade_date").reset_index(drop=True)
     prior_ice = emo.market_cycle.eq("ICE").shift(1, fill_value=False)
-    recovery_after_ice = emo.market_cycle.eq("RECOVERY") & prior_ice
-    recovery_dates = set(emo.loc[recovery_after_ice, "trade_date"])
+    recent_ice = prior_ice.copy()
+    for lag in range(2, policy_window_sessions + 1):
+        recent_ice |= emo.market_cycle.eq("ICE").shift(lag, fill_value=False)
+    recovery_after_ice = emo.market_cycle.eq("RECOVERY") & recent_ice
     emo["ice_reversal"] = recovery_after_ice
     emo_map = emo.set_index("trade_date")["ice_reversal"].to_dict()
     out["emotion_reversal_component"] = out.trade_date.map(emo_map).astype("boolean")
