@@ -210,3 +210,38 @@ def test_ignition_gate_emits_delayed_confirmation_without_backdating():
     assert out.phase_transition_gated.tolist() == [False, False, False, True, True]
     assert out.phase_gate_reason.iloc[3] == "ignition_confirmed_after_evidence_arrived"
     assert not out.startup_live_eligible.any()
+
+def test_negative_policy_event_is_exposed_as_independent_risk_evidence():
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-02", "2026-01-02", "2026-01-02"],
+        "industry_code": ["I1", "I2", "I3"],
+        "turnover_share": [0.1, 0.1, 0.1],
+        "turnover_share_change_3d": [0.01, 0.01, 0.01],
+        "strength_3d_percentile": [0.9, 0.9, 0.9],
+        "relative_strength_change_2d": [0.02, 0.02, 0.02],
+    })
+    emotion = pd.DataFrame({
+        "trade_date": ["2026-01-01", "2026-01-02"],
+        "market_cycle": ["ICE", "RECOVERY"],
+    })
+    policy = pd.DataFrame({
+        "available_at": [
+            "2026-01-02T06:00:00Z",
+            "2026-01-02T06:00:00Z",
+        ],
+        "industry_codes": [["I1"], ["I2"]],
+        "impact_direction": ["negative", "mixed"],
+    })
+
+    partial = attach_startup_evidence(industry, emotion, policy)
+    assert partial.negative_policy_event_component.iloc[0] == True
+    assert pd.isna(partial.negative_policy_event_component.iloc[1])
+    assert pd.isna(partial.negative_policy_event_component.iloc[2])
+
+    complete = attach_startup_evidence(
+        industry, emotion, policy, policy_archive_complete=True
+    )
+    assert complete.negative_policy_event_component.tolist() == [
+        True, False, False
+    ]
+
