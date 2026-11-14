@@ -2,7 +2,7 @@ name: SW Industry Provider Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/sw-historical-industry-valid-time-ledger]
     paths:
       - "src/providers/sw_industry.py"
       - "src/providers/sw_api_industry.py"
@@ -61,10 +61,88 @@ jobs:
                 f"industries={snapshot['industry_code'].nunique()} "
                 f"observed_at={snapshot['observed_at'].iloc[0]}")
           PY
+      - name: Live official SW2021 historical valid-time ledger smoke test
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+          from src.providers.sw_industry import (
+              fetch_sw_current_industry_membership_snapshot,
+              fetch_sw_industry_valid_time_ledger,
+              fetch_sw_industry_unmapped_history_audit,
+          )
+
+          snapshot = fetch_sw_current_industry_membership_snapshot()
+          ledger = fetch_sw_industry_valid_time_ledger()
+          if ledger.empty or ledger["symbol"].nunique() < 4000:
+              raise SystemExit(
+                  f"Unexpectedly small SW historical ledger: rows={len(ledger)} "
+                  f"symbols={ledger['symbol'].nunique() if not ledger.empty else 0}"
+              )
+          if ledger.duplicated(["symbol", "valid_from"]).any():
+              raise SystemExit("Duplicate stock/valid_from rows in SW historical ledger")
+          closed = ledger["valid_to"].notna()
+          if not closed.any():
+              raise SystemExit("SW historical ledger has no derived closed intervals")
+          if (ledger.loc[closed, "valid_to"] <= ledger.loc[closed, "valid_from"]).any():
+              raise SystemExit("SW historical ledger contains non-positive intervals")
+          if ledger["historical_pit_eligible"].ne(False).any():
+              raise SystemExit("SW historical ledger incorrectly marks rows PIT-eligible")
+
+          latest = (
+              ledger.sort_values(["symbol", "valid_from"], kind="stable")
+              .drop_duplicates("symbol", keep="last")
+              .set_index("symbol")["industry_code"]
+              .sort_index()
+          )
+          current = snapshot.set_index("symbol")["industry_code"].sort_index()
+          if not latest.index.equals(current.index):
+              missing_current = sorted(set(current.index) - set(latest.index))[:10]
+              missing_history = sorted(set(latest.index) - set(current.index))[:10]
+              raise SystemExit(
+                  "SW history/current symbol universe mismatch: "
+                  f"missing_history={missing_current} missing_current={missing_history}"
+              )
+          mismatch = latest.ne(current)
+          if mismatch.any():
+              raise SystemExit(
+                  "SW history latest industry differs from current snapshot: "
+                  f"{latest[mismatch].head(10).to_dict()}"
+              )
+
+          Path("sw2021-historical-valid-time-ledger.csv").write_text(
+              ledger.to_csv(index=False), encoding="utf-8"
+          )
+          unmapped = fetch_sw_industry_unmapped_history_audit(
+              current_symbols=set(snapshot["symbol"])
+          )
+          Path("sw-history-unmapped-code-audit.csv").write_text(
+              unmapped.to_csv(index=False), encoding="utf-8"
+          )
+          unmapped_rows = int(unmapped["row_count"].sum()) if not unmapped.empty else 0
+          unmapped_symbols = int(unmapped["symbol_count"].sum()) if not unmapped.empty else 0
+          print(f"SW_HISTORY_UNMAPPED_AUDIT codes={len(unmapped)} rows={unmapped_rows} symbols={unmapped_symbols}")
+          multi = ledger.groupby("symbol").size().gt(1)
+          print(
+              f"SW2021_HISTORY_LEDGER_OK rows={len(ledger)} "
+              f"symbols={ledger['symbol'].nunique()} "
+              f"industries={ledger['industry_code'].nunique()} "
+              f"valid_from_min={ledger['valid_from'].min().date()} "
+              f"valid_from_max={ledger['valid_from'].max().date()} "
+              f"multi_record_symbols={int(multi.sum())} "
+              f"closed_intervals={int(closed.sum())} "
+              f"current_symbol_match={len(current)} "
+              f"latest_industry_mismatches={int(mismatch.sum())} "
+              f"pit_eligible={int(ledger['historical_pit_eligible'].sum())}"
+          )
+          PY
       - name: Upload live SW2021 snapshot
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: sw2021-live-snapshot
-          path: sw2021-live-snapshot.csv
+          path: |
+            sw2021-live-snapshot.csv
+            sw2021-historical-valid-time-ledger.csv
+            sw-history-unmapped-code-audit.csv
           retention-days: 7
