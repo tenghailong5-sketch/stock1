@@ -197,3 +197,68 @@ def summarize_gate_blockers(frame: pd.DataFrame) -> pd.DataFrame:
             .size().rename(columns={"size": "count"})
             .sort_values(["strategy", "count", "blocker"], ascending=[True, False, True])
             .reset_index(drop=True))
+
+def aggregate_archived_stock_turnover(
+    archive_root, expected_symbols, *, trade_date, decision_time,
+) -> tuple[pd.DataFrame, dict]:
+    """Build industry turnover concentration only from archived, complete PIT rows."""
+    from pathlib import Path
+    from src.model.m4_industry_membership import aggregate_pit_industry_turnover
+
+    root = Path(archive_root)
+    stock_rows, membership_rows = [], []
+    stock_dir = root / "stock_daily"
+    member_dir = root / "industry_membership"
+    for path in sorted(stock_dir.glob("*.jsonl")) if stock_dir.exists() else []:
+        try:
+            frame = pd.read_json(path, lines=True, dtype={"symbol": str})
+        except (ValueError, OSError) as exc:
+            return pd.DataFrame(), {
+                "status": "invalid_stock_archive",
+                "reason": f"{path.name}:{type(exc).__name__}:{str(exc)[:160]}",
+                "historical_pit_eligible": False,
+            }
+        if not frame.empty:
+            if "symbol" not in frame:
+                frame["symbol"] = path.stem
+            stock_rows.append(frame)
+    for path in sorted(member_dir.glob("*.jsonl")) if member_dir.exists() else []:
+        try:
+            frame = pd.read_json(path, lines=True, dtype={"symbol": str})
+        except (ValueError, OSError) as exc:
+            return pd.DataFrame(), {
+                "status": "invalid_membership_archive",
+                "reason": f"{path.name}:{type(exc).__name__}:{str(exc)[:160]}",
+                "historical_pit_eligible": False,
+            }
+        if not frame.empty:
+            membership_rows.append(frame)
+    empty = pd.DataFrame(columns=[
+        "trade_date", "industry_code", "turnover", "available_time",
+        "decision_time", "availability_basis", "historical_pit_eligible",
+    ])
+    if not stock_rows:
+        return empty, {
+            "status": "stock_archive_missing", "expected_universe_size": len(expected_symbols),
+            "stock_bar_eligible_symbols": 0, "historical_pit_eligible": False,
+        }
+    if not membership_rows:
+        return empty, {
+            "status": "membership_archive_missing", "expected_universe_size": len(expected_symbols),
+            "stock_bar_eligible_symbols": 0, "historical_pit_eligible": False,
+        }
+    stock_bars = pd.concat(stock_rows, ignore_index=True, sort=False)
+    membership = pd.concat(membership_rows, ignore_index=True, sort=False)
+    try:
+        result, audit = aggregate_pit_industry_turnover(
+            stock_bars, membership, expected_symbols,
+            trade_date=trade_date, decision_time=decision_time,
+            scope_id="live_full_market_universe",
+        )
+    except Exception as exc:
+        return empty, {
+            "status": "aggregation_error",
+            "reason": f"{type(exc).__name__}:{str(exc)[:180]}",
+            "historical_pit_eligible": False,
+        }
+    return result, audit
