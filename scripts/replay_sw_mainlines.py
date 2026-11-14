@@ -6,30 +6,23 @@ import json
 import time
 from pathlib import Path
 
-import akshare as ak
 import pandas as pd
 
 from src.model.mainline_flows import classify_mainlines
-from src.providers.sw_industry import fetch_sw_industry_index_history
+from src.providers.sw_api_industry import (\n    fetch_sw_api_first_level_index_list,\n    fetch_sw_api_industry_index_history,\n)
 
 
 def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output")) -> dict:
-    groups = ak.index_realtime_sw(symbol="一级行业")
-    required = {"指数代码", "指数名称"}
-    if groups is None or groups.empty or required - set(groups.columns):
-        raise RuntimeError("SW first-level industry index list is empty or schema changed")
-    groups = groups[["指数代码", "指数名称"]].copy()
-    groups["指数代码"] = groups["指数代码"].astype(str).str.strip().str.zfill(6)
-    groups = groups[groups["指数代码"].str.fullmatch(r"\d{6}")].drop_duplicates("指数代码")
+    groups = fetch_sw_api_first_level_index_list()
     expected = len(groups)
     if expected < 20:
         raise RuntimeError(f"SW first-level industry list unexpectedly small: {expected}")
 
     frames, failures = [], []
     for row in groups.itertuples(index=False):
-        code, name = row[0], row[1]
+        code, name = row.industry_code, row.industry_name
         try:
-            frame = fetch_sw_industry_index_history(
+            frame = fetch_sw_api_industry_index_history(
                 code, start_date=start_date, end_date=end_date
             )
             frame["industry_name"] = str(name)
