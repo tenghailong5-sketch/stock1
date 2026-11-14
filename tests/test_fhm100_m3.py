@@ -325,3 +325,25 @@ def test_m5_diagnostic_input_handles_non_unique_watchlist_index():
     assert frame["price_structure"].tolist() == [100.0, 50.0]
     assert frame["trade_quality"].tolist() == [100.0, 50.0]
 
+def test_m5_negative_policy_risk_blocks_only_explicitly_affected_industry():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002"],
+        "sw_history_industry_code": ["801010", "801020"],
+        "CLV": [0.8, 0.5],
+        "20日平均成交额": [200_000_000, 120_000_000],
+    })
+    mainline = pd.DataFrame({
+        "industry_code": ["801010", "801020"],
+        "trade_date": ["2026-11-16", "2026-11-16"],
+        "strength_percentile": [0.9, 0.7],
+        "negative_policy_event_component": [True, pd.NA],
+    })
+
+    result = fhm100.build_m5_diagnostic_input(
+        watchlist,
+        {"market_state": "RISK_ON", "market_environment_score": 80.0},
+        mainline,
+    )
+
+    assert result["no_material_negative_event"].tolist() == [False, None]
+

@@ -107,9 +107,6 @@ def attach_startup_evidence(
         raise ValueError("policy impact_direction uses an unknown value")
     if events.industry_codes.map(lambda x: not isinstance(x, (list, tuple, set))).any():
         raise ValueError("policy industry_codes must be explicit collections")
-    # Only explicitly positive, source-backed policy events can support an
-    # ignition. Mixed/negative/unclear events are not positive startup evidence.
-    events = events[events.impact_direction.eq("positive")].copy()
     dates = sorted(pd.Timestamp(date) for date in out.trade_date.unique())
     date_position = {date: i for i, date in enumerate(dates)}
     # A policy event is usable at the first trading-session close (15:00
@@ -120,30 +117,35 @@ def attach_startup_evidence(
         date.tz_localize("Asia/Shanghai") + pd.Timedelta(hours=15)
         for date in dates
     ]
-    event_sessions = []
-    for event in events.itertuples(index=False):
-        event_pos = bisect_left(session_close_cutoffs, event.available_at)
-        if event_pos < len(dates):
-            event_sessions.append((
-                event_pos,
-                {str(code) for code in event.industry_codes},
+
+    def _event_match(direction: str) -> pd.Series:
+        selected = events.loc[events.impact_direction.eq(direction)]
+        event_sessions = []
+        for event in selected.itertuples(index=False):
+            event_pos = bisect_left(session_close_cutoffs, event.available_at)
+            if event_pos < len(dates):
+                event_sessions.append((
+                    event_pos,
+                    {str(code) for code in event.industry_codes},
+                ))
+        matched = []
+        for row in out.itertuples(index=False):
+            pos = date_position[pd.Timestamp(row.trade_date)]
+            first = max(0, pos - policy_window_sessions + 1)
+            industry_code = str(row.industry_code)
+            matched.append(any(
+                first <= event_pos <= pos and industry_code in event_codes
+                for event_pos, event_codes in event_sessions
             ))
-    matched = []
-    for row in out.itertuples(index=False):
-        pos = date_position[pd.Timestamp(row.trade_date)]
-        first = max(0, pos - policy_window_sessions + 1)
-        industry_code = str(row.industry_code)
-        matched.append(any(
-            first <= event_pos <= pos and industry_code in event_codes
-            for event_pos, event_codes in event_sessions
-        ))
-    policy_values = pd.Series(matched, index=out.index, dtype="boolean")
-    # A positively matched, source-backed event is known even when the archive
-    # is incomplete. Only absence is UNKNOWN until archive completeness is
-    # certified; otherwise valid positive catalysts are discarded.
-    if not policy_archive_complete:
-        policy_values = policy_values.mask(~policy_values, pd.NA)
-    out["policy_catalyst_component"] = policy_values
+        values = pd.Series(matched, index=out.index, dtype="boolean")
+        # Positive evidence and negative risk are independently useful when
+        # observed. Absence is unknown until the official archive is complete.
+        if not policy_archive_complete:
+            values = values.mask(~values, pd.NA)
+        return values
+
+    out["policy_catalyst_component"] = _event_match("positive")
+    out["negative_policy_event_component"] = _event_match("negative")
 
     numeric = ["turnover_share", "turnover_share_change_3d",
                "strength_3d_percentile", "relative_strength_change_2d"]

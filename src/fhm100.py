@@ -617,6 +617,43 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None):
                     industry_strength.between(0.0, 100.0)
                 )
 
+    # Negative policy evidence is a hard-risk observation, not a positive
+    # catalyst score. Incomplete archives leave non-matches unknown.
+    negative_policy_risk = pd.Series(None, index=base.index, dtype=object)
+    if (
+        mainline is not None and not mainline.empty
+        and {"industry_code", "trade_date", "negative_policy_event_component"}.issubset(mainline.columns)
+        and industry_code_col in base
+    ):
+        policy_panel = mainline.copy()
+        policy_panel["trade_date"] = pd.to_datetime(
+            policy_panel["trade_date"], errors="coerce"
+        )
+        policy_panel = policy_panel.dropna(subset=["trade_date"])
+        if not policy_panel.empty:
+            policy_latest_date = policy_panel["trade_date"].max()
+            policy_latest = policy_panel.loc[
+                policy_panel["trade_date"].eq(policy_latest_date)
+            ].copy()
+            policy_latest["industry_code"] = (
+                policy_latest["industry_code"].astype(str).str.strip()
+            )
+            policy_counts = policy_latest.groupby("industry_code").size()
+            unique_policy_codes = policy_counts[policy_counts.eq(1)].index
+            policy_lookup = (
+                policy_latest.loc[
+                    policy_latest.industry_code.isin(unique_policy_codes)
+                ].set_index("industry_code")["negative_policy_event_component"]
+                .to_dict()
+            )
+            mapped_policy = (
+                base[industry_code_col].astype(str).str.strip().map(policy_lookup)
+            )
+            negative_policy_risk = mapped_policy.map(
+                lambda value: (not bool(value))
+                if pd.notna(value) else None
+            )
+
     structure_rank = _cross_section_percentile("CLV")
     trade_quality_rank = _cross_section_percentile("20日平均成交额")
     amount_ma20 = pd.to_numeric(
@@ -653,7 +690,7 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None):
             "industry_not_weak": (
                 bool(industry_value >= 30.0) if pd.notna(industry_value) else None
             ),
-            "no_material_negative_event": None,
+            "no_material_negative_event": negative_policy_risk.loc[idx],
             "liquidity_and_risk_pass": None,
             "m5_factor_scope": "bounded_live_research_pool_percentile",
             "industry_factor_provenance": (
