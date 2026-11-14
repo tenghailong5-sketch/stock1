@@ -113,7 +113,9 @@ jobs:
           Path("sw2021-historical-valid-time-ledger.csv").write_text(
               ledger.to_csv(index=False), encoding="utf-8"
           )
-          unmapped = fetch_sw_industry_unmapped_history_audit()
+          unmapped = fetch_sw_industry_unmapped_history_audit(
+    current_symbols=set(snapshot["symbol"])
+)
           Path("sw-history-unmapped-code-audit.csv").write_text(
               unmapped.to_csv(index=False), encoding="utf-8"
           )
