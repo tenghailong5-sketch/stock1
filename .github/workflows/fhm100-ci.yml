@@ -1,7 +1,7 @@
 name: FHM-100 CI
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     paths:
       - "src/**"
       - "tests/**"
