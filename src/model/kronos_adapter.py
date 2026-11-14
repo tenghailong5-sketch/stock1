@@ -66,10 +66,22 @@ def prepare_kronos_history(
 
     original_count = len(frame)
     data = frame.copy()
-    available = pd.to_datetime(data["available_time"], errors="coerce")
-    if available.isna().any() or available.dt.tz is None:
+    # Parse each value first: pandas 3.x may coerce a mixed-offset/object
+    # Series to naive datetime64 when a naive timestamp is concatenated with
+    # timezone-aware values. Validate awareness per row before normalizing.
+    available_values = []
+    for value in data["available_time"]:
+        try:
+            stamp = pd.Timestamp(value)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("available_time must be valid and timezone-aware") from None
+        if pd.isna(stamp) or stamp.tzinfo is None:
+            raise ValueError("available_time must be valid and timezone-aware")
+        available_values.append(stamp)
+    available = pd.to_datetime(available_values, errors="coerce", utc=True)
+    if available.isna().any():
         raise ValueError("available_time must be valid and timezone-aware")
-    data["available_time"] = available.dt.tz_convert("UTC")
+    data["available_time"] = available
     data = data.loc[data["available_time"] <= cutoff_utc].copy()
     if data.empty:
         raise ValueError("no bars were available at decision_time")
