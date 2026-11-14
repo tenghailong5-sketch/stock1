@@ -26,9 +26,45 @@ from src.providers.sw_api_industry import (
 )
 
 
+def _load_recent_sw_universe(path: Path, *, max_age_days: int = 7) -> pd.DataFrame:
+    """Load a recent, previously verified official taxonomy snapshot on API outage."""
+    if not path.exists():
+        raise RuntimeError("cached SW first-level industry universe is missing")
+    cached = pd.read_json(path, lines=True)
+    required = {"industry_code", "industry_name", "observed_at", "source_id"}
+    missing = required - set(cached.columns)
+    if missing:
+        raise RuntimeError("cached SW universe missing fields: " + ",".join(sorted(missing)))
+    cached["industry_code"] = cached.industry_code.astype(str)
+    cached["industry_name"] = cached.industry_name.astype(str)
+    observed = pd.to_datetime(cached.observed_at, errors="coerce", utc=True)
+    if observed.isna().any() or observed.nunique() != 1:
+        raise RuntimeError("cached SW universe has invalid or inconsistent snapshot time")
+    age = pd.Timestamp.now(tz="UTC") - observed.iloc[0]
+    if age < pd.Timedelta(0) or age > pd.Timedelta(days=max_age_days):
+        raise RuntimeError("cached SW universe snapshot is stale")
+    if cached.industry_code.duplicated().any() or (
+        ~cached.industry_code.str.fullmatch(r"\\d{6}")
+    ).any() or cached.industry_name.str.strip().eq("").any():
+        raise RuntimeError("cached SW universe contains invalid or duplicate industries")
+    result = cached[["industry_code", "industry_name"]].copy()
+    if len(result) < 20:
+        raise RuntimeError("cached SW first-level industry universe is incomplete")
+    return result
+
+
 def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output")) -> dict:
     session = requests.Session()
-    groups = fetch_sw_api_first_level_index_list(session=session)
+    universe_source = "official_api_live"
+    universe_fallback_reason = None
+    try:
+        groups = fetch_sw_api_first_level_index_list(session=session)
+    except requests.exceptions.RequestException as exc:
+        groups = _load_recent_sw_universe(
+            Path("data/forward_archive/sw_industry_universe/2026-11-14.jsonl")
+        )
+        universe_source = "recent_verified_official_snapshot_fallback"
+        universe_fallback_reason = f"{type(exc).__name__}: {str(exc)[:180]}"
     expected = len(groups)
     if expected < 20:
         raise RuntimeError(f"SW first-level industry list unexpectedly small: {expected}")
@@ -310,6 +346,8 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
     summary = {
         "status": "RETROSPECTIVE_REPLAY_COMPLETE",
         "industry_count": expected,
+        "industry_universe_source": universe_source,
+        "industry_universe_fallback_reason": universe_fallback_reason,
         "complete_trade_dates": int(phases.trade_date.nunique()),
         "rows": int(len(phases)),
         "phase_counts": {str(k): int(v) for k, v in counts.items()},
