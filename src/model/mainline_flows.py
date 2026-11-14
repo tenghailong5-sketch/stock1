@@ -51,14 +51,52 @@ def classify_mainlines(frame: pd.DataFrame) -> pd.DataFrame:
     out["turnover_share_change_3d"] = out.groupby("industry_code").turnover_share.diff(3)
     out["relative_strength_change_3d"] = out.groupby("industry_code").relative_strength_5d.diff(3)
     out["strength_percentile"] = out.groupby("trade_date").relative_strength_5d.rank(pct=True)
-    out["mainline_phase"] = "TRANSITION"
     ready = out.turnover_share_change_3d.notna() & out.relative_strength_change_3d.notna()
-    ignition = ready & (out.strength_percentile >= 0.8) & (out.turnover_share_change_3d > 0) & (out.relative_strength_change_3d > 0)
-    decay = ready & (out.strength_percentile < 0.5) & (out.turnover_share_change_3d < 0) & (out.relative_strength_change_3d < 0)
-    peak = ready & (out.strength_percentile >= 0.8) & (out.turnover_share_change_3d <= 0) & (out.relative_strength_change_3d <= 0)
-    out.loc[~ready, "mainline_phase"] = "UNKNOWN"
-    out.loc[ignition, "mainline_phase"] = "IGNITION"
-    out.loc[peak, "mainline_phase"] = "PEAK"
-    out.loc[decay, "mainline_phase"] = "DECAY"
+    out["mainline_phase"] = "UNKNOWN"
+    out["phase_transition"] = False
+    out["phase_reason"] = "three_session_warmup"
+    ignition_candidate = (
+        ready & (out.strength_percentile >= 0.8)
+        & (out.turnover_share_change_3d > 0)
+        & (out.relative_strength_change_3d > 0)
+    )
+    peak_candidate = (
+        ready & (out.strength_percentile >= 0.8)
+        & (out.turnover_share_change_3d <= 0)
+        & (out.relative_strength_change_3d <= 0)
+    )
+    decay_candidate = (
+        ready & (out.strength_percentile < 0.5)
+        & (out.turnover_share_change_3d < 0)
+        & (out.relative_strength_change_3d < 0)
+    )
+
+    # Two consecutive observations confirm each phase transition. The phase
+    # begins on the confirmation date; no retrospective backdating is allowed.
+    for _, indexes in out.groupby("industry_code", sort=False).groups.items():
+        state = "TRANSITION"
+        ignition_streak = peak_streak = decay_streak = 0
+        for index in indexes:
+            if not bool(ready.loc[index]):
+                out.at[index, "mainline_phase"] = "UNKNOWN"
+                out.at[index, "phase_reason"] = "required_history_warmup"
+                continue
+            ignition_streak = ignition_streak + 1 if bool(ignition_candidate.loc[index]) else 0
+            peak_streak = peak_streak + 1 if bool(peak_candidate.loc[index]) else 0
+            decay_streak = decay_streak + 1 if bool(decay_candidate.loc[index]) else 0
+            previous = state
+            reason = "phase_state_persisted"
+            if ignition_streak >= 2 and state in {"TRANSITION", "PEAK", "DECAY"}:
+                state = "IGNITION"
+                reason = "two_session_strength_and_turnover_expansion"
+            elif peak_streak >= 2 and state == "IGNITION":
+                state = "PEAK"
+                reason = "two_session_strength_plateau_with_turnover_contraction"
+            elif decay_streak >= 2 and state in {"IGNITION", "PEAK"}:
+                state = "DECAY"
+                reason = "two_session_relative_strength_and_turnover_contraction"
+            out.at[index, "mainline_phase"] = state
+            out.at[index, "phase_transition"] = state != previous
+            out.at[index, "phase_reason"] = reason
     out["historical_pit_eligible"] = False
     return out
