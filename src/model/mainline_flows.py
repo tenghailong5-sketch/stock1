@@ -62,6 +62,7 @@ def classify_mainlines(
     out["relative_strength_3d"] = out.industry_return_3d - out.market_return_3d
     out["relative_strength_5d"] = out.industry_return_5d - out.market_return_5d
     out["turnover_share"] = out.turnover / out.market_turnover
+    out["turnover_share_basis"] = "relative_share_of_sw_first_level_industry_index_turnover"
     out = out.sort_values(["industry_code", "trade_date"]).reset_index(drop=True)
     out["turnover_share_change_1d"] = out.groupby("industry_code").turnover_share.diff(1)
     out["turnover_share_change_3d"] = out.groupby("industry_code").turnover_share.diff(3)
