@@ -105,7 +105,8 @@ def test_second_position_respects_aggregate_3000_and_correlation_budget():
         quantity=500, planned_risk=600.0, same_industry_or_corr_gt_06=True,
     )
     assert not correlated.allowed
-    assert correlated.max_allowed_risk == 500.0
+    assert correlated.max_allowed_risk == 0.0
+    assert "planned_risk_exceeds_market_or_portfolio_budget" in correlated.reasons
 
 
 def test_planned_risk_cannot_understate_entry_to_stop_loss():
