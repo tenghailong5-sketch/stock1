@@ -65,11 +65,14 @@ def build_live_decision_gate_audit(
     if rank_col in ranked:
         ranked[rank_col] = pd.to_numeric(ranked[rank_col], errors="coerce")
         ranked = ranked.sort_values(rank_col, ascending=False, na_position="last")
-    minute_symbols = set(ranked["代码"].astype(str).str.zfill(6).head(minute_scan_limit))
+    # Preserve rank order for deterministic bounded scans and bind every
+    # 15-minute observation to the runner's single frozen decision cutoff.
+    minute_symbols = ranked["代码"].astype(str).str.zfill(6).head(minute_scan_limit).tolist()
+    minute_symbol_set = set(minute_symbols)
     minute_results = {}
     for symbol in minute_symbols:
         try:
-            minute_results[symbol] = minute_confirmation_fetcher(symbol)
+            minute_results[symbol] = minute_confirmation_fetcher(symbol, captured_at=cutoff)
         except Exception as exc:
             minute_results[symbol] = {
                 "status": "UNAVAILABLE_15M", "entry_ready": False,
@@ -114,7 +117,37 @@ def build_live_decision_gate_audit(
         industry = latest_mainline.get(industry_code, {})
         phase = industry.get("mainline_phase", "UNKNOWN")
         industry_ready = _truth(industry.get("persistence_ready"))
-        industry_pit = _truth(industry.get("historical_pit_eligible"))
+        # The current runner passes a forward-only observed membership snapshot.
+        # Never let that mapping authorize a PIT mainline entry, even if a
+        # separate industry row happens to carry PIT metadata.
+        membership_pit = False
+        required_membership_pit = {
+            "historical_pit_eligible", "availability_basis",
+            "available_time", "valid_from", "valid_to",
+        }
+        if required_membership_pit.issubset(membership_row):
+            try:
+                member_available = pd.Timestamp(membership_row["available_time"])
+                target_trade_date = pd.Timestamp(
+                    stock.get("trade_date", industry.get("trade_date"))
+                ).normalize()
+                valid_from = pd.Timestamp(membership_row["valid_from"]).normalize()
+                valid_to_raw = membership_row.get("valid_to")
+                valid_to = pd.Timestamp(valid_to_raw).normalize() if pd.notna(valid_to_raw) else None
+                membership_pit = (
+                    _truth(membership_row.get("historical_pit_eligible"))
+                    and str(membership_row.get("availability_basis", "")).strip() == "source_published_at"
+                    and member_available.tzinfo is not None
+                    and member_available.tz_convert("UTC") <= cutoff.tz_convert("UTC")
+                    and not pd.isna(target_trade_date)
+                    and valid_from <= target_trade_date
+                    and (valid_to is None or target_trade_date < valid_to)
+                )
+            except (TypeError, ValueError, OverflowError):
+                membership_pit = False
+        industry_pit = (
+            membership_pit and _truth(industry.get("historical_pit_eligible"))
+        )
         concentration_status = str(industry.get("stock_turnover_pit_status", "not_ready"))
         minute = minute_results.get(symbol, {
             "status": "NOT_SCANNED_15M", "entry_ready": False,
