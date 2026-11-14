@@ -214,3 +214,80 @@ def test_forward_industry_audit_accepts_official_sw2021_snapshot(tmp_path):
     assert audit["selected_symbol_count"] == 3
     assert set(selected["source_id"]) == {"swsresearch.sw2021_stock_classification"}
     assert audit["historical_pit_eligible"] is False
+
+
+
+def test_m5_maps_observed_industry_structure_and_trade_quality_without_filling_unknowns():
+    watchlist = pd.DataFrame([
+        {
+            "代码": "000001", "sw_history_industry_code": "801010",
+            "CLV": 0.9, "20日平均成交额": 200_000_000,
+        },
+        {
+            "代码": "000002", "sw_history_industry_code": "801020",
+            "CLV": 0.4, "20日平均成交额": 80_000_000,
+        },
+    ])
+    mainline = pd.DataFrame([
+        {
+            "industry_code": "801010", "trade_date": "2026-11-13",
+            "strength_percentile": 0.92,
+        },
+        {
+            "industry_code": "801020", "trade_date": "2026-11-13",
+            "strength_percentile": 0.35,
+        },
+    ])
+    market = {
+        "market_state": "RISK_ON",
+        "market_environment_score": 88.0,
+    }
+
+    frame = fhm100.build_m5_diagnostic_input(watchlist, market, mainline)
+    first = frame.set_index("symbol").loc["000001"]
+    second = frame.set_index("symbol").loc["000002"]
+
+    assert first["industry_relative_strength"] == 92.0
+    assert first["industry_strength"] == 92.0
+    assert first["industry_top_30pct"] is True
+    assert first["amount_ma20_ge_100m"] is True
+    assert first["market_environment"] == 88.0
+    assert first["m5_factor_scope"] == "bounded_live_research_pool_percentile"
+    assert second["industry_not_weak"] is True
+    assert second["amount_ma20_ge_100m"] is False
+
+    # No fabricated cross-session residual, event, pullback, or risk inputs.
+    for key in (
+        "stock_residual_top_20pct", "breakout_or_confirmed_retest",
+        "no_high_volume_stall_or_repeated_rejection",
+        "pre_pullback_residual_positive", "pullback_between_0_5_and_4pct",
+        "pullback_volume_le_80pct_prior5d", "stop_or_reversal_confirmed",
+        "no_material_negative_event", "liquidity_and_risk_pass",
+    ):
+        assert frame[key].isna().all()
+
+
+def test_m5_industry_factor_fails_closed_on_ambiguous_latest_industry_rows():
+    watchlist = pd.DataFrame([
+        {
+            "代码": "000001", "sw_history_industry_code": "801010",
+            "CLV": 0.8, "20日平均成交额": 150_000_000,
+        },
+    ])
+    mainline = pd.DataFrame([
+        {
+            "industry_code": "801010", "trade_date": "2026-11-13",
+            "strength_percentile": 0.9,
+        },
+        {
+            "industry_code": "801010", "trade_date": "2026-11-13",
+            "strength_percentile": 0.95,
+        },
+    ])
+    frame = fhm100.build_m5_diagnostic_input(
+        watchlist, {"market_state": "RISK_ON", "market_environment_score": 80},
+        mainline,
+    )
+    assert pd.isna(frame.loc[0, "industry_relative_strength"])
+    assert frame.loc[0, "industry_top_30pct"] is None
+    assert frame.loc[0, "industry_factor_provenance"] == "missing_or_ambiguous_industry_mapping"
