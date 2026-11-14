@@ -149,3 +149,20 @@ def test_sw_history_provider_rejects_conflicting_same_day_memberships(monkeypatc
             session=Session(), clock=lambda: pd.Timestamp("2026-11-14T08:00:00Z"))
 
 
+
+
+
+def test_sw_history_unmapped_codes_are_audited_not_mapped(monkeypatch):
+    def fake_sheet_rows(content):
+        if content.endswith(b"code-file"):
+            return (["行业代码", "一级行业名称", "二级行业名称", "三级行业名称"],
+                    iter([["110101", "农林牧渔", "种植业", "种子"]]))
+        return (["股票代码", "计入日期", "行业代码"],
+                iter([["000001", 45000, "110101"], ["000001", 43000, "990001"],
+                      ["600001", 44000, "990001"], ["000002", "", "990002"]]))
+    monkeypatch.setattr(sw_industry, "_sheet_rows", fake_sheet_rows)
+    result = sw_industry.fetch_sw_industry_unmapped_history_audit(session=Session())
+    assert result["industry_code"].tolist() == ["990001"]
+    assert result.iloc[0]["row_count"] == 2
+    assert result.iloc[0]["symbol_count"] == 2
+    assert result.iloc[0]["mapping_status"] == "unmapped_outside_sw2021_dictionary"
