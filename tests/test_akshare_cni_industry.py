@@ -95,3 +95,16 @@ def test_fetch_fails_closed_if_any_index_fails():
 def test_duplicate_index_requests_are_rejected():
     with pytest.raises(ValueError, match="duplicates"):
         fetch_cni_historical_industry(["399001", "399001"])
+
+
+def test_default_fetch_uses_broad_cni_a_share_index():
+    class FakeAk:
+        @staticmethod
+        def index_detail_hist_cni(*, symbol):
+            assert symbol == "399317"
+            return source_rows()
+
+    result = fetch_cni_historical_industry(
+        ak_module=FakeAk, fetched_at="2026-11-14T00:00:00Z"
+    )
+    assert set(result["index_symbol"]) == {"399317"}
