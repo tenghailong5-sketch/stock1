@@ -44,7 +44,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run focused signal gate tests
-        run: pytest -q tests/test_mainline_signal_gates.py
+        run: pytest -q tests/test_mainline_signal_gates.py tests/test_mainline_validation.py
       - name: Fetch all SW first-level industry histories and replay phases
         run: python scripts/replay_sw_mainlines.py --start-date 20260522 --end-date 20261113
       - name: Audit independent startup, peak and decay evidence
