@@ -265,6 +265,16 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         ),
         "board_failure_rate_observations": int(market_cycles.board_failure_rate.notna().sum()),
         "promotion_rate_observations": int(market_cycles.promotion_rate.notna().sum()),
+        "limit_streak_observations": int(
+            market_cycles.highest_observed_limit_up_streak.notna().sum()
+        ),
+        "strong_pool_observations": int(market_cycles.strong_pool_count.notna().sum()),
+        "opened_rate_observations": int(market_cycles.opened_rate.notna().sum()),
+        "opened_rate_status_counts": {
+            str(k): int(v) for k, v in market_cycles.opened_rate_status.value_counts(
+                dropna=False
+            ).to_dict().items()
+        },
         "market_cycle_counts": {
             str(k): int(v) for k, v in market_cycles.market_cycle.value_counts().to_dict().items()
         },
