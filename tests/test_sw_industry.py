@@ -108,3 +108,44 @@ def test_download_rejects_html_error_page():
 
     with pytest.raises(ValueError, match="not a valid OLE"):
         sw_industry._download_xls(HtmlSession(), sw_industry.STOCK_URL, 30)
+
+
+
+def test_sw_history_provider_preserves_valid_time_intervals_without_claiming_pit(monkeypatch):
+    captured = pd.Timestamp("2026-11-14T08:00:00Z")
+    def fake_sheet_rows(content):
+        if content.endswith(b"code-file"):
+            return (["行业代码", "一级行业名称", "二级行业名称", "三级行业名称"],
+                    iter([["110101", "农林牧渔", "种植业", "种子"],
+                          ["220201", "基础化工", "化学原料", "纯碱"]]))
+        return (["股票代码", "计入日期", "行业代码"],
+                iter([["000001", 45000, "110101"], ["000001", 46000, "220201"],
+                      ["600001", 45500, "110101"]]))
+    monkeypatch.setattr(sw_industry, "_sheet_rows", fake_sheet_rows)
+    result = sw_industry.fetch_sw_industry_valid_time_ledger(
+        session=Session(), clock=lambda: captured)
+    selected = result[result["symbol"].eq("000001")].sort_values("valid_from")
+    assert len(selected) == 2
+    assert selected.iloc[0]["industry_code"] == "110101"
+    assert selected.iloc[1]["industry_code"] == "220201"
+    assert selected.iloc[0]["valid_to"] == selected.iloc[1]["valid_from"]
+    assert pd.isna(selected.iloc[1]["valid_to"])
+    assert result["historical_pit_eligible"].eq(False).all()
+    assert result["available_time"].eq(captured).all()
+    assert result["snapshot_scope"].eq("historical_valid_time_intervals_not_pit").all()
+
+
+def test_sw_history_provider_rejects_conflicting_same_day_memberships(monkeypatch):
+    def fake_sheet_rows(content):
+        if content.endswith(b"code-file"):
+            return (["行业代码", "一级行业名称", "二级行业名称", "三级行业名称"],
+                    iter([["110101", "农林牧渔", "种植业", "种子"],
+                          ["220201", "基础化工", "化学原料", "纯碱"]]))
+        return (["股票代码", "计入日期", "行业代码"],
+                iter([["000001", 46000, "110101"], ["000001", 46000, "220201"]]))
+    monkeypatch.setattr(sw_industry, "_sheet_rows", fake_sheet_rows)
+    with pytest.raises(ValueError, match="conflicting industries"):
+        sw_industry.fetch_sw_industry_valid_time_ledger(
+            session=Session(), clock=lambda: pd.Timestamp("2026-11-14T08:00:00Z"))
+
+
