@@ -9,7 +9,10 @@ from bisect import bisect_left
 
 import pandas as pd
 
-from src.model.mainline_flows import DEFAULT_IGNITION_STRENGTH_MIN
+from src.model.mainline_flows import (
+    DEFAULT_IGNITION_STRENGTH_MIN,
+    attach_pit_stock_turnover_concentration,
+)
 
 
 EMOTION_FIELDS = (
@@ -56,6 +59,7 @@ def attach_startup_evidence(
     *,
     policy_archive_complete: bool = False,
     policy_window_sessions: int = 5,
+    pit_stock_turnover: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Attach three separately auditable ignition components to industry rows.
 
@@ -82,6 +86,13 @@ def attach_startup_evidence(
         raise ValueError("policy_window_sessions must be positive")
 
     out = industry.copy()
+    if pit_stock_turnover is not None:
+        out = attach_pit_stock_turnover_concentration(out, pit_stock_turnover)
+        out["_capital_turnover_share"] = out["stock_turnover_share"]
+        out["capital_concentration_basis"] = "pit_stock_turnover_share"
+    else:
+        out["_capital_turnover_share"] = out["turnover_share"]
+        out["capital_concentration_basis"] = "sw_industry_index_turnover_share"
     out["trade_date"] = pd.to_datetime(out.trade_date, errors="coerce").dt.normalize()
     if out.trade_date.isna().any():
         raise ValueError("invalid industry trade_date")
@@ -145,14 +156,14 @@ def attach_startup_evidence(
         policy_values = policy_values.mask(~policy_values, pd.NA)
     out["policy_catalyst_component"] = policy_values
 
-    numeric = ["turnover_share", "turnover_share_change_3d",
+    numeric = ["_capital_turnover_share", "turnover_share_change_3d",
                "strength_3d_percentile", "relative_strength_change_2d"]
     for field in numeric:
         out[field] = pd.to_numeric(out[field], errors="coerce")
     # Preserve each capital-flow condition separately so a failed composite
     # gate can be diagnosed without relaxing the frozen confirmation rule.
     capital_checks = {
-        "capital_turnover_share_positive": ("turnover_share", lambda x: x > 0),
+        "capital_turnover_share_positive": ("_capital_turnover_share", lambda x: x > 0),
         "capital_turnover_share_increasing": ("turnover_share_change_3d", lambda x: x > 0),
         "capital_leadership_at_ignition_threshold": ("strength_3d_percentile", lambda x: x >= DEFAULT_IGNITION_STRENGTH_MIN),
         "capital_relative_strength_accelerating": ("relative_strength_change_2d", lambda x: x > 0),
