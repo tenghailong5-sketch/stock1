@@ -61,7 +61,7 @@ def test_fetch_sw_index_history_normalizes_official_payload_and_provenance():
     )
     assert len(result) == 7
     assert result.industry_code.eq("801010").all()
-    assert result.iloc[-1].return_5 == pytest.approx(0.10)
+    assert result.iloc[-1].return_5 == pytest.approx(110 / 101 - 1)
     assert result.iloc[-1].amount == 1060
     assert result.historical_pit_eligible.eq(False).all()
     assert result.availability_basis.eq("retrieval_time_only").all()
