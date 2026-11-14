@@ -198,3 +198,37 @@ def test_sw_history_unmapped_audit_exposes_only_unique_prefix_candidates(monkeyp
     assert unresolved["industry_level1_candidate"] == ""
     assert unresolved["industry_level2_candidate"] == ""
     assert unresolved["mapping_precision"] == "unresolved_no_unique_sw2021_prefix"
+
+def test_sw_history_ledger_preserves_codes_outside_sw2021_dictionary(monkeypatch):
+    captured = pd.Timestamp("2026-11-14T08:00:00Z")
+
+    def fake_sheet_rows(content):
+        if content.endswith(b"code-file"):
+            return (
+                ["行业代码", "一级行业名称", "二级行业名称", "三级行业名称"],
+                iter([["110101", "农林牧渔", "种植业", "种子"]]),
+            )
+        return (
+            ["股票代码", "计入日期", "行业代码"],
+            iter([
+                ["000001", 45000, "990001"],
+                ["000001", 46000, "110101"],
+            ]),
+        )
+
+    monkeypatch.setattr(sw_industry, "_sheet_rows", fake_sheet_rows)
+    result = sw_industry.fetch_sw_industry_valid_time_ledger(
+        session=Session(), clock=lambda: captured
+    ).sort_values("valid_from").reset_index(drop=True)
+
+    assert len(result) == 2
+    legacy = result.iloc[0]
+    current = result.iloc[1]
+    assert legacy["industry_code"] == "990001"
+    assert legacy["industry_codebook_status"] == "outside_sw2021_dictionary"
+    assert legacy["industry_name"] == ""
+    assert legacy["industry_level1"] == ""
+    assert legacy["industry_level2"] == ""
+    assert legacy["valid_to"] == current["valid_from"]
+    assert current["industry_codebook_status"] == "sw2021_dictionary_match"
+    assert result["historical_pit_eligible"].eq(False).all()
