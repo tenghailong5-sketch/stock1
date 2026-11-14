@@ -20,6 +20,10 @@ def _inputs():
     membership = pd.DataFrame([{
         "symbol": "600000", "industry_code": "801010",
         "historical_pit_eligible": True,
+        "availability_basis": "source_published_at",
+        "available_time": "2026-11-13T08:00:00Z",
+        "valid_from": "2020-01-01",
+        "valid_to": None,
     }])
     risk = {"600000": {
         "entry_price": 20.0, "stop_price": 19.0, "quantity": 500,
@@ -61,6 +65,25 @@ def test_current_diagnostic_mainline_and_missing_m8_inputs_block_all_entries():
     assert not rows["allowed"].any()
     assert rows["reasons"].map(lambda x: "industry_history_not_pit_eligible" in x).all()
     assert audit["blocked_count"] == 3
+
+
+def test_forward_only_membership_snapshot_cannot_authorize_pit_entry():
+    watchlist, m5, market, mainline, membership, risk = _inputs()
+    membership["historical_pit_eligible"] = False
+    membership["availability_basis"] = "retrieval_time_only"
+    rows, audit = build_live_decision_gate_audit(
+        watchlist, m5, market, mainline, membership,
+        decision_time="2026-11-14T09:00:00+08:00",
+        risk_context_by_symbol=risk,
+        minute_confirmation_fetcher=lambda symbol, captured_at=None: {
+            "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
+            "reason": "all_15m_checks_passed",
+        },
+    )
+    assert not rows["allowed"].any()
+    assert rows["reasons"].map(
+        lambda reasons: "industry_history_not_pit_eligible" in reasons
+    ).all()
 
 
 def test_missing_15m_confirmation_blocks_entry_even_when_other_inputs_are_ready():
