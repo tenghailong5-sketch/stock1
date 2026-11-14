@@ -6,6 +6,7 @@ import json
 import time
 from pathlib import Path
 
+import akshare as ak
 import pandas as pd
 import requests
 
@@ -18,6 +19,7 @@ from src.model.m3_assembler import (
     assemble_m3_history, assemble_market_emotion_history,
 )
 from src.model.policy_catalysts import visible_policy_events
+from src.providers.eastmoney_market_emotion import fetch_market_emotion_pool_history
 from src.providers.sw_api_industry import (
     fetch_sw_api_first_level_index_list,
     fetch_sw_api_industry_index_history,
@@ -144,7 +146,46 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
             "raw market emotion archive is not ready: "
             + str(emotion_result.get("valid_sessions"))
         )
-    market_cycles = classify_market_cycle(emotion_result["history"])
+    emotion_history = emotion_result["history"].copy()
+    pool_dates = emotion_history.trade_date.tail(30).tolist()
+    pool_history = fetch_market_emotion_pool_history(
+        pool_dates,
+        limit_up_fetcher=ak.stock_zt_pool_em,
+        broken_board_fetcher=ak.stock_zt_pool_zbgc_em,
+        strong_pool_fetcher=ak.stock_zt_pool_strong_em,
+    )
+    pool_history["trade_date"] = pd.to_datetime(pool_history.trade_date).dt.normalize()
+    emotion_history["trade_date"] = pd.to_datetime(emotion_history.trade_date).dt.normalize()
+    pool_history = pool_history.rename(columns={
+        "available_time": "pool_history_available_time",
+        "availability_basis": "pool_history_availability_basis",
+        "historical_pit_eligible": "pool_history_pit_eligible",
+        "source_revision": "pool_history_source_revision",
+    })
+    emotion_history = emotion_history.merge(
+        pool_history, on="trade_date", how="left", validate="one_to_one",
+        suffixes=("", "_pool"),
+    )
+    for field in (
+        "highest_observed_limit_up_streak", "strong_pool_count",
+        "board_failure_rate", "promotion_rate",
+    ):
+        pool_field = field + "_pool"
+        if pool_field in emotion_history.columns:
+            emotion_history[field] = emotion_history[pool_field].combine_first(
+                emotion_history[field]
+            )
+    if "pool_history_available_time" in emotion_history.columns:
+        emotion_history["available_time"] = emotion_history.apply(
+            lambda row: max(
+                row.available_time, row.pool_history_available_time
+            ) if pd.notna(row.pool_history_available_time) else row.available_time,
+            axis=1,
+        )
+    pool_history_path = output_dir / "sw_mainline_market_emotion_pool_history.csv"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pool_history.to_csv(pool_history_path, index=False)
+    market_cycles = classify_market_cycle(emotion_history)
     market_cycles["trade_date"] = pd.to_datetime(market_cycles.trade_date).dt.normalize()
     emotion_field_counts = {
         field: int(market_cycles[field].notna().sum())
@@ -157,7 +198,11 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
         field: {
             "observations": count,
             "coverage": float(count / len(market_cycles)) if len(market_cycles) else 0.0,
-            "status": "READY" if len(market_cycles) and count / len(market_cycles) >= 0.95 else "INSUFFICIENT",
+            "status": (
+                "READY" if len(market_cycles) and count / len(market_cycles) >= 0.95
+                else "PARTIAL" if len(market_cycles) and count / len(market_cycles) >= 0.20
+                else "INSUFFICIENT"
+            ),
         }
         for field, count in emotion_field_counts.items()
     }
@@ -311,8 +356,16 @@ def replay(start_date: str, end_date: str, *, output_dir: Path = Path("output"))
             "READY" if all(
                 item["status"] == "READY"
                 for item in emotion_field_coverage.values()
+            ) else "PARTIAL" if any(
+                item["status"] == "PARTIAL"
+                for item in emotion_field_coverage.values()
             ) else "INSUFFICIENT"
         ),
+        "market_emotion_pool_history_rows": int(len(pool_history)),
+        "market_emotion_pool_history_ready_rows": int(
+            pool_history.pool_history_status.eq("READY").sum()
+        ),
+        "market_emotion_pool_history_output": str(pool_history_path),
         "market_cycle_counts": {
             str(k): int(v) for k, v in market_cycles.market_cycle.value_counts().to_dict().items()
         },
