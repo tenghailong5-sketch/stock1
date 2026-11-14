@@ -14,6 +14,7 @@ import pandas as pd
 REQUIRED_COLUMNS = {
     "symbol", "industry_code", "valid_from", "valid_to",
     "available_time", "source_id", "source_revision", "snapshot_scope",
+    "historical_pit_eligible", "availability_basis",
 }
 
 
@@ -66,8 +67,15 @@ def select_pit_industry_membership(
     x["available_time"] = available.dt.tz_convert("UTC")
     x = x.loc[x["available_time"] <= cutoff.tz_convert("UTC")].copy()
     x = x.loc[x["snapshot_scope"].astype(str).str.strip() == scope_id].copy()
+    pit_mask = (
+        x["historical_pit_eligible"].eq(True)
+        & x["availability_basis"].astype(str).str.strip().eq("source_published_at")
+    )
+    pit_rejected_count = int((~pit_mask).sum())
+    x = x.loc[pit_mask].copy()
 
-    # Validate only records that could have been known at this decision.
+    # Validate only records that could have been known at this decision and
+    # whose source publication time is explicitly verified as PIT-safe.
     x["valid_from"] = pd.to_datetime(x["valid_from"], errors="coerce")
     x["valid_to"] = pd.to_datetime(x["valid_to"], errors="coerce")
     if x["valid_from"].isna().any():
@@ -99,12 +107,14 @@ def select_pit_industry_membership(
             "membership_coverage": selected_count / len(symbols),
             "expected_symbols_sha256": expected_hash,
             "selected_symbols_sha256": selected_hash,
+            "membership_pit_rejected_rows": pit_rejected_count,
             "status": status,
             "historical_pit_eligible": status == "ready",
         }
 
     if eligible.empty:
-        return empty, audit("no_eligible_membership")
+        status = "no_pit_eligible_membership" if pit_rejected_count else "no_eligible_membership"
+        return empty, audit(status)
 
     # Latest revision available by the decision time supersedes earlier
     # observations. Multiple latest rows for a symbol are ambiguous and block.
