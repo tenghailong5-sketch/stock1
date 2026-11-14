@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-14T09:16:22.963487+00:00",
+  "captured_at": "2026-11-14T09:41:10.898064+00:00",
   "source_status": {
     "index_000001": "ok: tencent.stock_zh_index_daily_tx; rows=123",
     "index_399001": "ok: tencent.stock_zh_index_daily_tx; rows=123",
@@ -380,6 +380,7 @@
       "770301": "KeyError: \"None of [Index(['代码', '日期', '收盘', '开盘', '最高', '最低', '成交量', '成交额'], dtype='str')] are in the [columns]\"",
       "770302": "KeyError: \"None of [Index(['代码', '日期', '收盘', '开盘', '最高', '最低', '成交量', '成交额'], dtype='str')] are in the [columns]\""
     },
+    "shenwan_industry_index_history_by_code": {},
     "shenwan_api_coverage": 0.9360100376411543,
     "shenwan_api_error": null,
     "shenwan_api_failed_industry_count": 0,
