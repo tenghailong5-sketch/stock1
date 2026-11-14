@@ -74,7 +74,7 @@ def _parse_package(content: bytes, ymd: str, *, min_priced=None) -> list[dict]:
         for offset in range(0, len(cod), 150):
             record = cod[offset:offset + 150]
             try:
-                code = record[:6].rstrip(b"\\x00 ").decode("ascii")
+                code = record[:6].rstrip(b"\x00 ").decode("ascii")
             except UnicodeDecodeError as exc:
                 raise RuntimeError(f"{market} contains a non-ASCII security code") from exc
             seq = struct.unpack("<H", record[32:34])[0]
@@ -98,7 +98,7 @@ def _parse_package(content: bytes, ymd: str, *, min_priced=None) -> list[dict]:
                 raise RuntimeError(f"{market}{code} contains negative price/volume/amount")
             if high < max(open_, low, close) or low > min(open_, high, close):
                 raise RuntimeError(f"{market}{code} has inconsistent OHLC")
-            raw_name = record[40:72].split(b"\\x00")[0]
+            raw_name = record[40:72].split(b"\x00")[0]
             try:
                 name = raw_name.decode("gbk").strip()
             except UnicodeDecodeError as exc:
