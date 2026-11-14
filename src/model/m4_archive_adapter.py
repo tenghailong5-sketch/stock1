@@ -102,7 +102,7 @@ def _index_returns(
         g["historical_pit_eligible"] = False
         g = g.loc[g[output_5].notna() & g[output_20].notna()].copy()
         results.append(g[[
-            "trade_date", identity_col, output_5, output_20, "available_time",
+            "trade_date", identity_col, "daily_return", output_5, output_20, "available_time",
             "source_id", "source_revision", "availability_basis",
             "historical_pit_eligible",
         ]])
@@ -111,10 +111,13 @@ def _index_returns(
 
 def build_industry_index_returns(index_bars: pd.DataFrame, *, decision_time) -> pd.DataFrame:
     """Build industry return_5/return_20 rows visible at a forward decision."""
-    return _index_returns(
+    out = _index_returns(
         index_bars, identity_col="industry_code", decision_time=decision_time,
         output_5="return_5", output_20="return_20",
     )
+    out["industry_return"] = out["daily_return"]
+    out["industry_return_5"] = out["return_5"]
+    return out
 
 
 def build_market_index_returns(index_bars: pd.DataFrame, *, decision_time) -> pd.DataFrame:
