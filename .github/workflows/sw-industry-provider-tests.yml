@@ -89,39 +89,34 @@ jobs:
           if ledger["historical_pit_eligible"].ne(False).any():
               raise SystemExit("SW historical ledger incorrectly marks rows PIT-eligible")
 
-          latest = (
-              ledger.sort_values(["symbol", "valid_from"], kind="stable")
+          # Match the snapshot's selection rule: latest row with a code in
+          # the SW2021 dictionary. Preserve outside-dictionary rows in ledger,
+          # but do not let them override the mapped current-membership check.
+          mapped_history = ledger.loc[
+              ledger["industry_codebook_status"].eq("sw2021_dictionary_match")
+          ]
+          latest_mapped = (
+              mapped_history.sort_values(["symbol", "valid_from"], kind="stable")
               .drop_duplicates("symbol", keep="last")
               .set_index("symbol")["industry_code"]
               .sort_index()
           )
           current = snapshot.set_index("symbol")["industry_code"].sort_index()
-          # The historical XLS intentionally retains delisted securities.
-          # Require every current member to exist in the ledger, but do not
-          # require the historical ledger to equal today's smaller universe.
-          missing_history = sorted(set(current.index) - set(latest.index))
+          missing_history = sorted(set(current.index) - set(latest_mapped.index))
           if missing_history:
               raise SystemExit(
-                  "Current SW members missing from historical ledger: "
+                  "Current SW members missing from mapped historical ledger: "
                   f"{missing_history[:20]}"
               )
-          comparable = current.index.intersection(latest.index)
-          mismatch = latest.loc[comparable].ne(current.loc[comparable])
+          comparable = current.index.intersection(latest_mapped.index)
+          mismatch = latest_mapped.loc[comparable].ne(current.loc[comparable])
           if mismatch.any():
-              bad_symbols = list(latest.loc[comparable][mismatch].index[:20])
-              diagnostics = ledger[ledger["symbol"].isin(bad_symbols)].sort_values(
-                  ["symbol", "valid_from"], kind="stable"
-              ).groupby("symbol").tail(4)[
-                  ["symbol", "industry_code", "industry_codebook_status", "valid_from", "source_update_date"]
-              ]
               raise SystemExit(
-                  "SW history latest industry differs from current snapshot: "
-                  f"ledger={latest.loc[comparable][mismatch].head(20).to_dict()} "
-                  f"current={current.loc[bad_symbols].to_dict()} "
-                  f"history_tail={diagnostics.to_dict('records')}"
+                  "SW mapped history latest industry differs from current snapshot: "
+                  f"{latest_mapped.loc[comparable][mismatch].head(10).to_dict()}"
               )
-          historical_only = latest.index.difference(current.index)
-
+          historical_only = latest_mapped.index.difference(current.index)
+          
           Path("sw2021-historical-valid-time-ledger.csv").write_text(
               ledger.to_csv(index=False), encoding="utf-8"
           )
