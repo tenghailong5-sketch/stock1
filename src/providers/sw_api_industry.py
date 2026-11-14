@@ -317,5 +317,10 @@ def fetch_sw_api_industry_index_history(
     frame["availability_basis"] = "retrieval_time_only"
     frame["historical_pit_eligible"] = False
     frame["source_id"] = "swsresearch.index_publish.trend"
+    frame["source_revision"] = frame.apply(
+        lambda row: hashlib.sha256(
+            f"{code}|{row['trade_date']}|{row['close']}|{row['amount']}".encode("utf-8")
+        ).hexdigest(), axis=1,
+    )
     frame["snapshot_scope"] = "historical_index_series_retrieved_at_current_time"
     return frame.reset_index(drop=True)
