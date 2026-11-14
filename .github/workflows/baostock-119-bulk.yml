@@ -1,11 +1,7 @@
 name: BaoStock 119-Session Full-Market History Test
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/probe_baostock_119_bulk.py"
-      - ".github/workflows/baostock-119-bulk.yml"
+
 permissions:
   contents: write
 concurrency:
