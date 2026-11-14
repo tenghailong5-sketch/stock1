@@ -524,7 +524,7 @@ def collect(ak_module, archive_root: Path, *, captured_at=None, write: bool = Tr
             f"partial: archived={len(sw_index_history_records)}; "
             f"failed={len(sw_index_history_failures)}; PIT-ineligible"
         )
-    elif expected_symbols:
+    elif sw_index_history_fetcher is not None:
         source_status["shenwan_industry_index_history"] = (
             "unavailable: SW index-history provider not injected or SW membership unavailable"
         )
