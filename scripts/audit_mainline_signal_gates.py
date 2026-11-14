@@ -38,8 +38,18 @@ def main() -> None:
     lifecycle = evaluate_peak_and_decay_independently(startup)
     # Legacy IGNITION remains a candidate until all three independent gates pass.
     lifecycle = gate_ignition_labels(lifecycle)
-    ignition_candidate = lifecycle["mainline_phase_candidate"].eq("IGNITION")
+    ignition_state = lifecycle["mainline_phase_candidate"].eq("IGNITION")
+    ignition_candidate = (
+        ignition_state & lifecycle["phase_transition"].fillna(False).astype(bool)
+    )
     confirmed = lifecycle["startup_evidence_status"].eq("CONFIRMED").fillna(False)
+    gated_ignition_transition = (
+        lifecycle["mainline_phase_gated"].eq("IGNITION")
+        & lifecycle["phase_transition_gated"]
+    )
+    delayed_confirmed = (
+        gated_ignition_transition & ~lifecycle["phase_transition"].fillna(False).astype(bool)
+    )
 
     gate_fields = [
         "emotion_reversal_component",
@@ -81,9 +91,13 @@ def main() -> None:
                 dropna=False
             ).items()
         },
-        "gated_ignition_candidate_rows": int(ignition_candidate.sum()),
-        "confirmed_ignition_rows": int((ignition_candidate & confirmed).sum()),
-        "unconfirmed_ignition_rows": int((ignition_candidate & ~confirmed).sum()),
+        "ignition_state_rows": int(ignition_state.sum()),
+        "ignition_candidate_transition_rows": int(ignition_candidate.sum()),
+        "confirmed_ignition_transition_rows": int(gated_ignition_transition.sum()),
+        "delayed_confirmed_ignition_transitions": int(delayed_confirmed.sum()),
+        "unconfirmed_ignition_transition_rows": int(
+            (ignition_candidate & ~confirmed).sum()
+        ),
         "ignition_candidate_gate_breakdown": ignition_gate_breakdown,
         "positive_policy_ignition_rows": int(positive_policy_ignition.sum()),
         "positive_policy_ignition_gate_breakdown": positive_policy_gate_breakdown,
