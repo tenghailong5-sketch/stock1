@@ -17,7 +17,7 @@ def sample():
 
 def test_confirms_only_closed_breakout_bar_with_volume_expansion():
     bars = normalize_15m_bars(
-        sample(), symbol="600000", captured_at="2026-11-13T03:00:00Z"
+        sample(), symbol="600000", captured_at="2026-11-13T03:20:00Z"
     )
     result = confirm_15m_breakout(bars, lookback_bars=4, minimum_volume_multiple=1.0)
     assert result["entry_ready"] is True
@@ -28,7 +28,7 @@ def test_confirms_only_closed_breakout_bar_with_volume_expansion():
 
 def test_partial_current_bar_is_excluded():
     bars = normalize_15m_bars(
-        sample(), symbol="600000", captured_at="2026-11-13T02:10:00Z"
+        sample(), symbol="600000", captured_at="2026-11-13T03:10:00Z"
     )
     assert len(bars) == 4
     assert confirm_15m_breakout(bars)["entry_ready"] is False
@@ -39,7 +39,7 @@ def test_no_breakout_does_not_confirm():
     raw.loc[4, "收盘"] = 10.3
     raw.loc[4, "开盘"] = 10.3
     bars = normalize_15m_bars(
-        raw, symbol="600000", captured_at="2026-11-13T03:00:00Z"
+        raw, symbol="600000", captured_at="2026-11-13T03:20:00Z"
     )
     result = confirm_15m_breakout(bars)
     assert result["entry_ready"] is False
@@ -55,11 +55,11 @@ def test_duplicate_bar_timestamps_are_rejected():
     raw = sample()
     raw.loc[4, "时间"] = raw.loc[3, "时间"]
     with pytest.raises(ValueError, match="duplicate"):
-        normalize_15m_bars(raw, symbol="600000", captured_at="2026-11-13T03:00:00Z")
+        normalize_15m_bars(raw, symbol="600000", captured_at="2026-11-13T03:20:00Z")
 
 
 def test_invalid_ohlc_is_rejected():
     raw = sample()
     raw.loc[4, "最高"] = 10.2
     with pytest.raises(ValueError, match="high is inconsistent"):
-        normalize_15m_bars(raw, symbol="600000", captured_at="2026-11-13T03:00:00Z")
+        normalize_15m_bars(raw, symbol="600000", captured_at="2026-11-13T03:20:00Z")
