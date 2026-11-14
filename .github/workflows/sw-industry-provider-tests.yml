@@ -61,10 +61,43 @@ jobs:
                 f"industries={snapshot['industry_code'].nunique()} "
                 f"observed_at={snapshot['observed_at'].iloc[0]}")
           PY
+      - name: Live official SW2021 historical valid-time ledger smoke test
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from src.providers.sw_industry import fetch_sw_industry_valid_time_ledger
+
+          ledger = fetch_sw_industry_valid_time_ledger()
+          if ledger.empty or ledger["symbol"].nunique() < 4000:
+              raise SystemExit(
+                  f"Unexpectedly small SW historical ledger: rows={len(ledger)} "
+                  f"symbols={ledger['symbol'].nunique() if not ledger.empty else 0}"
+              )
+          if ledger.duplicated(["symbol", "valid_from"]).any():
+              raise SystemExit("Duplicate stock/valid_from rows in SW historical ledger")
+          closed = ledger["valid_to"].notna()
+          if not closed.any():
+              raise SystemExit("SW historical ledger has no derived closed intervals")
+          if (ledger.loc[closed, "valid_to"] <= ledger.loc[closed, "valid_from"]).any():
+              raise SystemExit("SW historical ledger contains non-positive intervals")
+          if ledger["historical_pit_eligible"].ne(False).any():
+              raise SystemExit("SW historical ledger incorrectly marks rows PIT-eligible")
+          Path("sw2021-historical-valid-time-ledger.csv").write_text(
+              ledger.to_csv(index=False), encoding="utf-8"
+          )
+          print(
+              f"SW2021_HISTORY_LEDGER_OK rows={len(ledger)} "
+              f"symbols={ledger['symbol'].nunique()} "
+              f"industries={ledger['industry_code'].nunique()} "
+              f"valid_from_dates={ledger['valid_from'].nunique()} "
+              f"closed_intervals={int(closed.sum())} "
+              f"pit_eligible={int(ledger['historical_pit_eligible'].sum())}"
+          )
+          PY
       - name: Upload live SW2021 snapshot
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: sw2021-live-snapshot
-          path: sw2021-live-snapshot.csv
+          path: |\n            sw2021-live-snapshot.csv\n            sw2021-historical-valid-time-ledger.csv
           retention-days: 7
