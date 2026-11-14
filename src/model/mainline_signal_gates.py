@@ -154,7 +154,7 @@ def attach_startup_evidence(
     capital_checks = {
         "capital_turnover_share_positive": ("turnover_share", lambda x: x > 0),
         "capital_turnover_share_increasing": ("turnover_share_change_3d", lambda x: x > 0),
-        "capital_leadership_top_quintile": ("strength_3d_percentile", lambda x: x >= DEFAULT_IGNITION_STRENGTH_MIN),
+        "capital_leadership_at_ignition_threshold": ("strength_3d_percentile", lambda x: x >= DEFAULT_IGNITION_STRENGTH_MIN),
         "capital_relative_strength_accelerating": ("relative_strength_change_2d", lambda x: x > 0),
     }
     for output_field, (input_field, predicate) in capital_checks.items():
