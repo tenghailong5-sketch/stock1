@@ -280,3 +280,24 @@ def test_market_emotion_limits_research_watchlist_by_regime():
         assert audit["market_cycle_state"] == state
         assert audit["market_regime_candidate_cap"] == count
         assert not shortlist["buy_authorization"].any()
+
+
+
+def test_final_shortlist_excludes_decay_and_peak_industries():
+    ranked = pd.DataFrame({
+        "symbol": ["000001", "000002", "000003", "000004"],
+        "最新价": [10.0, 10.0, 10.0, 10.0],
+        "涨跌幅%": [3.0, 3.0, 3.0, 3.0],
+        "当日成交额": [300e6, 300e6, 300e6, 300e6],
+        "research_opportunity_score": [99.0, 98.0, 97.0, 96.0],
+        "live_industry_level1": ["电子", "计算机", "银行", "通信"],
+        "live_mainline_phase_gated": [
+            "IGNITION_UNCONFIRMED", "TRANSITION", "DECAY", "PEAK"
+        ],
+    })
+    shortlist, _, audit = build_final_candidate_shortlist(
+        ranked, max_candidates=10, max_per_industry=3,
+    )
+    assert shortlist["symbol"].tolist() == ["000001", "000002"]
+    assert audit["mainline_phase_filtered_count"] == 2
+    assert not shortlist["buy_authorization"].any()
