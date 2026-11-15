@@ -250,7 +250,7 @@ def select_candidate_history_topup_symbols(research_opportunities, *, max_symbol
     frame = research_opportunities.copy()
     frame["symbol"] = frame["symbol"].astype(str).str.strip().str.zfill(6)
     available = frame["history_data_available"].fillna(False).astype(bool)
-    frame = frame.loc[~available & frame["symbol"].str.fullmatch(r"\\d{6}", na=False)]
+    frame = frame.loc[~available & frame["symbol"].str.fullmatch(r"\d{6}", na=False)]
     frame["research_opportunity_rank"] = pd.to_numeric(
         frame["research_opportunity_rank"], errors="coerce"
     )
