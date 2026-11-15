@@ -32,8 +32,8 @@ def _inputs():
         "valid_to": None,
     }])
     risk = {"600000": {
-        "entry_price": 20.0, "stop_price": 19.0, "quantity": 500,
-        "planned_risk": 600.0, "reward_risk": 2.0, "minimum_reward_risk": 1.5,
+        "entry_price": 20.0, "stop_price": 19.0, "quantity": 500, "available_cash": 10000.0,
+        "reward_risk": 2.0, "minimum_reward_risk": 1.5,
         "existing_portfolio_risk": 0.0, "existing_position_count": 0,
         "available_risk_budget": 1000.0,
         "same_industry_or_corr_gt_06": False,
@@ -55,6 +55,26 @@ def test_all_four_gates_can_authorize_only_with_complete_inputs():
     assert rows["allowed"].all()
     assert audit["allowed_count"] == 3
     assert audit["formal_signal_emitted"] is False
+
+
+def test_missing_m8_correlation_context_blocks_entry():
+    watchlist, m5, market, mainline, membership, risk = _inputs()
+    risk["600000"].pop("same_industry_or_corr_gt_06")
+    rows, audit = build_live_decision_gate_audit(
+        watchlist, m5, market, mainline, membership,
+        decision_time="2026-11-16T10:00:00+08:00",
+        risk_context_by_symbol=risk,
+        minute_confirmation_fetcher=lambda symbol, captured_at=None: {
+            "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
+            "reason": "all_15m_checks_passed",
+        },
+    )
+    # Missing correlation context is fail-closed: do not size or authorize.
+    assert not rows["allowed"].any()
+    assert rows["m8_risk_context_complete"].eq(False).all()
+    assert rows["m8_sized_quantity"].eq(0).all()
+    assert audit["m8_risk_context_complete_symbol_count"] == 0
+    assert audit["m8_risk_context_missing_symbol_count"] == 1
 
 
 def test_current_diagnostic_mainline_and_missing_m8_inputs_block_all_entries():
@@ -343,3 +363,69 @@ def test_operator_risk_context_file_loads_explicit_per_symbol_plan(tmp_path):
     assert plans["600000"]["available_risk_budget"] == 500.0
     assert audit["status"] == "LOADED"
     assert load_risk_context_file(None)[1]["status"] == "NOT_CONFIGURED"
+
+
+
+def test_m8_live_sizing_derives_quantity_from_cash_stop_and_market_scale():
+    watchlist, m5, market, mainline, membership, risk = _inputs()
+    rows, audit = build_live_decision_gate_audit(
+        watchlist, m5, market, mainline, membership,
+        decision_time="2026-11-16T10:00:00+08:00",
+        risk_context_by_symbol=risk,
+        minute_confirmation_fetcher=lambda symbol, **kwargs: {
+            "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
+        },
+    )
+    assert rows["allowed"].all()
+    assert rows["m8_sizing_approved"].all()
+    assert rows["m8_sized_quantity"].eq(400).all()
+    assert (rows["m8_estimated_loss"] <= 1000.0).all()
+
+
+def test_m8_live_sizing_uses_explicit_quantity_as_cash_cap_when_cash_is_missing():
+    watchlist, m5, market, mainline, membership, risk = _inputs()
+    del risk["600000"]["available_cash"]
+    rows, _ = build_live_decision_gate_audit(
+        watchlist, m5, market, mainline, membership,
+        decision_time="2026-11-16T10:00:00+08:00",
+        risk_context_by_symbol=risk,
+        minute_confirmation_fetcher=lambda symbol, **kwargs: {
+            "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
+        },
+    )
+    assert rows["allowed"].all()
+    assert rows["m8_risk_context_complete"].all()
+    assert rows["m8_sizing_approved"].all()
+    assert rows["m8_sized_quantity"].eq(400).all()
+
+
+
+def test_m8_live_sizing_rejects_boolean_cash_input():
+    watchlist, m5, market, mainline, membership, risk = _inputs()
+    risk["600000"]["available_cash"] = True
+    rows, _ = build_live_decision_gate_audit(
+        watchlist, m5, market, mainline, membership,
+        decision_time="2026-11-16T10:00:00+08:00",
+        risk_context_by_symbol=risk,
+        minute_confirmation_fetcher=lambda symbol, **kwargs: {
+            "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
+        },
+    )
+    assert not rows["allowed"].any()
+    assert rows["m8_risk_context_complete"].eq(False).all()
+    assert rows["m8_sized_quantity"].eq(0).all()
+
+
+def test_m8_live_sizing_does_not_require_quantity_when_cash_is_explicit():
+    watchlist, m5, market, mainline, membership, risk = _inputs()
+    del risk["600000"]["quantity"]
+    rows, _ = build_live_decision_gate_audit(
+        watchlist, m5, market, mainline, membership,
+        decision_time="2026-11-16T10:00:00+08:00",
+        risk_context_by_symbol=risk,
+        minute_confirmation_fetcher=lambda symbol, **kwargs: {
+            "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
+        },
+    )
+    assert rows["allowed"].all()
+    assert rows["m8_sized_quantity"].eq(400).all()

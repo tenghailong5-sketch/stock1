@@ -164,8 +164,16 @@ def evaluate_trade_decision(
         reasons.append("M5_strategy_not_eligible")
     if not _finite(strategy_score) or not 0.0 <= float(strategy_score) <= 100.0:
         reasons.append("M5_score_missing_or_out_of_range")
+    elif market_state == "NEUTRAL" and float(strategy_score) < 85.0:
+        # Preserve the explicit M3 NEUTRAL candidate-quality threshold only.
+        # Legacy global 80/85 score floors are not restored for other regimes.
+        reasons.append("M3_NEUTRAL_M5_SCORE_BELOW_85")
     if entry_ready is not True:
         reasons.append("entry_not_confirmed")
+    if not isinstance(same_industry_or_corr_gt_06, bool):
+        reasons.append("invalid_industry_correlation_flag")
+    elif same_industry_or_corr_gt_06:
+        reasons.append("same_industry_or_high_correlation_exposure")
     if isinstance(existing_position_count, bool) or not isinstance(existing_position_count, int) or existing_position_count < 0:
         reasons.append("invalid_existing_position_count")
     if not _finite(entry_price) or float(entry_price) <= 0:

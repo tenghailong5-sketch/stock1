@@ -104,11 +104,23 @@ def test_position_count_and_portfolio_risk_have_no_fixed_caps():
 
 def test_dynamic_market_scale_scales_available_risk_budget():
     result = valid_trade(
-        market_state="NEUTRAL", market_position_scale=0.43,
+        market_state="NEUTRAL", market_position_scale=0.43, strategy_score=85.0,
         planned_risk=2100.0, available_risk_budget=5000.0,
     )
     assert result.allowed
     assert result.max_allowed_risk == pytest.approx(2150.0)
+
+
+def test_m8_blocks_same_industry_or_high_correlation_add_on():
+    result = valid_trade(same_industry_or_corr_gt_06=True)
+    assert not result.allowed
+    assert "same_industry_or_high_correlation_exposure" in result.reasons
+
+
+def test_m8_rejects_non_boolean_industry_correlation_flag():
+    result = valid_trade(same_industry_or_corr_gt_06="false")
+    assert not result.allowed
+    assert "invalid_industry_correlation_flag" in result.reasons
 
 
 def test_planned_risk_cannot_understate_entry_to_stop_loss():
@@ -154,3 +166,17 @@ def test_live_forward_mode_requires_snapshot_and_m3_persistence():
         stock_turnover_pit_status="ready", decision_mode="historical_pit",
         industry_live_data_eligible=True, stock_turnover_live_status="ready",
     ).allow_new_entries
+
+
+def test_m3_neutral_requires_m5_score_of_at_least_85():
+    result = valid_trade(
+        market_state="NEUTRAL", market_position_scale=0.43, strategy_score=84.9,
+        planned_risk=2100.0, available_risk_budget=5000.0,
+    )
+    assert not result.allowed
+    assert "M3_NEUTRAL_M5_SCORE_BELOW_85" in result.reasons
+
+
+def test_risk_on_does_not_restore_legacy_global_80_point_floor():
+    result = valid_trade(market_state="RISK_ON", strategy_score=62.5)
+    assert result.allowed
