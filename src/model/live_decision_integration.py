@@ -151,10 +151,9 @@ def build_live_decision_gate_audit(
     if len(symbols) != len(set(symbols)):
         raise ValueError("watchlist contains duplicate symbols")
 
-    # M5 eligibility is the prerequisite for an expensive 15-minute check.
-    # Keep all candidate rows for diagnostics, but only scan symbols with at
-    # least one eligible A/B/C strategy. This changes request ordering, not
-    # candidate coverage or the decision rules.
+    # 15-minute confirmation is a live observation layer, not an M5 substitute.
+    # Scan the best-ranked research candidates even when M5 factors are missing;
+    # the formal decision below still requires M5 eligibility and every other gate.
     m5_lookup = {}
     if m5 is not None and not m5.empty:
         for row in m5.to_dict("records"):
@@ -163,15 +162,14 @@ def build_live_decision_gate_audit(
         symbol for (symbol, strategy), candidate in m5_lookup.items()
         if strategy in {"A", "B", "C"} and _truth(candidate.get("eligible"))
     }
-    # Preserve the existing exploratory rank among M5-qualified symbols.
     rank_col = "快速初筛分" if "快速初筛分" in watchlist else "当日成交额"
     ranked = watchlist.copy()
     if rank_col in ranked:
         ranked[rank_col] = pd.to_numeric(ranked[rank_col], errors="coerce")
         ranked = ranked.sort_values(rank_col, ascending=False, na_position="last")
-    # Bind every 15-minute observation to the runner's single frozen cutoff.
+    # Keep the 15m pass bounded, but do not let incomplete M5 inputs suppress
+    # useful live entry-structure observations for otherwise ranked candidates.
     minute_ranked_symbols = ranked["代码"].astype(str).str.zfill(6)
-    minute_ranked_symbols = minute_ranked_symbols[minute_ranked_symbols.isin(m5_eligible_symbols)]
     minute_symbols = (
         minute_ranked_symbols.tolist() if minute_scan_limit is None
         else minute_ranked_symbols.head(minute_scan_limit).tolist()
@@ -286,8 +284,7 @@ def build_live_decision_gate_audit(
         live_concentration_status = str(industry.get("stock_turnover_live_status", "not_ready"))
         minute = minute_results.get(symbol, {
             "status": "NOT_SCANNED_15M", "entry_ready": False,
-            "reason": ("outside_configured_15m_scan_pool" if symbol in m5_eligible_symbols
-                       else "m5_strategy_not_eligible"), "historical_pit_eligible": False,
+            "reason": "outside_configured_15m_scan_pool", "historical_pit_eligible": False,
         })
         risk = risk_context_by_symbol.get(symbol, {})
         # A market quote is not an approved execution plan. M8 requires an
@@ -366,6 +363,7 @@ def build_live_decision_gate_audit(
         "candidate_count": int(len(result)),
         "unique_stock_count": int(len(symbols)),
         "m5_eligible_symbol_count": int(len(m5_eligible_symbols)),
+        "minute_scan_scope": "ranked_research_candidates_independent_of_m5",
         "minute_scanned_count": int(len(minute_symbols)) if minute_window_open else 0,
         "minute_deferred_outside_session_count": int(len(minute_symbols)) if not minute_window_open else 0,
         "minute_entry_window_open": bool(minute_window_open),
