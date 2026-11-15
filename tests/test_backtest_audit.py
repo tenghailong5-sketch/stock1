@@ -62,14 +62,29 @@ def test_missing_delisted_or_corporate_action_certification_blocks():
     assert "candidate_not_certified:corporate_actions_resolved" in audit.errors
 
 
-def test_invalid_ohlcv_and_low_score_candidate_block():
+def test_scores_below_80_are_not_rejected_by_a_legacy_floor():
+    candidates, bars = datasets()
+    candidates.loc[0, "score"] = 79.99
+    audit = audit_backtest_dataset(candidates, bars)
+    assert audit.ready
+    assert audit.errors == ()
+
+
+@pytest.mark.parametrize("score", [-0.01, 100.01])
+def test_score_outside_supported_range_is_rejected(score):
+    candidates, bars = datasets()
+    candidates.loc[0, "score"] = score
+    audit = audit_backtest_dataset(candidates, bars)
+    assert not audit.ready
+    assert "eligible_candidate_score_outside_0_100" in audit.errors
+
+
+def test_invalid_ohlcv_still_blocks():
     candidates, bars = datasets()
     bars.loc[0, "high"] = 9.0
-    candidates.loc[0, "score"] = 79.99
     audit = audit_backtest_dataset(candidates, bars)
     assert not audit.ready
     assert "bar_invalid_high" in audit.errors
-    assert "eligible_candidate_score_outside_80_100" in audit.errors
 
 
 def test_duplicate_symbol_decision_strategy_is_rejected():
