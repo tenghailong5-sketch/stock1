@@ -65,6 +65,7 @@ def build_runtime_m4_pit_snapshot(
 
     frames = {}
     missing = []
+    builder_invoked = False
     try:
         for key, filename in _INPUT_FILES.items():
             stem = Path(filename).stem
@@ -87,6 +88,7 @@ def build_runtime_m4_pit_snapshot(
                 "missing_inputs": missing,
                 "input_dir": str(root),
             }
+        builder_invoked = True
         snapshot, audit = build_m4_pit_factor_snapshot(
             frames["stock_bars"], frames["stock_returns"],
             frames["industry_returns"], frames["market_returns"],
@@ -112,7 +114,7 @@ def build_runtime_m4_pit_snapshot(
     except Exception as exc:
         return pd.DataFrame(), pd.DataFrame(), {
             "status": "INVALID_CERTIFIED_INPUTS",
-            "builder_invoked": False,
+            "builder_invoked": builder_invoked,
             "historical_pit_eligible": False,
             "input_dir": str(root),
             "reason": f"{type(exc).__name__}:{str(exc)[:300]}",
