@@ -1342,9 +1342,10 @@ def main():
     formal_blockers.extend([
         "M5_REQUIRED_FACTORS_AND_HARD_GATES_NOT_COMPLETE",
         "M6_OUT_OF_SAMPLE_PREDICTION_NOT_VALIDATED",
-        "M8_STOP_SIZE_AND_PORTFOLIO_CONTEXT_NOT_AVAILABLE",
         "M9_EXECUTION_AWARE_BACKTEST_NOT_ADMITTED",
     ])
+    if decision_gate_audit.get("m8_risk_context_complete_symbol_count", 0) == 0:
+        formal_blockers.append("M8_DYNAMIC_RISK_CONTEXT_NOT_AVAILABLE")
     if decision_gate_audit.get("allowed_count", 0) == 0:
         formal_blockers.append("FOUR_LAYER_DECISION_GATE_BLOCKED_ALL_CANDIDATES")
     formal_status = "BLOCKED_FORMAL_SIGNAL" if formal_blockers else "READY"
