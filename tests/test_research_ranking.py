@@ -159,10 +159,12 @@ def test_weighted_quote_only_score_and_final_shortlist_are_diversified():
     )
     assert audit["score_method"] == "weighted_observed_percentiles_renormalized_per_row"
     assert audit["factor_weights"] == {
-        "industry_strength": 0.30,
-        "current_momentum": 0.40,
+        "industry_strength": 0.25,
+        "current_momentum": 0.30,
         "current_liquidity": 0.15,
         "industry_flow_concentration": 0.15,
+        "mainline_lifecycle": 0.10,
+        "policy_catalyst": 0.05,
     }
     assert len(shortlist) == 4
     assert shortlist["shortlist_industry"].value_counts().max() <= 2
@@ -219,3 +221,33 @@ def test_sustained_industry_flow_concentration_is_used_when_observed():
     assert by_symbol.loc["000001", "industry_flow_concentration_percentile"] > by_symbol.loc["000002", "industry_flow_concentration_percentile"]
     assert by_symbol.loc["000001", "research_opportunity_score"] > by_symbol.loc["000002", "research_opportunity_score"]
     assert audit["factor_weights"]["industry_flow_concentration"] == 0.15
+
+
+def test_gated_mainline_phase_and_policy_catalyst_adjust_research_score():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002"],
+        "涨跌幅%": [3.0, 3.0],
+        "当日成交额": [200e6, 200e6],
+    })
+    m5_input = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "industry_relative_strength": [80.0, 80.0],
+    })
+    industry = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "current_industry_level1": ["计算机", "传媒"],
+        "strength_percentile": [0.8, 0.8],
+        "mainline_phase_gated": ["IGNITION", "DECAY"],
+        "startup_policy_status": ["POSITIVE_CATALYST", "NEGATIVE_CATALYST"],
+    })
+    ranked, audit = build_research_opportunity_ranking(
+        watchlist, m5_input, industry_context=industry,
+    )
+    by_symbol = ranked.set_index("symbol")
+    assert by_symbol.loc["000001", "live_mainline_phase_score"] == 100.0
+    assert by_symbol.loc["000002", "live_mainline_phase_score"] == 0.0
+    assert by_symbol.loc["000001", "live_policy_catalyst_score"] == 100.0
+    assert by_symbol.loc["000002", "live_policy_catalyst_score"] == 0.0
+    assert by_symbol.loc["000001", "research_opportunity_score"] > by_symbol.loc["000002", "research_opportunity_score"]
+    assert audit["factor_weights"]["mainline_lifecycle"] == 0.10
+    assert audit["factor_weights"]["policy_catalyst"] == 0.05
