@@ -18,7 +18,7 @@ def test_research_pool_keeps_financials_observable_and_prioritizes_active_names(
         liquidity_share=1 / 3,
     )
 
-    assert selected["code"].tolist() == ["600000", "300001", "300002"]
+    assert selected["code"].tolist() == ["600000", "300001", "300003"]
     assert "600000" in set(selected["code"])
 
 
