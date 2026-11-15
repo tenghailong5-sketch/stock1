@@ -193,7 +193,6 @@ def archive_corporate_action_snapshot(
     symbol: str, *, ak_module, observed_at, archive_root=Path("data/forward_archive")
 ) -> dict:
     """Fetch dividend and rights history for one shortlisted symbol and append revisions."""
-    observed = _aware_utc(observed_at)
     root = Path(archive_root) / "corporate_actions"
     path = root / f"{str(symbol).zfill(6)}.jsonl"
     existing = _read_existing(path)
@@ -204,8 +203,13 @@ def archive_corporate_action_snapshot(
     frames = []
     for indicator in ("分红", "配股"):
         raw = provider(symbol=str(symbol).zfill(6), indicator=indicator)
+        # Stamp after each provider response returns; a slow request must not
+        # inherit the batch-start time and become available before observation.
+        response_observed = _aware_utc(
+            observed_at() if callable(observed_at) else observed_at
+        )
         normalized = normalize_corporate_actions(
-            raw, symbol=symbol, indicator=indicator, observed_at=observed,
+            raw, symbol=symbol, indicator=indicator, observed_at=response_observed,
             first_seen_by_key=existing,
         )
         if not normalized.empty:
