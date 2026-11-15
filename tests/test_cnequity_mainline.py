@@ -64,12 +64,12 @@ def test_rejects_duplicate_industry_date_and_naive_provenance():
     industry, market = _frames()
     industry = pd.concat([industry, industry.iloc[[0]]], ignore_index=True)
     with pytest.raises(ValueError, match="duplicate"):
-        build_cnequity_mainline_inputs(industry, market, expected_industry_count=2)
+        build_cnequity_mainline_inputs(industry, market, expected_industry_count=10)
 
     industry, market = _frames()
     industry["fetched_at"] = "2026-01-10T08:00:00"
     with pytest.raises(ValueError, match="timezone-aware"):
-        build_cnequity_mainline_inputs(industry, market, expected_industry_count=2)
+        build_cnequity_mainline_inputs(industry, market, expected_industry_count=10)
 
 
 def test_loader_reads_industry_and_explicit_benchmark_with_data_root():
@@ -83,7 +83,7 @@ def test_loader_reads_industry_and_explicit_benchmark_with_data_root():
     panel, audit = load_cnequity_mainline_inputs(
         start="2026-01-01", end="2026-01-31",
         data_root="/tmp/cnequity", loader=fake_loader,
-        expected_industry_count=2,
+        expected_industry_count=10,
     )
     assert [name for name, _ in calls] == ["industry_index", "index_bars"]
     assert calls[0][1]["data_root"] == "/tmp/cnequity"
@@ -96,7 +96,7 @@ def test_excludes_low_priced_member_coverage_without_hiding_the_count():
     industry.loc[industry["industry_code"].eq("801001"), "n_priced"] = 70
     industry.loc[industry["industry_code"].eq("801001"), "n_excluded"] = 30
     panel, audit = build_cnequity_mainline_inputs(
-        industry, market, expected_industry_count=2,
+        industry, market, expected_industry_count=10,
         min_priced_coverage=0.80,
     )
     assert "801001" not in set(panel["industry_code"])
@@ -108,7 +108,7 @@ def test_rejects_inconsistent_industry_member_counts():
     industry, market = _frames()
     industry.loc[0, "n_excluded"] = 4
     with pytest.raises(ValueError, match="inconsistent"):
-        build_cnequity_mainline_inputs(industry, market, expected_industry_count=2)
+        build_cnequity_mainline_inputs(industry, market, expected_industry_count=10)
 
 def test_drops_an_industry_with_gapped_sessions_instead_of_bridging_returns():
     industry, market = _frames()
