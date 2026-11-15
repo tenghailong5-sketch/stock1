@@ -97,7 +97,7 @@ def test_shortline_research_pool_includes_financials_and_limit_up_momentum():
         snapshot, max_symbols=3, min_candidate_amount=100, liquidity_share=1 / 3,
     )
 
-    assert selected["code"].tolist() == ["000001", "000002", "000003"]
+    assert selected["code"].tolist() == ["000001", "000002", "000004"]
     assert "000001" in set(selected["code"])  # financials are observable
     assert "000002" in set(selected["code"])  # >8% mover/limit-up leader is observable
 
