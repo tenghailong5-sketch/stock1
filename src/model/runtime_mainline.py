@@ -26,6 +26,9 @@ from src.model.m3_assembler import assemble_market_emotion_history
 from src.model.policy_catalysts import visible_policy_events
 from src.providers.eastmoney_market_emotion import fetch_market_emotion_pool_history
 from src.providers.gov_policy import discover_gov_policy_candidates, append_policy_candidates
+from src.providers.global_news import (
+    discover_global_news_candidates, append_global_news_candidates,
+)
 from src.providers.sw_api_industry import (
     fetch_sw_api_first_level_index_list,
     fetch_sw_api_industry_index_history,
@@ -273,6 +276,7 @@ def scan_runtime_mainlines(
     *, decision_time, archive_root: str | Path = Path("data/forward_archive"),
     policy_path: str | Path = Path("data/policy_catalysts/official_policy_events.jsonl"),
     policy_candidate_path: str | Path = Path("data/policy_catalysts/discovered_candidates.jsonl"),
+    global_news_candidate_path: str | Path = Path("data/global_news/discovered_candidates.jsonl"),
 ) -> tuple[pd.DataFrame, dict]:
     """Run the mainline/emotion/policy evidence chain as part of model execution."""
     cutoff = pd.Timestamp(decision_time)
@@ -289,6 +293,19 @@ def scan_runtime_mainlines(
         discovery_audit = {
             "status": "UNAVAILABLE",
             "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
+            "candidate_only": True,
+            "formal_stock_score_eligible": False,
+        }
+    global_news_audit = {"status": "UNAVAILABLE", "reason": "not attempted"}
+    try:
+        news_candidates, global_news_audit = discover_global_news_candidates()
+        global_news_audit["new_candidates_archived"] = append_global_news_candidates(
+            global_news_candidate_path, news_candidates
+        )
+    except Exception as news_exc:
+        global_news_audit = {
+            "status": "UNAVAILABLE",
+            "reason": f"{type(news_exc).__name__}: {str(news_exc)[:240]}",
             "candidate_only": True,
             "formal_stock_score_eligible": False,
         }
@@ -365,6 +382,12 @@ def scan_runtime_mainlines(
                 "archive_complete": False,
                 "visible_events": int(len(visible)),
                 "absence_means_no_catalyst": False,
+            },
+            "international_news": {
+                **global_news_audit,
+                "archive_path": str(global_news_candidate_path),
+                "candidate_only": True,
+                "no_unreviewed_news_changes_stock_scores": True,
             },
             "latest_trade_date": latest.strftime("%Y-%m-%d"),
             "latest_industry_rows": int(len(latest_rows)),
