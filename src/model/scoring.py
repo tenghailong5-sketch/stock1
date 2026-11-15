@@ -229,14 +229,22 @@ def score_factor_bundle_audited(
     return out, combined
 
 
-def qualify_candidate(result: StrategyResult, *, minimum_score: float = 80.0) -> StrategyResult:
-    """Apply the mandatory FHM candidate floor after all strategy hard gates.
+def qualify_candidate(result: StrategyResult, *, minimum_score: float | None = None) -> StrategyResult:
+    """Optionally apply a calibrated score floor; no fixed floor is imposed by default.
 
-    The configured floor may be raised but never lowered below 80. A high score
-    cannot override failed/missing hard gates, and a missing score never qualifies.
+    Missing factors and failed structural gates remain ineligible. When a
+    historical calibration explicitly supplies a floor, it may be any value
+    from 0 to 100; the live pipeline does not silently restore the legacy 80.
     """
-    if not _finite_number(minimum_score) or not 80.0 <= float(minimum_score) <= 100.0:
-        raise ValueError("minimum_score must be finite and within [80,100]")
+    if minimum_score is None:
+        if result.score is not None and (
+            not _finite_number(result.score) or not 0.0 <= float(result.score) <= 100.0
+        ):
+            return StrategyResult(result.strategy, None, False,
+                                  result.reasons + ("invalid_score",), result.stage)
+        return result
+    if not _finite_number(minimum_score) or not 0.0 <= float(minimum_score) <= 100.0:
+        raise ValueError("minimum_score must be finite and within [0,100]")
     if not result.eligible or result.score is None:
         return result
     if not _finite_number(result.score) or not 0.0 <= float(result.score) <= 100.0:
