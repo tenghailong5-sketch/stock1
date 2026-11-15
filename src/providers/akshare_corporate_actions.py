@@ -152,8 +152,9 @@ def normalize_corporate_actions(
             raise ValueError("corporate-action row missing valid announcement_date")
         identity = {
             "symbol": symbol, "event_type": event_type,
+            # Announcement date is the stable event identity: ex/record dates
+            # may be populated or revised in later observations.
             "announcement_date": row["announcement_date"],
-            "ex_date": row["ex_date"], "record_date": row["record_date"],
         }
         row["event_key"] = hashlib.sha256(
             json.dumps(identity, sort_keys=True, ensure_ascii=False).encode("utf-8")
