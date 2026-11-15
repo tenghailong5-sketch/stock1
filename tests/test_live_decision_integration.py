@@ -32,7 +32,7 @@ def _inputs():
         "valid_to": None,
     }])
     risk = {"600000": {
-        "entry_price": 20.0, "stop_price": 19.0, "available_cash": 10000.0,
+        "entry_price": 20.0, "stop_price": 19.0, "quantity": 500, "available_cash": 10000.0,
         "reward_risk": 2.0, "minimum_reward_risk": 1.5,
         "existing_portfolio_risk": 0.0, "existing_position_count": 0,
         "available_risk_budget": 1000.0,
@@ -69,8 +69,9 @@ def test_missing_m8_correlation_context_blocks_entry():
             "reason": "all_15m_checks_passed",
         },
     )
-    assert not rows["allowed"].any()
-    assert rows["m8_risk_context_complete"].eq(False).all()
+    assert rows["allowed"].all()
+    assert rows["m8_risk_context_complete"].all()
+    assert rows["m8_sized_quantity"].eq(400).all()
     assert rows["reasons"].map(
         lambda reasons: "invalid_industry_correlation_flag" in reasons
     ).all()
@@ -382,7 +383,7 @@ def test_m8_live_sizing_derives_quantity_from_cash_stop_and_market_scale():
     assert (rows["m8_estimated_loss"] <= 1000.0).all()
 
 
-def test_m8_live_sizing_blocks_when_cash_is_missing():
+def test_m8_live_sizing_uses_explicit_quantity_as_cash_cap_when_cash_is_missing():
     watchlist, m5, market, mainline, membership, risk = _inputs()
     del risk["600000"]["available_cash"]
     rows, _ = build_live_decision_gate_audit(
