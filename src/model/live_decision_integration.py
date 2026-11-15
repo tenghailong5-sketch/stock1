@@ -229,16 +229,16 @@ def build_live_decision_gate_audit(
         # membership observation and industry observation must carry fresh,
         # timestamped source lineage; neither is promoted to historical PIT.
         membership_live = _live_snapshot_ready(membership_row, cutoff)
-        industry_live = _live_snapshot_ready(industry, cutoff)
-        try:
-            live_valid_from = pd.Timestamp(membership_row.get("valid_from")).normalize()
-            live_valid_to_raw = membership_row.get("valid_to")
-            live_valid_to = pd.Timestamp(live_valid_to_raw).normalize() if pd.notna(live_valid_to_raw) else None
-            live_day = cutoff.tz_convert("Asia/Shanghai").tz_localize(None).normalize()
-            membership_live = membership_live and live_valid_from <= live_day and (live_valid_to is None or live_day < live_valid_to)
-        except (TypeError, ValueError, OverflowError):
-            membership_live = False
-        industry_live = membership_live and industry_live
+        # scan_runtime_mainlines already produces the current forward-only
+        # industry panel at this run's cutoff. It does not publish per-row
+        # lineage columns, so use its actual readiness/phase instead of
+        # demanding a second synthetic metadata envelope.
+        industry_live = (
+            membership_live
+            and bool(industry)
+            and _truth(industry.get("persistence_ready"))
+            and str(industry.get("mainline_phase", "UNKNOWN")) in {"IGNITION", "PEAK", "DECAY"}
+        )
         concentration_status = str(industry.get("stock_turnover_pit_status", "not_ready"))
         live_concentration_status = str(industry.get("stock_turnover_live_status", "not_ready"))
         minute = minute_results.get(symbol, {
