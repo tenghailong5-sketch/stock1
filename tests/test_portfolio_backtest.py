@@ -132,6 +132,7 @@ def test_partial_exit_fills_count_as_one_trade_only_after_position_closes():
         bar("000001", "2026-01-09", open_=9.2, high=9.3, low=9.0, close=9.1, volume=20000),
         bar("000001", "2026-01-12", open_=9.0, high=9.1, low=8.9, close=9.0, volume=20000),
         bar("000001", "2026-01-13", open_=8.9, high=9.0, low=8.8, close=8.9, volume=20000),
+        bar("000001", "2026-01-14", open_=8.8, high=8.9, low=8.7, close=8.8, volume=20000),
     ])
     result = run_portfolio_backtest(candidates, bars)
     assert result["open_positions"] == []
