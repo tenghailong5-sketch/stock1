@@ -1350,18 +1350,35 @@ def main():
             w["sw_history_industry_code"] = w["sw_history_industry_code"].combine_first(
                 w["current_forward_industry_code"]
             )
-    m5_input = build_m5_diagnostic_input(
-        w, m3, mainline_mapping_panel,
-        pit_factor_snapshot=m4_pit_factor_snapshot,
-        decision_time=now,
-    )
+    try:
+        m5_input = build_m5_diagnostic_input(
+            w, m3, mainline_mapping_panel,
+            pit_factor_snapshot=m4_pit_factor_snapshot,
+            decision_time=now,
+        )
+        m5_input_audit = {"status": "READY"}
+    except Exception as m5_input_exc:
+        m5_input = pd.DataFrame({"symbol": w.get("symbol", pd.Series(dtype=str))})
+        m5_input_audit = {
+            "status": "OPTIONAL_DIAGNOSTIC_SKIPPED",
+            "reason": f"{type(m5_input_exc).__name__}: {str(m5_input_exc)[:220]}",
+        }
     # Keep broad discovery moving independently of formal M5 readiness. This
     # ranking uses only observed same-session/industry diagnostics and cannot
     # be mistaken for a formal score or buy authorization.
-    research_opportunities, research_opportunity_audit = build_research_opportunity_ranking(
-        w, m5_input, min_observed_factors=3,
-        industry_context=forward_stock_mainline,
-    )
+    try:
+        research_opportunities, research_opportunity_audit = build_research_opportunity_ranking(
+            w, m5_input, min_observed_factors=3,
+            industry_context=forward_stock_mainline,
+        )
+    except Exception as ranking_exc:
+        research_opportunities = pd.DataFrame()
+        research_opportunity_audit = {
+            "status": "UNAVAILABLE",
+            "reason": f"{type(ranking_exc).__name__}: {str(ranking_exc)[:220]}",
+            "ranked_count": 0, "row_count": int(len(w)),
+            "formal_m5_score": False, "buy_authorization": False,
+        }
     research_opportunities.to_csv(
         OUT/"research_opportunity_rank.csv", index=False, encoding="utf-8-sig"
     )
@@ -1369,12 +1386,28 @@ def main():
         json.dumps(research_opportunity_audit, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
-    m5 = evaluate_candidates(m5_input, stage="close") if not m5_input.empty else pd.DataFrame(
-        columns=["symbol","strategy","stage","score","eligible","candidate_band","minimum_score","reasons"])
+    try:
+        m5 = evaluate_candidates(m5_input, stage="close") if not m5_input.empty else pd.DataFrame(
+            columns=["symbol","strategy","stage","score","eligible","candidate_band","minimum_score","reasons"])
+    except Exception as m5_exc:
+        m5 = pd.DataFrame(columns=["symbol","strategy","stage","score","eligible","candidate_band","minimum_score","reasons"])
+        m5_input_audit["m5_evaluation_error"] = f"{type(m5_exc).__name__}: {str(m5_exc)[:180]}"
     m5.to_csv(OUT/"m5_diagnostics.csv",index=False,encoding="utf-8-sig")
-    m5_readiness = factor_readiness_audit(m5_input, stage="close")
+    try:
+        m5_readiness = factor_readiness_audit(m5_input, stage="close")
+    except Exception as readiness_exc:
+        m5_readiness = pd.DataFrame()
+        m5_input_audit["factor_readiness_error"] = f"{type(readiness_exc).__name__}: {str(readiness_exc)[:180]}"
     m5_readiness.to_csv(OUT/"m5_factor_readiness.csv", index=False, encoding="utf-8-sig")
-    shortline_architecture, shortline_pillar_audit = audit_shortline_architecture(m5_input)
+    try:
+        shortline_architecture, shortline_pillar_audit = audit_shortline_architecture(m5_input)
+    except Exception as architecture_exc:
+        shortline_architecture = {
+            "status": "OPTIONAL_AUDIT_SKIPPED",
+            "reason": f"{type(architecture_exc).__name__}: {str(architecture_exc)[:180]}",
+            "candidate_count": 0, "pit_backed_candidate_count": 0,
+        }
+        shortline_pillar_audit = pd.DataFrame()
     (OUT/"shortline_architecture_audit.json").write_text(
         json.dumps(shortline_architecture, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
@@ -1491,12 +1524,25 @@ def main():
         os.getenv("FHM_RISK_CONTEXT_FILE", "").strip() or None,
         raw_json=os.getenv("FHM_RISK_CONTEXT_JSON", ""),
     )
-    decision_gates, decision_gate_audit = build_live_decision_gate_audit(
-        w, m5, m3, runtime_mainline, industry_membership,
-        decision_time=now, minute_scan_limit=minute_scan_limit,
-        risk_context_by_symbol=risk_context_by_symbol,
-    )
+    try:
+        decision_gates, decision_gate_audit = build_live_decision_gate_audit(
+            w, m5, m3, mainline_mapping_panel, industry_membership,
+            decision_time=now, minute_scan_limit=minute_scan_limit,
+            risk_context_by_symbol=risk_context_by_symbol,
+        )
+    except Exception as gate_exc:
+        decision_gates = pd.DataFrame()
+        decision_gate_audit = {
+            "status": "OPTIONAL_GATE_EVALUATION_UNAVAILABLE",
+            "reason": f"{type(gate_exc).__name__}: {str(gate_exc)[:220]}",
+            "candidate_count": int(len(w)), "minute_scanned_count": 0,
+            "allowed_count": 0, "blocked_count": int(len(w)),
+            "m8_risk_context_complete_symbol_count": 0,
+        }
     decision_gate_audit["risk_context_source"] = risk_context_audit
+    (OUT/"m5_input_optional_audit.json").write_text(
+        json.dumps(m5_input_audit, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     (OUT/"m8_risk_context_audit.json").write_text(
         json.dumps(risk_context_audit, ensure_ascii=False, indent=2),
         encoding="utf-8",
