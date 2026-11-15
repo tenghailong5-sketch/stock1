@@ -211,7 +211,7 @@ def score_factor_bundle_audited(
             expected_universe_size=universe["expected_universe_size"],
             date_col=date_col,
             higher_is_better=higher_is_better,
-            min_coverage=universe.get("min_coverage", 0.95),
+            min_coverage=universe.get("min_coverage", 0.80),
         )
         out[output_name] = ranks
         audit.insert(1, "factor_name", output_name)
