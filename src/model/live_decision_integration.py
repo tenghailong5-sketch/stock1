@@ -24,6 +24,41 @@ def _finite(value) -> bool:
         return False
 
 
+def load_risk_context_file(path: str | None) -> tuple[dict, dict]:
+    """Load operator-supplied, per-symbol M8 plans without inventing account data.
+
+    JSON shape: {"600000": {"entry_price": ..., "stop_price": ...,
+    "quantity": ..., "planned_risk": ..., "reward_risk": ...,
+    "minimum_reward_risk": ..., "existing_portfolio_risk": ...,
+    "existing_position_count": ..., "available_risk_budget": ...}}
+    """
+    if not path:
+        return {}, {"status": "NOT_CONFIGURED", "symbol_count": 0}
+    from pathlib import Path
+    try:
+        payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("risk context JSON root must be an object keyed by symbol")
+        normalized = {}
+        for raw_symbol, context in payload.items():
+            symbol = str(raw_symbol).strip().zfill(6)
+            if len(symbol) != 6 or not symbol.isdigit() or not isinstance(context, dict):
+                raise ValueError("risk context must map six-digit symbols to objects")
+            if symbol in normalized:
+                raise ValueError(f"duplicate normalized symbol: {symbol}")
+            normalized[symbol] = context
+        return normalized, {
+            "status": "LOADED", "symbol_count": len(normalized),
+            "source": "operator_configured_file",
+        }
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        return {}, {
+            "status": "INVALID_OR_UNAVAILABLE",
+            "reason": f"{type(exc).__name__}:{str(exc)[:200]}",
+            "symbol_count": 0,
+        }
+
+
 def build_live_decision_gate_audit(
     watchlist: pd.DataFrame,
     m5: pd.DataFrame,
