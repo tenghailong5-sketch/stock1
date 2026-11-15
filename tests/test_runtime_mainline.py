@@ -396,7 +396,7 @@ def test_industry_panel_uses_recent_cached_history_when_both_live_routes_fail(mo
             "trade_date": dates.strftime("%Y-%m-%d"),
             "industry_code": code,
             "close": [100.0 + j + i * 0.1 for j in range(len(dates))],
-            "amount": [1_000_000.0] * len(dates),
+            "amount": ([0.0] * len(dates) if i == 19 else [1_000_000.0] * len(dates)),
             "available_time": ["2026-02-14T07:00:00Z"] * len(dates),
         }).to_json(history_dir / f"{code}.jsonl", orient="records", lines=True)
     (index_dir / "000001.jsonl").write_text(
@@ -419,8 +419,10 @@ def test_industry_panel_uses_recent_cached_history_when_both_live_routes_fail(mo
     )
     assert audit["universe_source"] == "archived_SW_universe"
     assert audit["industry_count"] == 20
-    assert audit["available_industries"] == 20
+    assert audit["available_industries"] == 19
+    assert audit["failed_industry_count"] == 1
     assert audit["minimum_industries_per_date"] == 18
     assert audit["latest_trade_date"] == "2026-02-13"
-    assert panel.industry_code.nunique() == 20
+    assert panel.industry_code.nunique() == 19
+    assert "801019" not in set(panel.industry_code)
     assert not audit["historical_pit_eligible"]
