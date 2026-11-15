@@ -913,7 +913,7 @@ def main():
         # Adaptive short-term research pool. Default is 800 symbols; set
         # FHM_HISTORY_SCAN_MAX_SYMBOLS=all to request full-market history retrieval.
         # Scan inclusion never grants M5 eligibility or buy authorization.
-        scan_limit_raw = os.getenv("FHM_HISTORY_SCAN_MAX_SYMBOLS", "800").strip().lower()
+        scan_limit_raw = os.getenv("FHM_HISTORY_SCAN_MAX_SYMBOLS", "all").strip().lower()
         if scan_limit_raw in {"all", "full", "unlimited", "0"}:
             scan_limit = None
         else:
@@ -1199,7 +1199,7 @@ def main():
 
     # Execute M2 -> M3 -> M5 -> M8 on every strategy row. Missing PIT,
     # factor, 15-minute or portfolio-risk inputs remain explicit blockers.
-    minute_limit_raw = os.getenv("FHM_15M_SCAN_LIMIT", "100").strip().lower()
+    minute_limit_raw = os.getenv("FHM_15M_SCAN_LIMIT", "all").strip().lower()
     minute_scan_limit = (
         None if minute_limit_raw in {"all", "full", "unlimited", "0"}
         else int(minute_limit_raw)
