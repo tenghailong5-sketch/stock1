@@ -12,9 +12,10 @@ import pandas as pd
 
 RESEARCH_FACTORS = {
     # Weights are renormalized across observed factors for each row.
-    "industry_strength": ("industry_relative_strength", True, 0.35),
-    "current_momentum": ("涨跌幅%", True, 0.45),
-    "current_liquidity": ("当日成交额", True, 0.20),
+    "industry_strength": ("industry_relative_strength", True, 0.30),
+    "current_momentum": ("涨跌幅%", True, 0.40),
+    "current_liquidity": ("当日成交额", True, 0.15),
+    "industry_flow_concentration": ("industry_turnover_share_change_3d", True, 0.15),
     "price_structure": ("price_structure", True, 0.0),
     "body_strength": ("BodyStrength", True, 0.0),
     "upper_shadow_quality": ("upper_shadow_ratio", False, 0.0),
@@ -74,7 +75,10 @@ def build_research_opportunity_ranking(
             raise ValueError("duplicate symbol in forward industry context")
         keep = [c for c in (
             "symbol", "industry_code", "current_industry_level1", "mainline_phase",
-            "mainline_phase_gated", "strength_percentile", "startup_evidence_status",
+            "mainline_phase_gated", "strength_percentile", "turnover_share",
+            "turnover_share_change_1d", "turnover_share_change_3d",
+            "startup_evidence_status", "startup_policy_status",
+            "peak_evidence", "decay_evidence", "phase_gate_reason",
             "membership_observed_at", "mainline_trade_date",
         ) if c in context.columns]
         context = context[keep].rename(columns={
@@ -83,9 +87,18 @@ def build_research_opportunity_ranking(
             "mainline_phase": "live_mainline_phase",
             "mainline_phase_gated": "live_mainline_phase_gated",
             "strength_percentile": "live_industry_strength_percentile",
+            "turnover_share": "live_industry_turnover_share",
+            "turnover_share_change_1d": "live_industry_turnover_share_change_1d",
+            "turnover_share_change_3d": "live_industry_turnover_share_change_3d",
             "startup_evidence_status": "live_startup_evidence_status",
+            "startup_policy_status": "live_startup_policy_status",
         })
         out = out.merge(context, on="symbol", how="left", validate="one_to_one")
+        live_flow_change = pd.to_numeric(
+            out.get("live_industry_turnover_share_change_3d", pd.Series(np.nan, index=out.index)),
+            errors="coerce",
+        )
+        out["industry_turnover_share_change_3d"] = live_flow_change
         live_strength = pd.to_numeric(
             out["live_industry_strength_percentile"], errors="coerce"
         ) * 100.0
