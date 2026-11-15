@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from src.model.four_layer_decision import evaluate_trade_decision
+from src.model.position_sizing import size_long_position
 from src.providers.akshare_15m import fetch_live_15m_confirmation
 
 
@@ -287,26 +288,40 @@ def build_live_decision_gate_audit(
             "reason": "outside_configured_15m_scan_pool", "historical_pit_eligible": False,
         })
         risk = risk_context_by_symbol.get(symbol, {})
-        # A market quote is not an approved execution plan. M8 requires an
-        # explicit entry, stop, size, and portfolio-risk context.
+        # M8 computes board-lot quantity from cash, stop distance and the
+        # remaining portfolio risk budget. Operator-supplied quantity/planned
+        # risk are not trusted as sizing decisions.
         entry_price = risk.get("entry_price", np.nan)
         required_risk_fields = (
-            "entry_price", "stop_price", "quantity", "planned_risk",
-            "reward_risk", "minimum_reward_risk", "existing_portfolio_risk",
+            "entry_price", "stop_price", "available_cash", "reward_risk",
+            "minimum_reward_risk", "existing_portfolio_risk",
             "existing_position_count", "available_risk_budget",
             "same_industry_or_corr_gt_06",
         )
         risk_context_complete = (
             all(field in risk for field in required_risk_fields)
             and all(_finite(risk.get(field)) for field in (
-                "entry_price", "stop_price", "planned_risk", "reward_risk",
+                "entry_price", "stop_price", "available_cash", "reward_risk",
                 "minimum_reward_risk", "existing_portfolio_risk",
-                "existing_position_count", "available_risk_budget",
+                "available_risk_budget",
             ))
-            and isinstance(risk.get("quantity"), int)
-            and not isinstance(risk.get("quantity"), bool)
+            and isinstance(risk.get("existing_position_count"), int)
+            and not isinstance(risk.get("existing_position_count"), bool)
             and isinstance(risk.get("same_industry_or_corr_gt_06"), bool)
+            and _finite(market_scale)
         )
+        sizing = None
+        if risk_context_complete:
+            sizing = size_long_position(
+                entry_price=float(entry_price),
+                stop_price=float(risk["stop_price"]),
+                available_cash=float(risk["available_cash"]),
+                open_position_count=risk["existing_position_count"],
+                open_portfolio_risk=float(risk["existing_portfolio_risk"]),
+                available_risk_budget=float(risk["available_risk_budget"]),
+                market_risk_scale=float(market_scale),
+            )
+        sizing_approved = bool(sizing is not None and sizing.approved)
         args = {
             "market_state": market_state or "UNKNOWN",
             "market_position_scale": market_scale,
@@ -323,8 +338,8 @@ def build_live_decision_gate_audit(
             "entry_ready": _truth(minute.get("entry_ready")),
             "entry_price": entry_price,
             "stop_price": risk.get("stop_price", np.nan),
-            "quantity": risk.get("quantity", 0),
-            "planned_risk": risk.get("planned_risk", np.nan),
+            "quantity": sizing.shares if sizing_approved else 0,
+            "planned_risk": sizing.estimated_loss if sizing_approved else np.nan,
             "reward_risk": risk.get("reward_risk", np.nan),
             "minimum_reward_risk": risk.get("minimum_reward_risk", np.nan),
             "existing_portfolio_risk": risk.get("existing_portfolio_risk", np.nan),
@@ -347,6 +362,10 @@ def build_live_decision_gate_audit(
                 "minute_entry_ready": _truth(minute.get("entry_ready")),
                 "minute_reason": minute.get("reason"),
                 "m8_risk_context_complete": bool(risk_context_complete),
+                "m8_sizing_approved": sizing_approved,
+                "m8_sized_quantity": sizing.shares if sizing is not None else 0,
+                "m8_estimated_loss": sizing.estimated_loss if sizing is not None else None,
+                "m8_cash_required": sizing.cash_required if sizing is not None else None,
                 "stock_industry_code": industry_code or None,
                 "mainline_phase": phase,
                 "stock_turnover_pit_status": concentration_status,
