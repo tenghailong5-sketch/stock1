@@ -1359,7 +1359,7 @@ def main():
             if "current_industry_level1" in forward_stock_mainline else []
         )
         catalyst_candidates, catalyst_mapping_fallback_audit = map_candidate_sectors(
-            archived_candidates, current_industries,
+            archived_candidates, current_industries, decision_time=now,
         )
     catalyst_counts = {}
     for candidate in catalyst_candidates:
