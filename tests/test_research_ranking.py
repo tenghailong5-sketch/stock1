@@ -194,3 +194,28 @@ def test_quote_only_fallback_ranks_when_industry_context_is_unavailable():
     assert len(shortlist) == 3
     assert shortlist_audit["candidate_count"] == 3
     assert shortlist.buy_authorization.eq(False).all()
+
+
+def test_sustained_industry_flow_concentration_is_used_when_observed():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002"],
+        "涨跌幅%": [3.0, 3.0],
+        "当日成交额": [200e6, 200e6],
+    })
+    m5_input = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "industry_relative_strength": [80.0, 80.0],
+    })
+    industry = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "current_industry_level1": ["计算机", "传媒"],
+        "strength_percentile": [0.8, 0.8],
+        "turnover_share_change_3d": [0.08, -0.08],
+    })
+    ranked, audit = build_research_opportunity_ranking(
+        watchlist, m5_input, industry_context=industry,
+    )
+    by_symbol = ranked.set_index("symbol")
+    assert by_symbol.loc["000001", "industry_flow_concentration_percentile"] > by_symbol.loc["000002", "industry_flow_concentration_percentile"]
+    assert by_symbol.loc["000001", "research_opportunity_score"] > by_symbol.loc["000002", "research_opportunity_score"]
+    assert audit["factor_weights"]["industry_flow_concentration"] == 0.15
