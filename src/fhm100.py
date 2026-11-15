@@ -488,7 +488,7 @@ def load_m3_market_context(decision_time=None, archive_root=Path("data/forward_a
             "status": "INVALID_DATA",
             "reason": f"m3_assembly_error:{type(exc).__name__}:{str(exc)[:180]}",
             "market_state": None, "market_environment_score": None,
-            "position_scale": None, "valid_sessions": 0,
+            "risk_scale": None, "position_scale": None, "valid_sessions": 0,
             "latest_trade_date": None, "historical_backtest_eligible": False,
             "quality_warnings": [],
         }
@@ -508,7 +508,8 @@ def load_m3_market_context(decision_time=None, archive_root=Path("data/forward_a
     return {
         "status": status, "reason": result.get("reason"), "market_state": state,
         "market_environment_score": environment_score,
-        "position_scale": result.get("position_scale") if state else None,
+        "risk_scale": result.get("risk_scale", result.get("position_scale")) if state else None,
+        "position_scale": result.get("risk_scale", result.get("position_scale")) if state else None,
         "valid_sessions": int(result.get("valid_sessions", 0) or 0),
         "latest_trade_date": result.get("latest_trade_date"),
         "historical_backtest_eligible": False,
