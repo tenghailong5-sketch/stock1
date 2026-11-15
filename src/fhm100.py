@@ -1523,11 +1523,17 @@ def main():
         sw_history_audit = {"status": "UNAVAILABLE", "historical_pit_eligible": False,
                             "trading_authorization": False}
         try:
-            sw_history = fetch_sw_industry_history(\n                cache_path=Path("data/forward_archive/sw_industry_history_cache.jsonl"),\n                fetched_at=now,\n            )
-            sw_history_audit["provider_status"] = sw_history.attrs.get("provider_status", "LIVE")\n            if sw_history.attrs.get("live_fetch_error"):\n                sw_history_audit["live_fetch_error"] = sw_history.attrs["live_fetch_error"]\n            sw_research, sw_history_audit = select_sw_industry_research_snapshot(
+            sw_history = fetch_sw_industry_history(
+                cache_path=Path("data/forward_archive/sw_industry_history_cache.jsonl"),
+                fetched_at=now,
+            )
+            sw_research, sw_history_audit = select_sw_industry_research_snapshot(
                 sw_history, expected_symbols,
                 as_of_date=now.astimezone(ZoneInfo("Asia/Shanghai")).date(),
             )
+            sw_history_audit["provider_status"] = sw_history.attrs.get("provider_status", "LIVE")
+            if sw_history.attrs.get("live_fetch_error"):
+                sw_history_audit["live_fetch_error"] = sw_history.attrs["live_fetch_error"]
             sw_stock_mainline, sw_stock_mainline_audit = build_sw_stock_mainline_research(
                 sw_research, runtime_mainline,
                 as_of_date=now.astimezone(ZoneInfo("Asia/Shanghai")).date(),
