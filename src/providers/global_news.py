@@ -42,9 +42,9 @@ def discover_global_news_candidates(*, session=None, clock=None, timeout=12,
             # GDELT rate-limits bursts. Keep topic requests sequential with a
             # small pause and one bounded retry for HTTP 429.
             if theme_index:
-                time.sleep(1.0)
+                time.sleep(2.0)
             response = None
-            for attempt in range(2):
+            for attempt in range(3):
                 response = client.get(
                     API_URL,
                     params={
@@ -56,8 +56,14 @@ def discover_global_news_candidates(*, session=None, clock=None, timeout=12,
                     },
                     timeout=timeout,
                 )
-                if getattr(response, "status_code", None) == 429 and attempt == 0:
-                    time.sleep(2.0)
+                if getattr(response, "status_code", None) == 429 and attempt < 2:
+                    headers = getattr(response, "headers", {}) or {}
+                    retry_after = headers.get("Retry-After")
+                    try:
+                        delay = float(retry_after)
+                    except (TypeError, ValueError):
+                        delay = min(2.0 ** (attempt + 2), 8.0)
+                    time.sleep(max(0.0, min(delay, 15.0)))
                     continue
                 break
             response.raise_for_status()
