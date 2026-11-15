@@ -134,6 +134,7 @@ def test_dynamic_risk_context_is_required_and_bounded():
 
 def test_m8_permission_must_be_explicit_boolean():
     candidates, bars = datasets()
+    candidates["m8_trade_allowed"] = candidates["m8_trade_allowed"].astype(object)
     candidates.loc[0, "m8_trade_allowed"] = None
     audit = audit_backtest_dataset(candidates, bars)
     assert not audit.ready
