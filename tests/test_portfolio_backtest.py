@@ -134,6 +134,15 @@ def test_partial_exit_fills_count_as_one_trade_only_after_position_closes():
 
 
 
+def test_candidate_blocked_by_historical_m8_permission_is_not_entered():
+    candidates = frame([candidate()])
+    candidates.loc[0, "m8_trade_allowed"] = False
+    bars = frame([bar("000001", "2026-01-06")])
+    result = run_portfolio_backtest(candidates, bars)
+    assert result["fills"] == []
+    assert result["skipped"][0]["reason"] == "m8_trade_not_allowed"
+
+
 def test_retrieval_time_only_dataset_is_blocked_before_simulation():
     candidates = frame([candidate()])
     bars = frame([bar("000001", "2026-01-06")])
