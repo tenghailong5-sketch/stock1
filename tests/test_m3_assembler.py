@@ -101,7 +101,7 @@ def test_m3_assembler_requires_119_aligned_days_for_60_scored_observations(tmp_p
     )
     assert result["status"] == "INSUFFICIENT_DATA"
     assert result["reason"] == "fewer_than_119_index_sessions"
-    assert result["required_sessions"] == 119
+    assert result["required_index_sessions"] == 119
 
 
 def test_m3_prefers_retrieved_historical_aggregate_and_checks_availability(tmp_path):
