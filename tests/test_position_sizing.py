@@ -17,6 +17,21 @@ def test_remaining_portfolio_risk_caps_second_position():
     assert r.approved and r.risk_budget == 500
     assert r.estimated_loss <= 500
 
+def test_continuous_market_scale_is_applied_once_to_remaining_budget():
+    r = size_long_position(entry_price=20, stop_price=19, available_cash=100000,
+                           open_position_count=0, open_portfolio_risk=0,
+                           available_risk_budget=2000, market_risk_scale=0.5)
+    assert r.approved
+    assert r.risk_budget == 1000
+    assert r.estimated_loss <= 1000
+
+def test_zero_market_scale_does_not_authorize_a_new_position():
+    r = size_long_position(entry_price=20, stop_price=19, available_cash=100000,
+                           open_position_count=0, open_portfolio_risk=0,
+                           available_risk_budget=2000, market_risk_scale=0.0)
+    assert not r.approved
+    assert r.shares == 0
+
 
 
 def test_rejects_invalid_stop():
