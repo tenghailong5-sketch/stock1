@@ -217,9 +217,23 @@ def scan_runtime_mainlines(
         ]])
         names = panel[["industry_code", "industry_name"]].drop_duplicates("industry_code")
         phases = phases.merge(names, on="industry_code", how="left", validate="many_to_one")
-        emotion, emotion_audit = _assemble_emotion(
-            decision_time=cutoff, archive_root=root
-        )
+        # Industry strength/flow observations must survive an unavailable
+        # emotion archive. Keep emotion explicitly UNKNOWN so the ignition
+        # evidence gate remains closed, while PEAK/DECAY and raw mainline
+        # diagnostics can still be reported from valid industry observations.
+        try:
+            emotion, emotion_audit = _assemble_emotion(
+                decision_time=cutoff, archive_root=root
+            )
+            emotion_audit["status"] = "READY"
+        except Exception as emotion_exc:
+            emotion = pd.DataFrame(columns=["trade_date", "market_cycle"])
+            emotion_audit = {
+                "status": "UNAVAILABLE_UNKNOWN",
+                "reason": f"{type(emotion_exc).__name__}: {str(emotion_exc)[:240]}",
+                "sessions": 0,
+                "historical_pit_eligible": False,
+            }
         # Policy evidence is an optional overlay, not a prerequisite for
         # industry/emotion discovery. Missing or malformed archives remain
         # UNKNOWN and never mean "no catalyst"; they must not erase the scan.
