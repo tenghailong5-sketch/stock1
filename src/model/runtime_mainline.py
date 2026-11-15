@@ -356,34 +356,43 @@ def scan_runtime_mainlines(
     if cutoff.tzinfo is None:
         raise ValueError("decision_time must be timezone-aware")
     root = Path(archive_root)
-    discovery_audit = {"status": "UNAVAILABLE", "reason": "not attempted"}
-    policy_candidates = []
-    try:
-        policy_candidates, discovery_audit = discover_gov_policy_candidates()
-        discovery_audit["new_candidates_archived"] = append_policy_candidates(
-            policy_candidate_path, policy_candidates
-        )
-    except Exception as exc:
-        discovery_audit = {
-            "status": "UNAVAILABLE",
-            "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
-            "candidate_only": True,
-            "formal_stock_score_eligible": False,
-        }
-    global_news_audit = {"status": "UNAVAILABLE", "reason": "not attempted"}
-    news_candidates = []
-    try:
-        news_candidates, global_news_audit = discover_global_news_candidates()
-        global_news_audit["new_candidates_archived"] = append_global_news_candidates(
-            global_news_candidate_path, news_candidates
-        )
-    except Exception as news_exc:
-        global_news_audit = {
-            "status": "UNAVAILABLE",
-            "reason": f"{type(news_exc).__name__}: {str(news_exc)[:240]}",
-            "candidate_only": True,
-            "formal_stock_score_eligible": False,
-        }
+    # Policy and international-news discovery are independent network lanes.
+    # Run them concurrently so one slow provider does not serialize the other.
+    def discover_policy_lane():
+        try:
+            candidates, audit = discover_gov_policy_candidates()
+            audit["new_candidates_archived"] = append_policy_candidates(
+                policy_candidate_path, candidates
+            )
+            return candidates, audit
+        except Exception as exc:
+            return [], {
+                "status": "UNAVAILABLE",
+                "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
+                "candidate_only": True,
+                "formal_stock_score_eligible": False,
+            }
+
+    def discover_global_news_lane():
+        try:
+            candidates, audit = discover_global_news_candidates()
+            audit["new_candidates_archived"] = append_global_news_candidates(
+                global_news_candidate_path, candidates
+            )
+            return candidates, audit
+        except Exception as exc:
+            return [], {
+                "status": "UNAVAILABLE",
+                "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
+                "candidate_only": True,
+                "formal_stock_score_eligible": False,
+            }
+
+    with ThreadPoolExecutor(max_workers=2) as discovery_pool:
+        policy_future = discovery_pool.submit(discover_policy_lane)
+        news_future = discovery_pool.submit(discover_global_news_lane)
+        policy_candidates, discovery_audit = policy_future.result()
+        news_candidates, global_news_audit = news_future.result()
     try:
         panel, industry_audit = _assemble_industry_panel(
             decision_time=cutoff, archive_root=root
