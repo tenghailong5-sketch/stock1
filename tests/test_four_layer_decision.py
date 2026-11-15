@@ -111,6 +111,18 @@ def test_dynamic_market_scale_scales_available_risk_budget():
     assert result.max_allowed_risk == pytest.approx(2150.0)
 
 
+def test_m8_blocks_same_industry_or_high_correlation_add_on():
+    result = valid_trade(same_industry_or_corr_gt_06=True)
+    assert not result.allowed
+    assert "same_industry_or_high_correlation_exposure" in result.reasons
+
+
+def test_m8_rejects_non_boolean_industry_correlation_flag():
+    result = valid_trade(same_industry_or_corr_gt_06="false")
+    assert not result.allowed
+    assert "invalid_industry_correlation_flag" in result.reasons
+
+
 def test_planned_risk_cannot_understate_entry_to_stop_loss():
     result = valid_trade(planned_risk=900.0)
     assert not result.allowed
