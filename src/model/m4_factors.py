@@ -389,8 +389,13 @@ def _require_historical_pit_eligible(frame: pd.DataFrame, name: str) -> None:
     if not eligible.all():
         raise ValueError(f"{name} contains observations not certified historical PIT eligible")
     basis = frame["availability_basis"].astype(str).str.strip()
-    if basis.eq("").any() or basis.eq("retrieval_time_only").any():
-        raise ValueError(f"{name} has retrieval-time-only availability")
+    allowed_basis = {"original_publication_time", "exchange_publication_time"}
+    invalid_basis = ~basis.isin(allowed_basis)
+    if invalid_basis.any():
+        rejected = sorted(basis.loc[invalid_basis].unique().tolist())
+        raise ValueError(
+            f"{name} has unsupported availability_basis: " + ",".join(rejected)
+        )
     for col in ("source_id", "source_revision"):
         values = frame[col]
         if values.isna().any() or values.astype(str).str.strip().eq("").any():
@@ -526,6 +531,7 @@ def build_m4_pit_factor_snapshot(
         amount_ma20.loc[valid_amount] >= 100_000_000
     )
     if hard_gate_snapshot is not None:
+        _require_historical_pit_eligible(hard_gate_snapshot, "hard_gate_snapshot")
         external_gate_fields = tuple(
             field for field in gate_fields if field != "amount_ma20_ge_100m"
         )
@@ -551,10 +557,25 @@ def build_m4_pit_factor_snapshot(
         base = base.drop(columns=list(external_gate_fields)).merge(
             gates[["symbol", *external_gate_fields]], on="symbol", how="left", validate="one_to_one"
         )
+    # Preserve each input archive's lineage alongside the derived-factor
+    # identity; never overwrite the only record of where observations came from.
+    for frame, prefix in (
+        (stock_bars, "stock_bars"),
+        (stock_returns, "stock_returns"),
+        (industry_returns, "industry_returns"),
+        (market_returns, "market_returns"),
+    ):
+        base[f"{prefix}_source_ids"] = ";".join(
+            sorted(frame["source_id"].astype(str).str.strip().unique())
+        )
+        base[f"{prefix}_source_revisions"] = ";".join(
+            sorted(frame["source_revision"].astype(str).str.strip().unique())
+        )
     base["historical_pit_eligible"] = True
+    base["availability_basis"] = "derived_from_certified_pit_inputs"
     base["available_time"] = pd.to_datetime(base["available_time"], utc=True)
     base["source_id"] = "derived:m4_pit_factor_builder"
-    base["source_revision"] = "derived:v1"
+    base["source_revision"] = "derived:v2"
     base["m4_decision_time"] = cutoff.isoformat()
     base["m4_factor_status"] = "ready"
     # Incomplete factor ranks remain NA and are visible in the audit; the M5
