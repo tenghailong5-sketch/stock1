@@ -211,8 +211,17 @@ def score_factor_bundle_audited(
             expected_universe_size=universe["expected_universe_size"],
             date_col=date_col,
             higher_is_better=higher_is_better,
-            min_coverage=universe.get("min_coverage", 0.95),
+            min_coverage=universe.get("min_coverage", 0.80),
         )
+        # Formal M5 factor bundles require the exact declared peer universe.
+        # The 80% partial-universe allowance belongs to M4 research diagnostics,
+        # not to the audited M5 factor contract.
+        expected_size = universe["expected_universe_size"]
+        for audit_index, audit_row in audit.iterrows():
+            if int(audit_row["observed_universe_size"]) != int(expected_size):
+                date_mask = out[date_col].eq(audit_row["trade_date"])
+                ranks.loc[date_mask] = float("nan")
+                audit.at[audit_index, "status"] = "universe_size_mismatch"
         out[output_name] = ranks
         audit.insert(1, "factor_name", output_name)
         audits.append(audit)

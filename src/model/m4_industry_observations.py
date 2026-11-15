@@ -31,14 +31,14 @@ def select_latest_observed_industry_snapshot(
     expected_symbols,
     *,
     decision_time,
-    max_age="2D",
+    max_age="10D",
+    min_symbol_coverage=0.90,
 ) -> tuple[pd.DataFrame, dict]:
-    """Select the newest complete visible batch, preserving many-to-many rows.
+    """Select the newest sufficiently complete visible forward-only membership batch.
 
-    A batch is eligible only when every row in that batch was available by the
-    decision time. The newest eligible batch is authoritative: if it is stale,
-    incomplete for the expected universe, or internally duplicated, the
-    function fails closed instead of falling back to an older batch.
+    Incomplete newest batches no longer erase an older complete snapshot that
+    is still fresh. Partial symbol coverage is usable for research once the
+    configured floor is met; absent symbols simply retain missing industry data.
     """
     if membership is None or not isinstance(membership, pd.DataFrame):
         raise ValueError("membership must be a DataFrame")
@@ -59,10 +59,13 @@ def select_latest_observed_industry_snapshot(
     age_limit = pd.Timedelta(max_age)
     if age_limit <= pd.Timedelta(0):
         raise ValueError("max_age must be positive")
+    if not 0 < float(min_symbol_coverage) <= 1:
+        raise ValueError("min_symbol_coverage must be within (0,1]")
 
     empty = membership.iloc[0:0].copy()
 
-    def audit(status, *, snapshot_id=None, selected=None, latest_time=None):
+    def audit(status, *, snapshot_id=None, selected=None, latest_time=None,
+              skipped_batches=None, fallback_used=False):
         selected = selected if selected is not None else empty
         matched = set(selected["symbol"].astype(str)) if not selected.empty else set()
         return {
@@ -71,9 +74,11 @@ def select_latest_observed_industry_snapshot(
             "latest_available_time": latest_time.isoformat() if latest_time is not None else None,
             "expected_universe_size": len(symbols),
             "selected_symbol_count": len(matched),
-            "membership_row_count": int(len(selected)),
             "membership_coverage": len(matched) / len(symbols),
+            "minimum_symbol_coverage": float(min_symbol_coverage),
             "status": status,
+            "fallback_used": bool(fallback_used),
+            "skipped_batches": skipped_batches or [],
             "historical_pit_eligible": False,
         }
 
@@ -99,41 +104,59 @@ def select_latest_observed_industry_snapshot(
 
     x["available_time"] = _aware_utc_series(x["available_time"], "available_time")
     x["observed_at"] = _aware_utc_series(x["observed_at"], "observed_at")
-
-    # A batch is not visible until all its constituent requests have completed.
     batch_available = x.groupby("snapshot_id")["available_time"].max()
     visible_ids = batch_available.loc[batch_available <= cutoff].sort_values(ascending=False)
     if visible_ids.empty:
         return empty, audit("no_visible_snapshot")
 
-    snapshot_id = str(visible_ids.index[0])
-    latest_time = visible_ids.iloc[0]
-    batch = x.loc[x["snapshot_id"] == snapshot_id].copy()
-    if (batch["available_time"] > cutoff).any():
-        return empty, audit("batch_not_fully_visible", snapshot_id=snapshot_id, latest_time=latest_time)
+    skipped = []
+    latest_visible_time = visible_ids.iloc[0]
+    last_reason = "incomplete_universe"
+    for batch_index, (snapshot_id, latest_time) in enumerate(visible_ids.items()):
+        if cutoff - latest_time > age_limit:
+            last_reason = "stale_snapshot"
+            break
+        batch = x.loc[x["snapshot_id"] == snapshot_id].copy()
+        if (batch["available_time"] > cutoff).any():
+            last_reason = "batch_not_fully_visible"
+            skipped.append({"snapshot_id": str(snapshot_id), "reason": last_reason})
+            continue
+        expected_counts = pd.to_numeric(
+            batch["expected_industry_count"], errors="coerce"
+        ).dropna().unique()
+        if len(expected_counts) != 1 or expected_counts[0] <= 0:
+            last_reason = "invalid_batch_manifest"
+            skipped.append({"snapshot_id": str(snapshot_id), "reason": last_reason})
+            continue
+        if batch["industry_code"].nunique() != int(expected_counts[0]):
+            last_reason = "incomplete_industry_batch"
+            skipped.append({"snapshot_id": str(snapshot_id), "reason": last_reason})
+            continue
+        if batch.duplicated(["symbol", "industry_code"]).any():
+            last_reason = "duplicate_membership"
+            skipped.append({"snapshot_id": str(snapshot_id), "reason": last_reason})
+            continue
 
-    if cutoff - latest_time > age_limit:
-        return empty, audit("stale_snapshot", snapshot_id=snapshot_id, latest_time=latest_time)
+        selected = batch.loc[batch["symbol"].isin(symbols)].copy()
+        matched = set(selected["symbol"].astype(str))
+        coverage = len(matched) / len(symbols)
+        if coverage < float(min_symbol_coverage):
+            last_reason = "incomplete_universe"
+            skipped.append({
+                "snapshot_id": str(snapshot_id), "reason": last_reason,
+                "membership_coverage": coverage,
+            })
+            continue
 
-    expected_counts = pd.to_numeric(batch["expected_industry_count"], errors="coerce").dropna().unique()
-    if len(expected_counts) != 1 or expected_counts[0] <= 0:
-        return empty, audit("invalid_batch_manifest", snapshot_id=snapshot_id, latest_time=latest_time)
-    if batch["industry_code"].nunique() != int(expected_counts[0]):
-        return empty, audit("incomplete_industry_batch", snapshot_id=snapshot_id, latest_time=latest_time)
-
-    if batch.duplicated(["symbol", "industry_code"]).any():
-        return empty, audit("duplicate_membership", snapshot_id=snapshot_id, latest_time=latest_time)
-
-    selected = batch.loc[batch["symbol"].isin(symbols)].copy()
-    matched = set(selected["symbol"].astype(str))
-    if matched != set(symbols):
-        return empty, audit(
-            "incomplete_universe", snapshot_id=snapshot_id,
-            selected=selected, latest_time=latest_time,
+        selected = selected.sort_values(["symbol", "industry_code"]).reset_index(drop=True)
+        status = "ready_forward_only" if coverage == 1.0 else "ready_forward_only_partial"
+        return selected, audit(
+            status, snapshot_id=str(snapshot_id), selected=selected,
+            latest_time=latest_time, skipped_batches=skipped,
+            fallback_used=batch_index > 0,
         )
 
-    selected = selected.sort_values(["symbol", "industry_code"]).reset_index(drop=True)
-    return selected, audit(
-        "ready_forward_only", snapshot_id=snapshot_id,
-        selected=selected, latest_time=latest_time,
+    return empty, audit(
+        last_reason, snapshot_id=str(visible_ids.index[0]),
+        latest_time=latest_visible_time, skipped_batches=skipped,
     )

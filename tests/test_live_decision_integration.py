@@ -195,3 +195,42 @@ def test_15m_confirmation_scan_supports_all_candidates_without_fixed_cap():
     assert seen == ["600000", "000001", "300001"]
     assert audit["minute_scanned_count"] == 3
     assert audit["minute_scan_limit"] == "ALL"
+
+
+
+def test_15m_full_universe_uses_bounded_parallel_workers(monkeypatch):
+    from src.model import live_decision_integration as integration
+
+    calls = {}
+
+    class RecordingExecutor:
+        def __init__(self, max_workers):
+            calls["max_workers"] = max_workers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def map(self, fn, values):
+            return map(fn, values)
+
+    monkeypatch.setattr(integration, "ThreadPoolExecutor", RecordingExecutor)
+    watchlist = pd.DataFrame([
+        {"代码": "600000", "当日成交额": 100},
+        {"代码": "000001", "当日成交额": 90},
+    ])
+    rows, audit = integration.build_live_decision_gate_audit(
+        watchlist, pd.DataFrame(), {"status": "UNKNOWN"},
+        pd.DataFrame(), pd.DataFrame(),
+        decision_time="2026-11-14T09:00:00+08:00",
+        minute_confirmation_fetcher=lambda symbol, **kwargs: {
+            "status": "CHECKED", "entry_ready": False
+        },
+        minute_scan_limit=None, minute_scan_workers=99,
+    )
+
+    assert calls["max_workers"] == 8
+    assert audit["minute_scanned_count"] == 2
+    assert audit["minute_scan_limit"] == "ALL"

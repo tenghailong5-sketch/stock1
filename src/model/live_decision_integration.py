@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -32,7 +34,8 @@ def build_live_decision_gate_audit(
     decision_time,
     risk_context_by_symbol: dict | None = None,
     minute_confirmation_fetcher=None,
-    minute_scan_limit: int | None = 100,
+    minute_scan_limit: int | None = None,
+    minute_scan_workers: int | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Run all four decision gates without inventing missing factor/risk/PIT inputs.
 
@@ -72,16 +75,24 @@ def build_live_decision_gate_audit(
         minute_ranked_symbols.tolist() if minute_scan_limit is None
         else minute_ranked_symbols.head(minute_scan_limit).tolist()
     )
-    minute_results = {}
-    for symbol in minute_symbols:
+    if minute_scan_workers is None:
+        minute_scan_workers = int(os.getenv("FHM_15M_SCAN_WORKERS", "4"))
+    minute_scan_workers = max(1, min(int(minute_scan_workers), 8))
+
+    def _fetch_minute(symbol):
         try:
-            minute_results[symbol] = minute_confirmation_fetcher(symbol, captured_at=cutoff)
+            return symbol, minute_confirmation_fetcher(symbol, captured_at=cutoff)
         except Exception as exc:
-            minute_results[symbol] = {
+            return symbol, {
                 "status": "UNAVAILABLE_15M", "entry_ready": False,
                 "reason": f"{type(exc).__name__}:{str(exc)[:180]}",
                 "historical_pit_eligible": False,
             }
+
+    minute_results = {}
+    with ThreadPoolExecutor(max_workers=minute_scan_workers) as executor:
+        for symbol, result in executor.map(_fetch_minute, minute_symbols):
+            minute_results[symbol] = result
 
     membership_by_symbol = {}
     if (

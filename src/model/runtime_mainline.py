@@ -6,7 +6,8 @@ perform a historical replay, or promote diagnostics into formal stock scores.
 from __future__ import annotations
 
 import json
-import time
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import akshare as ak
@@ -65,24 +66,32 @@ def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path)
         raise RuntimeError(f"SW first-level industry universe incomplete: {expected}")
     end_date = decision_time.tz_convert("Asia/Shanghai").strftime("%Y%m%d")
     start_date = (decision_time.tz_convert("Asia/Shanghai") - pd.Timedelta(days=150)).strftime("%Y%m%d")
-    frames = []
-    failures = []
-    for row in groups.itertuples(index=False):
+    def fetch_one(row):
+        local_session = requests.Session()
         try:
             history = fetch_sw_api_industry_index_history(
                 str(row.industry_code), start_date=start_date, end_date=end_date,
-                session=session,
+                session=local_session,
             )
             history["industry_name"] = str(row.industry_name)
-            frames.append(history)
+            return history, None
         except Exception as exc:
-            failures.append(f"{row.industry_code}:{type(exc).__name__}:{str(exc)[:140]}")
-        time.sleep(0.15)
+            return None, f"{row.industry_code}:{type(exc).__name__}:{str(exc)[:140]}"
+        finally:
+            local_session.close()
+
+    # Avoid serially waiting on every SW industry endpoint. Keep concurrency
+    # bounded to reduce provider pressure and preserve per-industry failures.
+    workers = max(1, min(int(os.getenv("FHM_MAINLINE_HISTORY_WORKERS", "4")), 8))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        results = list(executor.map(fetch_one, groups.itertuples(index=False)))
+    frames = [frame for frame, error in results if frame is not None]
+    failures = [error for frame, error in results if error is not None]
     # One provider timeout must not discard every available industry.
     # Keep the cross-section when at least 90% of the current SW universe is
     # present on a date; the observed turnover denominator scales all shares
     # equally, so within-date relative rankings remain comparable.
-    minimum_industries = max(20, int(expected * 0.90 + 0.999999))
+    minimum_industries = max(1, int(expected * 0.90 + 0.999999))
     if not frames:
         raise RuntimeError(
             f"SW industry history unavailable for all {expected} industries: "
@@ -127,7 +136,6 @@ def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path)
         "latest_trade_date": panel.trade_date.max().strftime("%Y-%m-%d"),
         "source": "official_SW_index_api_plus_archived_SSE_index",
         "historical_pit_eligible": False,
-        "failed_industries": [],
     }
     return panel, audit
 
@@ -212,12 +220,34 @@ def scan_runtime_mainlines(
         emotion, emotion_audit = _assemble_emotion(
             decision_time=cutoff, archive_root=root
         )
-        if not policy_path.exists():
-            raise RuntimeError("official policy catalyst archive is missing")
-        policy = pd.read_json(policy_path, lines=True)
-        visible, policy_audit = visible_policy_events(policy, decision_time=cutoff)
-        # The local seed archive is explicitly incomplete. A missing event is
-        # therefore UNKNOWN, never evidence that no catalyst exists.
+        # Policy evidence is an optional overlay, not a prerequisite for
+        # industry/emotion discovery. Missing or malformed archives remain
+        # UNKNOWN and never mean "no catalyst"; they must not erase the scan.
+        policy_columns = [
+            "event_id", "published_at", "available_at", "source_url", "source_id",
+            "title", "catalyst_type", "industry_codes", "impact_direction",
+            "confidence", "confidence_basis", "availability_basis",
+        ]
+        if policy_path.exists():
+            try:
+                policy = pd.read_json(policy_path, lines=True)
+                visible, policy_audit = visible_policy_events(policy, decision_time=cutoff)
+            except Exception as policy_exc:
+                visible = pd.DataFrame(columns=policy_columns)
+                policy_audit = {
+                    "status": "ARCHIVE_UNAVAILABLE_UNKNOWN",
+                    "reason": f"{type(policy_exc).__name__}: {str(policy_exc)[:200]}",
+                    "input_rows": 0, "visible_rows": 0,
+                    "historical_pit_eligible": False,
+                }
+        else:
+            visible = pd.DataFrame(columns=policy_columns)
+            policy_audit = {
+                "status": "ARCHIVE_MISSING_UNKNOWN",
+                "reason": "policy archive absent; no negative-catalyst inference",
+                "input_rows": 0, "visible_rows": 0,
+                "historical_pit_eligible": False,
+            }
         evidence = attach_startup_evidence(
             phases, emotion, visible, policy_archive_complete=False
         )

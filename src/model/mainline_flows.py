@@ -61,7 +61,7 @@ def classify_mainlines(
         lambda value: max(1, int(value + 0.999999))
     )
     if (observed_counts < minimum_by_date).any():
-        raise ValueError("industry peer coverage below configured minimum")
+        raise ValueError("industry peer universe coverage below configured minimum")
     if out.groupby("trade_date")["market_turnover"].nunique().ne(1).any():
         raise ValueError("market_turnover denominator must be consistent within each date")
     if (out.market_turnover <= 0).any():

@@ -30,7 +30,7 @@ def test_incomplete_universe_fails_closed():
     frame = pool([1.0, 2.0, 3.0])
     ranks, audit = audited_percentile_rank(frame, "raw", scope_id="declared_pool", expected_universe_size=4)
     assert ranks.isna().all()
-    assert audit.iloc[0].status == "universe_size_mismatch"
+    assert audit.iloc[0].status == "universe_coverage_below_minimum"
 
 
 def test_low_factor_coverage_fails_closed_and_preserves_missing():
@@ -78,3 +78,14 @@ def test_duplicate_symbols_after_whitespace_normalization_are_rejected():
         audited_percentile_rank(
             frame, "raw", scope_id="declared_pool", expected_universe_size=2
         )
+
+
+
+def test_partial_universe_ranks_when_default_eighty_percent_coverage_is_met():
+    frame = pool([1.0, 2.0, 3.0, 4.0])
+    ranks, audit = audited_percentile_rank(
+        frame, "raw", scope_id="declared_pool", expected_universe_size=5
+    )
+    assert ranks.notna().all()
+    assert audit.iloc[0].status == "ranked_partial_universe"
+    assert audit.iloc[0].factor_coverage == pytest.approx(0.8)

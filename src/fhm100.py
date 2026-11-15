@@ -8,6 +8,7 @@ import akshare as ak
 import numpy as np
 import pandas as pd
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from src.model.m4_factors import price_structure
 from src.model.m4_observation import rank_price_observations
 from src.model.pipeline import evaluate_candidates, factor_readiness_audit
@@ -27,9 +28,11 @@ from src.model.live_decision_integration import (
 from src.model.mainline_flows import attach_pit_stock_turnover_concentration
 from src.model.archive_readiness import audit_forward_archive
 from src.model.shortline_architecture import audit_shortline_architecture
+from src.model.research_ranking import build_research_opportunity_ranking
 
 OUT=Path("output"); OUT.mkdir(exist_ok=True)
 MIN_AMOUNT=100_000_000
+RESEARCH_MIN_AMOUNT=50_000_000
 
 def numeric(s): return pd.to_numeric(s,errors="coerce")
 
@@ -185,7 +188,7 @@ def select_history_universe(snapshot, *, max_symbols=600):
 
 
 def select_research_history_universe(
-    snapshot, *, max_symbols=800, min_candidate_amount=MIN_AMOUNT,
+    snapshot, *, max_symbols=800, min_candidate_amount=RESEARCH_MIN_AMOUNT,
     liquidity_share=0.20,
 ):
     """Select a broad short-term research pool without excluding limit-up leaders.
@@ -325,13 +328,13 @@ def _download_history(code, start, max_attempts=3):
 def history(code,start,archive_root=Path("data/forward_archive")):
     raw=_download_history(code,start)
     captured_at=datetime.now(timezone.utc)  # stamp immediately after provider response
-    if raw is None or len(raw)<25: return None
+    if raw is None or len(raw)<21: return None
     cols={"日期":"date","开盘":"open","收盘":"close","最高":"high","最低":"low","成交量":"volume","成交额":"amount"}
     if any(c not in raw.columns for c in cols): return None
     h=raw.rename(columns=cols).copy()
     for c in ["open","close","high","low","volume","amount"]: h[c]=numeric(h[c])
     h=h.dropna(subset=["open","close","high","low"]).sort_values("date")
-    if len(h)<25: return None
+    if len(h)<21: return None
     # Preserve the provider's original Chinese schema for the auditable archive.
     archive_frame=raw.loc[h.index].copy()
     if "换手率" not in archive_frame.columns:
@@ -355,71 +358,97 @@ def history(code,start,archive_root=Path("data/forward_archive")):
         raise ValueError("daily history lineage could not be attached to every bar")
     return h
 
-def scan(u,archive_root=Path("data/forward_archive"),history_sink=None):
-    rows=[]; errors=[]; start=(datetime.now()-pd.Timedelta(days=160)).strftime("%Y%m%d")
-    for _,s in u.iterrows():
-        try:
-            h=history(s.code,start,archive_root=archive_root)
-            if h is None: raise ValueError("insufficient history or schema mismatch")
-            if history_sink is not None:
-                history_sink[str(s.code).zfill(6)] = h.copy()
-            # M4 price primitives use the raw bars captured in this run.
-            # Retrieval timestamps do not certify historical PIT availability.
-            decision_at = datetime.now(timezone.utc)
-            m4_bars = h.rename(columns={"date": "trade_date"}).copy()
-            m4_bars["symbol"] = s.code
-            m4 = price_structure(m4_bars, decision_time=decision_at.isoformat()).iloc[-1]
-            # Fast exploratory indicators: raw, unadjusted history only.
-            # These are deliberately labelled provisional and never enter formal M5.
-            raw_close = pd.to_numeric(h["close"], errors="coerce").dropna()
-            raw_amount = pd.to_numeric(h["amount"], errors="coerce")
-            raw_volume = pd.to_numeric(h["volume"], errors="coerce")
-            quick_r5 = raw_close.pct_change(5).iloc[-1] if len(raw_close) > 5 else np.nan
-            quick_r20 = raw_close.pct_change(20).iloc[-1] if len(raw_close) > 20 else np.nan
-            quick_amount_ma20 = raw_amount.tail(20).mean()
-            quick_volume_ratio = (
-                raw_volume.iloc[-1] / raw_volume.tail(20).mean()
-                if len(raw_volume) >= 20 and raw_volume.tail(20).mean() > 0 else np.nan
-            )
-            available_at = pd.Timestamp(m4.available_time).to_pydatetime()
-            liq=pd.notna(m4.amount_ma20) and m4.amount_ma20>=MIN_AMOUNT
-            trend=(pd.notna(m4.return_5) and pd.notna(m4.return_20)
-                   and m4.return_5>0 and m4.return_20>0)
-            structure=pd.notna(m4.CLV) and m4.CLV>=.60
-            pullback=pd.notna(m4.Pullback) and m4.Pullback>-.12
-            flags=[]
-            if not liq: flags.append("20日平均成交额不足1亿元/缺失")
-            if m4.cross_session_price_status != "READY":
-                flags.append("缺少经公司行为账本验证的点时总收益价格序列；跨日趋势/突破/回撤禁用")
-            if not trend: flags.append("5日及20日趋势未同时确认")
-            if not structure: flags.append("CLV收盘结构未确认")
-            if not pullback: flags.append("回撤过深/缺失")
-            rows.append({"symbol":s.code,"trade_date":m4.trade_date.strftime("%Y-%m-%d"),
-              "available_time":available_at.isoformat(),
-              "BodyStrength":m4.BodyStrength,"return_5":m4.return_5,"return_10":m4.return_10,
-              "return_20":m4.return_20,"breakout20":m4.breakout20,
-              "upper_shadow_ratio":m4.upper_shadow_ratio,
-              "代码":s.code,"名称":s["name"],"最新价":s.price,"涨跌幅%":s.pct_chg,
-              "当日成交额":s.amount,"20日平均成交额":m4.amount_ma20,
-              "5日收益%":m4.return_5*100 if pd.notna(m4.return_5) else np.nan,
-              "20日收益%":m4.return_20*100 if pd.notna(m4.return_20) else np.nan,
-              "CLV":m4.CLV,"20日高点回撤%":m4.Pullback*100 if pd.notna(m4.Pullback) else np.nan,
-              "M4突破20日高点%":m4.breakout20*100 if pd.notna(m4.breakout20) else np.nan,
-              "M4量比5日/20日":m4.volume_ma5_to_ma20,
-              "M4距20日高点交易日":m4.pullback_duration,
-              "M4高量滞涨":bool(m4.high_volume_stall) if pd.notna(m4.high_volume_stall) else None,
-              "M4缩量回撤":bool(m4.low_volume_pullback) if pd.notna(m4.low_volume_pullback) else None,
-              "快速5日收益%":quick_r5 * 100 if pd.notna(quick_r5) else np.nan,
-              "快速20日收益%":quick_r20 * 100 if pd.notna(quick_r20) else np.nan,
-              "快速量比20日":quick_volume_ratio,
-              "快速20日平均成交额":quick_amount_ma20,
-              "M4数据口径":"原始OHLC仅用于当日K线结构；跨日特征仅接受经公司行为账本验证的点时总收益序列；本次抓取时间戳不具备历史PIT资格",
-              "M4跨日价格状态":m4.cross_session_price_status,
-              "流动性观察通过":bool(liq),"技术观察通过":bool(trend and structure and pullback),
-              "未通过项":"；".join(flags) if flags else "基础观察条件通过",
-              "公司行为口径":"无VERIFIED点时总收益序列时，跨日收益/突破/回撤留空；原始价格不替代总收益"})
-        except Exception as e: errors.append({"代码":s.code,"原因":str(e)[:220]})
-    return pd.DataFrame(rows),pd.DataFrame(errors)
+def _scan_one_symbol(s, start, archive_root, history_sink=None):
+    try:
+        h = history(s.code, start, archive_root=archive_root)
+        if h is None:
+            raise ValueError("insufficient history or schema mismatch")
+        if history_sink is not None:
+            history_sink[str(s.code).zfill(6)] = h.copy()
+        decision_at = datetime.now(timezone.utc)
+        m4_bars = h.rename(columns={"date": "trade_date"}).copy()
+        m4_bars["symbol"] = s.code
+        m4 = price_structure(m4_bars, decision_time=decision_at.isoformat()).iloc[-1]
+        raw_close = pd.to_numeric(h["close"], errors="coerce").dropna()
+        raw_amount = pd.to_numeric(h["amount"], errors="coerce")
+        raw_volume = pd.to_numeric(h["volume"], errors="coerce")
+        quick_r5 = raw_close.pct_change(5).iloc[-1] if len(raw_close) > 5 else np.nan
+        quick_r20 = raw_close.pct_change(20).iloc[-1] if len(raw_close) > 20 else np.nan
+        quick_amount_ma20 = raw_amount.tail(20).mean()
+        quick_volume_ratio = (
+            raw_volume.iloc[-1] / raw_volume.tail(20).mean()
+            if len(raw_volume) >= 20 and raw_volume.tail(20).mean() > 0 else np.nan
+        )
+        available_at = pd.Timestamp(m4.available_time).to_pydatetime()
+        liq = pd.notna(m4.amount_ma20) and m4.amount_ma20 >= MIN_AMOUNT
+        trend = (
+            pd.notna(m4.return_5) and pd.notna(m4.return_20)
+            and m4.return_5 > 0 and m4.return_20 > 0
+        )
+        structure = pd.notna(m4.CLV) and m4.CLV >= .60
+        pullback = pd.notna(m4.Pullback) and m4.Pullback > -.12
+        flags = []
+        if not liq:
+            flags.append("20日平均成交额不足1亿元/缺失")
+        if m4.cross_session_price_status != "READY":
+            flags.append("缺少经公司行为账本验证的点时总收益价格序列；跨日趋势/突破/回撤禁用")
+        if not trend:
+            flags.append("5日及20日趋势未同时确认")
+        if not structure:
+            flags.append("CLV收盘结构未确认")
+        if not pullback:
+            flags.append("回撤过深/缺失")
+        row = {
+            "symbol": s.code, "trade_date": m4.trade_date.strftime("%Y-%m-%d"),
+            "available_time": available_at.isoformat(),
+            "BodyStrength": m4.BodyStrength, "return_5": m4.return_5,
+            "return_10": m4.return_10, "return_20": m4.return_20,
+            "breakout20": m4.breakout20, "upper_shadow_ratio": m4.upper_shadow_ratio,
+            "代码": s.code, "名称": s["name"], "最新价": s.price, "涨跌幅%": s.pct_chg,
+            "当日成交额": s.amount, "20日平均成交额": m4.amount_ma20,
+            "5日收益%": m4.return_5 * 100 if pd.notna(m4.return_5) else np.nan,
+            "20日收益%": m4.return_20 * 100 if pd.notna(m4.return_20) else np.nan,
+            "CLV": m4.CLV, "20日高点回撤%": m4.Pullback * 100 if pd.notna(m4.Pullback) else np.nan,
+            "M4突破20日高点%": m4.breakout20 * 100 if pd.notna(m4.breakout20) else np.nan,
+            "M4量比5日/20日": m4.volume_ma5_to_ma20,
+            "M4距20日高点交易日": m4.pullback_duration,
+            "M4高量滞涨": bool(m4.high_volume_stall) if pd.notna(m4.high_volume_stall) else None,
+            "M4缩量回撤": bool(m4.low_volume_pullback) if pd.notna(m4.low_volume_pullback) else None,
+            "快速5日收益%": quick_r5 * 100 if pd.notna(quick_r5) else np.nan,
+            "快速20日收益%": quick_r20 * 100 if pd.notna(quick_r20) else np.nan,
+            "快速量比20日": quick_volume_ratio,
+            "快速20日平均成交额": quick_amount_ma20,
+            "M4数据口径": "原始OHLC仅用于当日K线结构；跨日特征仅接受经公司行为账本验证的点时总收益序列；本次抓取时间戳不具备历史PIT资格",
+            "M4跨日价格状态": m4.cross_session_price_status,
+            "流动性观察通过": bool(liq),
+            "技术观察通过": bool(trend and structure and pullback),
+            "未通过项": "；".join(flags) if flags else "基础观察条件通过",
+            "公司行为口径": "无VERIFIED点时总收益序列时，跨日收益/突破/回撤留空；原始价格不替代总收益",
+        }
+        return row, None
+    except Exception as exc:
+        return None, {"代码": s.code, "原因": str(exc)[:220]}
+
+
+def scan(u, archive_root=Path("data/forward_archive"), history_sink=None, max_workers=None):
+    """Fetch per-symbol history concurrently with a bounded, configurable worker pool."""
+    start = (datetime.now() - pd.Timedelta(days=160)).strftime("%Y%m%d")
+    if max_workers is None:
+        max_workers = int(os.getenv("FHM_HISTORY_SCAN_WORKERS", "4"))
+    max_workers = max(1, min(int(max_workers), 8))
+    symbols = [row for _, row in u.iterrows()]
+    rows, errors = [], []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = executor.map(
+            lambda stock: _scan_one_symbol(stock, start, archive_root, history_sink),
+            symbols,
+        )
+        for row, error in results:
+            if row is not None:
+                rows.append(row)
+            if error is not None:
+                errors.append(error)
+    return pd.DataFrame(rows), pd.DataFrame(errors)
 
 def ai_review(text):
     key=os.getenv("AI_API_KEY")
@@ -495,23 +524,22 @@ def audit_forward_industry_membership(archive_root, expected_symbols, *, decisio
     root = Path(archive_root) / "industry_membership"
     files = sorted(root.glob("*.jsonl")) if root.exists() else []
     frames = []
+    archive_errors = []
     for path in files:
         try:
             frame = pd.read_json(path, lines=True, dtype={"symbol": str})
         except (ValueError, OSError) as exc:
-            return pd.DataFrame(), {
-                "status": "invalid_archive_file",
-                "reason": f"{path.name}:{type(exc).__name__}:{str(exc)[:160]}",
-                "expected_universe_size": len(set(map(str, expected_symbols))),
-                "selected_symbol_count": 0,
-                "membership_coverage": 0.0,
-                "historical_pit_eligible": False,
-            }
+            archive_errors.append(
+                f"{path.name}:{type(exc).__name__}:{str(exc)[:160]}"
+            )
+            continue
         if not frame.empty:
             frames.append(frame)
     if not frames:
         return pd.DataFrame(), {
-            "status": "no_snapshot",
+            "status": "invalid_archive_file" if archive_errors else "no_snapshot",
+            "reason": " | ".join(archive_errors[:8]) if archive_errors else None,
+            "archive_file_error_count": len(archive_errors),
             "expected_universe_size": len(set(map(str, expected_symbols))),
             "selected_symbol_count": 0,
             "membership_coverage": 0.0,
@@ -548,8 +576,11 @@ def audit_forward_industry_membership(archive_root, expected_symbols, *, decisio
             "historical_pit_eligible": False,
         }
     selected, audit = select_latest_observed_industry_snapshot(
-        membership, expected_symbols, decision_time=decision_time, max_age="2D"
+        membership, expected_symbols, decision_time=decision_time,
+        max_age="10D", min_symbol_coverage=0.90,
     )
+    audit["archive_file_error_count"] = len(archive_errors)
+    audit["archive_file_errors"] = archive_errors
     return selected, audit
 
 
@@ -631,6 +662,7 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
     # Only current effective-date SW mapping is used for descriptive industry
     # strength. The source is explicitly retrieval-time-only in its audit.
     industry_strength = pd.Series(np.nan, index=base.index, dtype=float)
+    industry_context_by_code = {}
     industry_code_col = "sw_history_industry_code"
     if industry_code_col in base and mainline is not None and not mainline.empty:
         required = {"industry_code", "trade_date", "strength_percentile"}
@@ -648,11 +680,20 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
                 # Ambiguous duplicate industry rows are not resolved by row order.
                 counts = latest.groupby("industry_code").size()
                 unique_codes = counts[counts.eq(1)].index
-                lookup = (
-                    latest.loc[latest.industry_code.isin(unique_codes)]
-                    .set_index("industry_code")["strength_percentile"]
-                    .to_dict()
-                )
+                unique_latest = latest.loc[latest.industry_code.isin(unique_codes)].copy()
+                lookup = unique_latest.set_index("industry_code")["strength_percentile"].to_dict()
+                context_columns = [
+                    "mainline_phase", "phase_reason", "strength_percentile",
+                    "turnover_share", "turnover_share_change_3d",
+                    "startup_evidence_status", "policy_catalyst_component",
+                    "negative_policy_event_component", "emotion_reversal_component",
+                    "capital_concentration_component", "historical_pit_eligible",
+                ]
+                for record in unique_latest.to_dict(orient="records"):
+                    code = str(record.get("industry_code", "")).strip()
+                    industry_context_by_code[code] = {
+                        key: record.get(key) for key in context_columns if key in record
+                    }
                 mapped_codes = base[industry_code_col].astype(str).str.strip()
                 industry_strength = mapped_codes.map(lookup) * 100.0
                 industry_strength = industry_strength.where(
@@ -722,9 +763,26 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
     )
     for idx, stock in base.iterrows():
         industry_value = industry_strength.loc[idx]
+        industry_code = str(stock.get(industry_code_col, "")).strip()
+        industry_context = industry_context_by_code.get(industry_code, {})
         pit_row = pit_by_symbol.get(stock["symbol"], {})
         row = {
             "symbol": stock["symbol"],
+            "mainline_phase": industry_context.get("mainline_phase", "UNKNOWN"),
+            "mainline_phase_reason": industry_context.get("phase_reason"),
+            "mainline_strength_percentile": industry_context.get("strength_percentile"),
+            "mainline_turnover_share": industry_context.get("turnover_share"),
+            "mainline_turnover_share_change_3d": industry_context.get("turnover_share_change_3d"),
+            "mainline_startup_evidence_status": industry_context.get("startup_evidence_status", "UNKNOWN"),
+            "mainline_policy_catalyst_component": industry_context.get("policy_catalyst_component"),
+            "mainline_emotion_reversal_component": industry_context.get("emotion_reversal_component"),
+            "mainline_capital_concentration_component": industry_context.get("capital_concentration_component"),
+            "mainline_negative_policy_component": industry_context.get("negative_policy_event_component"),
+            "mainline_historical_pit_eligible": (
+                bool(industry_context.get("historical_pit_eligible"))
+                if isinstance(industry_context.get("historical_pit_eligible"), (bool, np.bool_))
+                else False
+            ),
             "market_state": state,
             # A/C factors that have an explicit live observation and a declared
             # bounded-universe ranking basis.
@@ -885,7 +943,7 @@ def main():
         # Adaptive short-term research pool. Default is 800 symbols; set
         # FHM_HISTORY_SCAN_MAX_SYMBOLS=all to request full-market history retrieval.
         # Scan inclusion never grants M5 eligibility or buy authorization.
-        scan_limit_raw = os.getenv("FHM_HISTORY_SCAN_MAX_SYMBOLS", "800").strip().lower()
+        scan_limit_raw = os.getenv("FHM_HISTORY_SCAN_MAX_SYMBOLS", "all").strip().lower()
         if scan_limit_raw in {"all", "full", "unlimited", "0"}:
             scan_limit = None
         else:
@@ -1084,14 +1142,11 @@ def main():
     quick_columns = ["快速5日收益%", "快速20日收益%", "CLV", "快速量比20日", "快速20日平均成交额"]
     if not w.empty and all(column in w.columns for column in quick_columns):
         percentile = w[quick_columns].apply(pd.to_numeric, errors="coerce").rank(pct=True)
-        w["快速初筛分"] = (percentile.mean(axis=1) * 100).where(percentile.notna().sum(axis=1) >= 4)
-        w["快速初筛通过"] = (
-            (pd.to_numeric(w["快速20日平均成交额"], errors="coerce") >= MIN_AMOUNT)
-            & (pd.to_numeric(w["快速5日收益%"], errors="coerce") > 0)
-            & (pd.to_numeric(w["快速20日收益%"], errors="coerce") > 0)
-            & (pd.to_numeric(w["CLV"], errors="coerce") >= 0.55)
-            & w["快速初筛分"].notna()
-        )
+        # Research ordering is not a formal buy gate. Rank with any three
+        # observed dimensions; do not discard early reversals, pullbacks,
+        # lower-CLV structures or smaller-cap theme leaders at this stage.
+        w["快速初筛分"] = (percentile.mean(axis=1) * 100).where(percentile.notna().sum(axis=1) >= 3)
+        w["快速初筛通过"] = w["快速初筛分"].notna()
     else:
         w["快速初筛分"] = np.nan
         w["快速初筛通过"] = False
@@ -1116,6 +1171,19 @@ def main():
         w, m3, runtime_mainline,
         pit_factor_snapshot=m4_pit_factor_snapshot,
         decision_time=now,
+    )
+    # Keep broad discovery moving independently of formal M5 readiness. This
+    # ranking uses only observed same-session/industry diagnostics and cannot
+    # be mistaken for a formal score or buy authorization.
+    research_opportunities, research_opportunity_audit = build_research_opportunity_ranking(
+        w, m5_input, min_observed_factors=3,
+    )
+    research_opportunities.to_csv(
+        OUT/"research_opportunity_rank.csv", index=False, encoding="utf-8-sig"
+    )
+    (OUT/"research_opportunity_audit.json").write_text(
+        json.dumps(research_opportunity_audit, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
     )
     m5 = evaluate_candidates(m5_input, stage="close") if not m5_input.empty else pd.DataFrame(
         columns=["symbol","strategy","stage","score","eligible","candidate_band","minimum_score","reasons"])
@@ -1174,7 +1242,7 @@ def main():
 
     # Execute M2 -> M3 -> M5 -> M8 on every strategy row. Missing PIT,
     # factor, 15-minute or portfolio-risk inputs remain explicit blockers.
-    minute_limit_raw = os.getenv("FHM_15M_SCAN_LIMIT", "100").strip().lower()
+    minute_limit_raw = os.getenv("FHM_15M_SCAN_LIMIT", "all").strip().lower()
     minute_scan_limit = (
         None if minute_limit_raw in {"all", "full", "unlimited", "0"}
         else int(minute_limit_raw)
@@ -1258,6 +1326,7 @@ def main():
       f"- 公司行为前瞻账本：{corporate_action_audit.get('status')}；候选扫描={corporate_action_audit.get('symbols_checked', 0)}只；新增事件版本={corporate_action_audit.get('rows_appended', 0)}；仅首次观察之后可用，未验证总回报，不参与评分或交易授权",
       f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
       f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
+      f"- 研究机会排序：{research_opportunity_audit.get('ranked_count', 0)}/{research_opportunity_audit.get('row_count', 0)}只；仅用当日K线结构、成交质量和当前行业观察，不使用未验证跨日收益，不是正式M5分数或买入授权",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
       f"- 四层决策门：{decision_gate_audit.get('status')}；检查记录={decision_gate_audit.get('candidate_count', 0)}；15分钟扫描={decision_gate_audit.get('minute_scanned_count', 0)}；准入={decision_gate_audit.get('allowed_count', 0)}；阻断={decision_gate_audit.get('blocked_count', 0)}",
       f"- 正式模型状态：{formal_status}",
@@ -1271,9 +1340,12 @@ def main():
       (m5_blockers.head(15).to_string(index=False) if len(m5_blockers) else "本次没有股票诊断记录；这不代表模型阻塞项为零。"), "",
       "## 模型状态（重要）",
       "**本次不是正式FHM-100信号。** 行业相对强度、市场/行业滚动Beta残差、完整涨跌停事件、经样本外校准的M6收益预测、M8组合风险及M9回测尚未完成。",
-      "M4已新增CLV、BodyStrength、5/10/20日收益、20日突破和上影线的横截面观察分位，并输出m4_observation_audit.csv。分位仅在同一交易日、声明的当前高成交额股票池完整覆盖且因子覆盖率达到95%时生成；不完整则全部留空。它们不是价格结构/成交质量复合分，也未接入M5。M3仅在前瞻归档状态READY时传入M5；行业/残差分位及策略硬门槛仍未全部接入，因此M5仍是诊断而非正式评分。",
+      "M4已新增CLV、BodyStrength、5/10/20日收益、20日突破和上影线的横截面观察分位，并输出m4_observation_audit.csv。分位仅在同一交易日、声明的当前高成交额股票池完整覆盖且因子覆盖率达到80%；低于80%则不生成分位时生成；不完整则全部留空。它们不是价格结构/成交质量复合分，也未接入M5。M3仅在前瞻归档状态READY时传入M5；行业/残差分位及策略硬门槛仍未全部接入，因此M5仍是诊断而非正式评分。",
       "不输出A/B/C正式评分、P_up、预期收益或买入指令；观察名单不等于达到80分门槛。AI仅作文字点评，不参与评分、不放宽硬门槛。",
       "价格口径：本扫描仅用未复权原始日线；尚无点时公司行为账本，分红送转附近的跨日收益/均线可能失真，相关观察值不得进入正式模型评分或回测标签。",
+      "## 研究机会排序（研究观察，不是正式M5分数/买入指令）",
+      (research_opportunities.head(20).to_markdown(index=False)
+       if not research_opportunities.empty else "本次没有达到至少3项可观察因子的研究排名记录。"),
       "## 快速初筛排名（临时研究结果，非正式FHM信号/非买入指令）",
       (w[w["快速初筛通过"]].sort_values("快速初筛分", ascending=False).head(20).to_markdown(index=False)
        if "快速初筛通过" in w and w["快速初筛通过"].any()
@@ -1294,6 +1366,7 @@ def main():
       "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
       "archive_readiness":archive_readiness,
       "m4_pit_snapshot_audit":m4_pit_snapshot_audit,
+      "research_opportunity_audit":research_opportunity_audit,
       "shortline_architecture_audit":shortline_architecture,
       "runtime_mainline_audit":runtime_mainline_audit,
       "sw_industry_history_research_audit":sw_history_audit,

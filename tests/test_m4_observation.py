@@ -32,7 +32,7 @@ def test_incomplete_peer_universe_keeps_every_rank_missing():
     frame = sample([0.2, 0.5, 0.8])
     ranked, audit = rank_price_observations(frame, expected_universe_size=4)
     assert ranked.filter(regex="_pct$").isna().all().all()
-    assert set(audit["status"]) == {"universe_size_mismatch"}
+    assert set(audit["status"]) == {"universe_coverage_below_minimum"}
 
 
 def test_missing_values_fail_closed_when_coverage_below_floor():

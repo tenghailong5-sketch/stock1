@@ -405,6 +405,26 @@ def _require_historical_pit_eligible(frame: pd.DataFrame, name: str) -> None:
         raise ValueError(f"{name}.available_time contains invalid timestamps")
 
 
+def _m4_universe_factor_status(
+    *, observed_universe_size: int, expected_universe_size: int,
+    finite_factor_count: int, coverage_floor: float,
+) -> str:
+    """Allow partial peer universes once both universe and factor coverage clear the floor."""
+    if expected_universe_size < 1 or observed_universe_size < 0 or finite_factor_count < 0:
+        raise ValueError("invalid M4 universe counts")
+    if not 0 < float(coverage_floor) <= 1:
+        raise ValueError("coverage_floor must be within (0,1]")
+    coverage = finite_factor_count / expected_universe_size
+    minimum_universe_size = max(1, int(np.ceil(expected_universe_size * coverage_floor)))
+    if observed_universe_size < minimum_universe_size:
+        return "universe_coverage_below_minimum"
+    if coverage < coverage_floor:
+        return "insufficient_factor_coverage"
+    if observed_universe_size < expected_universe_size:
+        return "ranked_partial_universe"
+    return "ranked"
+
+
 def build_m4_pit_factor_snapshot(
     stock_bars: pd.DataFrame,
     stock_returns: pd.DataFrame,
@@ -413,7 +433,7 @@ def build_m4_pit_factor_snapshot(
     *,
     decision_time,
     expected_universe_size: int,
-    coverage_floor: float = 0.95,
+    coverage_floor: float = 0.80,
     hard_gate_snapshot: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Build one audited M4 cross-section for one historical decision instant.
@@ -495,11 +515,16 @@ def build_m4_pit_factor_snapshot(
         values = pd.to_numeric(base[raw], errors="coerce")
         values = values.where(np.isfinite(values))
         coverage = int(values.notna().sum()) / expected_universe_size
-        universe_ok = len(base) == expected_universe_size
-        status = "ranked" if universe_ok and coverage >= coverage_floor else (
-            "universe_size_mismatch" if not universe_ok else "insufficient_factor_coverage"
+        status = _m4_universe_factor_status(
+            observed_universe_size=len(base),
+            expected_universe_size=expected_universe_size,
+            finite_factor_count=int(values.notna().sum()),
+            coverage_floor=coverage_floor,
         )
-        base[output] = rank_factor(values, higher_is_better=higher) if status == "ranked" else np.nan
+        base[output] = (
+            rank_factor(values, higher_is_better=higher)
+            if status in {"ranked", "ranked_partial_universe"} else np.nan
+        )
         audits.append({
             "factor_name": output, "trade_date": base["trade_date"].iloc[0],
             "expected_universe_size": expected_universe_size,

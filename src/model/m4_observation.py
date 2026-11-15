@@ -31,7 +31,7 @@ def rank_price_observations(
     *,
     expected_universe_size: int,
     scope_id: str = "top_350_turnover_snapshot",
-    min_coverage: float = 0.95,
+    min_coverage: float = 0.80,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Attach audited per-date percentiles; incomplete dates remain all-NaN."""
     out = frame.copy()

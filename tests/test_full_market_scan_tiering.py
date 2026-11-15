@@ -112,3 +112,16 @@ def test_shortline_research_pool_supports_full_market_history_scan():
     selected = select_research_history_universe(snapshot, max_symbols=None)
 
     assert selected["code"].tolist() == ["000001", "000002", "000003"]
+
+
+
+def test_shortline_research_pool_default_includes_50m_active_momentum_names():
+    snapshot = pd.DataFrame([
+        {"code": "000001", "name": "大成交额", "price": 10, "amount": 200_000_000, "pct_chg": 0.0},
+        {"code": "000002", "name": "中小主题", "price": 20, "amount": 80_000_000, "pct_chg": 5.0},
+        {"code": "000003", "name": "低流动性", "price": 30, "amount": 20_000_000, "pct_chg": 8.0},
+    ])
+
+    selected = select_research_history_universe(snapshot, max_symbols=2)
+
+    assert selected["code"].tolist() == ["000001", "000002"]
