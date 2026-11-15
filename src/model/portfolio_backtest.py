@@ -55,6 +55,10 @@ def run_portfolio_backtest(
     initial_cash: float = 100000.0,
     max_participation: float = 0.05,
     costs: ExecutionCosts = ExecutionCosts(),
+    _state: dict[str, Any] | None = None,
+    _date_start: date | None = None,
+    _date_end: date | None = None,
+    _include_state: bool = False,
 ) -> dict[str, Any]:
     """Run close-signal/next-session-open entries with T+1 stop exits.
 
@@ -106,14 +110,30 @@ def run_portfolio_backtest(
         if effective_budgets:
             entry_day_risk_budget[entry_day] = min(effective_budgets)
 
-    cash = float(initial_cash)
-    positions: dict[str, dict[str, Any]] = {}
-    fills: list[dict[str, Any]] = []
-    trades: list[dict[str, Any]] = []
-    daily_equity: list[dict[str, Any]] = []
-    realized_pnl = 0.0
+    if _state is None:
+        cash = float(initial_cash)
+        positions: dict[str, dict[str, Any]] = {}
+        fills: list[dict[str, Any]] = []
+        trades: list[dict[str, Any]] = []
+        daily_equity: list[dict[str, Any]] = []
+        realized_pnl = 0.0
+        completed_through = None
+    else:
+        cash = float(_state["cash"])
+        positions = {str(symbol): {**position, "entry_date": _as_date(position["entry_date"])}
+                     for symbol, position in _state["positions"].items()}
+        fills = list(_state["fills"])
+        trades = list(_state["trades"])
+        skipped = list(_state["skipped"])
+        daily_equity = list(_state["daily_equity"])
+        realized_pnl = float(_state["realized_pnl"])
+        completed_through = _as_date(_state["completed_through"]) if _state.get("completed_through") else None
 
-    for day in dates:
+    simulation_dates = [day for day in dates
+                        if (_date_start is None or day >= _date_start)
+                        and (_date_end is None or day <= _date_end)
+                        and (completed_through is None or day > completed_through)]
+    for day in simulation_dates:
         day_bars = bars_by_day[day]
 
         # 1) Process protective stops on positions carried into this session.
@@ -254,7 +274,7 @@ def run_portfolio_backtest(
         if (str(trade["symbol"]), str(trade["entry_date"])) not in open_entry_keys
     ]
     metrics = calculate_backtest_metrics(daily_equity, completed_trades, float(initial_cash)) if daily_equity else None
-    return {
+    output = {
         "audit_passed": True,
         "initial_cash": round(float(initial_cash), 2),
         "ending_cash": round(cash, 2),
@@ -278,3 +298,14 @@ def run_portfolio_backtest(
         "daily_equity": daily_equity,
         "metrics": metrics,
     }
+    if _include_state:
+        output["_state"] = {
+            "cash": cash,
+            "positions": {symbol: {**position, "entry_date": position["entry_date"].isoformat()}
+                          for symbol, position in positions.items()},
+            "fills": fills, "trades": trades, "skipped": skipped,
+            "daily_equity": daily_equity, "realized_pnl": realized_pnl,
+            "completed_through": simulation_dates[-1].isoformat() if simulation_dates else
+                                 (completed_through.isoformat() if completed_through else None),
+        }
+    return output
