@@ -295,9 +295,16 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
     historical decision_time; older residuals under one present-day cutoff
     would leak later-retrieved observations into backtests.
     """
-    required = {"symbol", "trade_date", "industry_code", "return_5", "daily_return"}
+    required = {
+        "symbol", "trade_date", "industry_code",
+        "pit_total_return_return_5", "pit_total_return_daily_return",
+        "pit_total_return_available_time", "corporate_action_status",
+    }
     if required - set(stock_returns.columns):
-        raise ValueError("stock_returns missing required columns")
+        raise ValueError(
+            "stock_returns missing verified PIT total-return fields: "
+            + ",".join(sorted(required - set(stock_returns.columns)))
+        )
     for frame, cols in ((market_returns, {"trade_date", "market_return", "market_return_5"}),
                         (industry_returns, {"trade_date", "industry_return", "industry_return_5", "industry_code"})):
         if cols - set(frame.columns):
@@ -305,6 +312,20 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
     if decision_time is None:
         raise ValueError("decision_time is required for PIT residual strength")
     stocks = _pit_frame(stock_returns, decision_time, "stock returns", ("symbol", "industry_code"))
+    cutoff = pd.Timestamp(decision_time)
+    if cutoff.tzinfo is None:
+        raise ValueError("decision_time must be timezone-aware")
+    pit_available = pd.to_datetime(stocks["pit_total_return_available_time"], errors="coerce")
+    if pit_available.isna().any() or pit_available.dt.tz is None:
+        raise ValueError("pit_total_return_available_time must be valid and timezone-aware")
+    stocks["pit_total_return_available_time"] = pit_available.dt.tz_convert("UTC")
+    # Raw close-to-close returns can contain mechanical ex-rights jumps. A
+    # residual is usable only when the total-return series and corporate-action
+    # ledger are explicitly verified and available by this decision cutoff.
+    stocks = stocks.loc[
+        stocks["corporate_action_status"].astype(str).str.strip().eq("VERIFIED")
+        & (stocks["pit_total_return_available_time"] <= cutoff.tz_convert("UTC"))
+    ].copy()
     markets = _pit_frame(market_returns, decision_time, "market returns")
     industries = _pit_frame(industry_returns, decision_time, "industry returns", ("industry_code",))
     if stocks.duplicated(["symbol", "trade_date"]).any():
@@ -321,12 +342,12 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
         g = group.copy()
         residual = []
         for i, row in enumerate(g.itertuples(index=False)):
-            hist = g.iloc[max(0, i-window):i][["market_return", "industry_return", "daily_return"]].copy()
+            hist = g.iloc[max(0, i-window):i][["market_return", "industry_return", "pit_total_return_daily_return"]].copy()
             hist = hist.apply(pd.to_numeric, errors="coerce")
             hist_values = hist.to_numpy(dtype=float)
             hist = hist.loc[np.isfinite(hist_values).all(axis=1)]
             current = pd.to_numeric(
-                pd.Series([row.return_5, row.market_return_5, row.industry_return_5]),
+                pd.Series([row.pit_total_return_return_5, row.market_return_5, row.industry_return_5]),
                 errors="coerce",
             ).to_numpy(dtype=float)
             if len(hist) < min_periods or not np.isfinite(current).all():
@@ -339,7 +360,7 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
             if np.linalg.matrix_rank(design) < design.shape[1]:
                 residual.append(np.nan)
                 continue
-            beta = np.linalg.lstsq(design, hist.daily_return.to_numpy(dtype=float), rcond=None)[0]
+            beta = np.linalg.lstsq(design, hist.pit_total_return_daily_return.to_numpy(dtype=float), rcond=None)[0]
             if not np.isfinite(beta).all():
                 residual.append(np.nan)
                 continue
