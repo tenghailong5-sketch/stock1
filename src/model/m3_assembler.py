@@ -43,7 +43,7 @@ def assemble_m3_history(
     *,
     index_symbol: str = "000001",
     decision_time,
-    min_breadth_coverage: float = 0.95,
+    min_breadth_coverage: float = 0.90,
     min_session_coverage: float = 0.90,
 ) -> dict:
     """Return READY only when 60 consecutive fully observed market sessions exist."""
@@ -277,7 +277,7 @@ def assemble_m3_history(
 
 def assemble_market_emotion_history(
     archive_root: str | Path, *, decision_time,
-    min_breadth_coverage: float = 0.95, min_sessions: int = 20,
+    min_breadth_coverage: float = 0.90, min_sessions: int = 20,
 ) -> dict:
     """Assemble raw daily breadth/limit-pool history without M3's MA60 warm-up.
 
