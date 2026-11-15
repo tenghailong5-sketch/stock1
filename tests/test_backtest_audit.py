@@ -13,6 +13,7 @@ def datasets():
         "strategy": "A", "score": 88.0, "eligible": True,
         "corporate_actions_resolved": True, "universe_complete": True,
         "delisted_included": True, "ruleset_version": "FHM-100-test",
+        "available_risk_budget": 5000.0, "market_risk_scale": 0.8,
     }])
     bars = pd.DataFrame([{
         "symbol": "000001", "trade_date": "2026-01-06",
@@ -116,3 +117,16 @@ def test_blank_ruleset_version_is_rejected():
     audit = audit_backtest_dataset(candidates, bars)
     assert not audit.ready
     assert "candidate_missing_ruleset_version" in audit.errors
+
+def test_dynamic_risk_context_is_required_and_bounded():
+    candidates, bars = datasets()
+    candidates.loc[0, "market_risk_scale"] = 1.01
+    audit = audit_backtest_dataset(candidates, bars)
+    assert not audit.ready
+    assert "candidate_invalid_market_risk_scale" in audit.errors
+
+    candidates, bars = datasets()
+    candidates.loc[0, "available_risk_budget"] = 0
+    audit = audit_backtest_dataset(candidates, bars)
+    assert not audit.ready
+    assert "candidate_invalid_available_risk_budget" in audit.errors
