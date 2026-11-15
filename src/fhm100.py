@@ -930,7 +930,10 @@ def merge_current_quotes_with_history(snapshot, history_watchlist, *, observed_a
             if base_column in {"名称", "最新价", "涨跌幅%", "当日成交额", "symbol", "available_time"}:
                 quotes = quotes.drop(columns=[history_column])
                 continue
-            quotes[base_column] = quotes[history_column]
+            if base_column in quotes:
+                quotes[base_column] = quotes[history_column].combine_first(quotes[base_column])
+            else:
+                quotes[base_column] = quotes[history_column]
             quotes = quotes.drop(columns=[history_column])
     return quotes.sort_values(["当日成交额", "代码"], ascending=[False, True]).reset_index(drop=True)
 
