@@ -84,6 +84,9 @@ def run_portfolio_backtest(
     for row in work.to_dict(orient="records"):
         if row["eligible"] is not True:
             continue
+        if row["m8_trade_allowed"] is not True:
+            skipped.append({"symbol": row["symbol"], "reason": "m8_trade_not_allowed"})
+            continue
         decision_day = row["_decision_date"]
         next_index = next((i for i, day in enumerate(dates) if day > decision_day), None)
         if next_index is None:
