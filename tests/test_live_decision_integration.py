@@ -69,13 +69,12 @@ def test_missing_m8_correlation_context_blocks_entry():
             "reason": "all_15m_checks_passed",
         },
     )
-    assert rows["allowed"].all()
-    assert rows["m8_risk_context_complete"].all()
-    assert rows["m8_sized_quantity"].eq(400).all()
-    assert rows["reasons"].map(
-        lambda reasons: "invalid_industry_correlation_flag" in reasons
-    ).all()
+    # Missing correlation context is fail-closed: do not size or authorize.
+    assert not rows["allowed"].any()
+    assert rows["m8_risk_context_complete"].eq(False).all()
+    assert rows["m8_sized_quantity"].eq(0).all()
     assert audit["m8_risk_context_complete_symbol_count"] == 0
+    assert audit["m8_risk_context_missing_symbol_count"] == 1
 
 
 def test_current_diagnostic_mainline_and_missing_m8_inputs_block_all_entries():
