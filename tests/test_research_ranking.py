@@ -280,3 +280,38 @@ def test_market_emotion_limits_research_watchlist_by_regime():
         assert audit["market_cycle_state"] == state
         assert audit["market_regime_candidate_cap"] == count
         assert not shortlist["buy_authorization"].any()
+
+
+def test_mapped_news_sector_context_is_exposed_but_score_neutral():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002"],
+        "涨跌幅%": [3.0, 3.0],
+        "当日成交额": [200e6, 200e6],
+    })
+    m5_input = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "industry_relative_strength": [80.0, 80.0],
+    })
+    base_context = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "current_industry_level1": ["计算机", "传媒"],
+        "strength_percentile": [0.8, 0.8],
+    })
+    catalyst_context = base_context.assign(
+        live_catalyst_candidate_count=[4, 0]
+    )
+    baseline, _ = build_research_opportunity_ranking(
+        watchlist, m5_input, industry_context=base_context,
+    )
+    ranked, _ = build_research_opportunity_ranking(
+        watchlist, m5_input, industry_context=catalyst_context,
+    )
+    by_symbol = ranked.set_index("symbol")
+    baseline_scores = baseline.set_index("symbol")["research_opportunity_score"]
+    assert by_symbol.loc["000001", "live_catalyst_candidate_count"] == 4
+    assert by_symbol.loc["000002", "live_catalyst_candidate_count"] == 0
+    pd.testing.assert_series_equal(
+        by_symbol["research_opportunity_score"].sort_index(),
+        baseline_scores.sort_index(),
+        check_names=False,
+    )
