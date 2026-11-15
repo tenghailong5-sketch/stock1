@@ -923,10 +923,17 @@ def merge_current_quotes_with_history(snapshot, history_watchlist, *, observed_a
         # Keep the live snapshot's timestamp as the availability time.
         if "available_time_history" in quotes:
             quotes = quotes.drop(columns=["available_time_history"])
-        for column in ("名称", "最新价", "涨跌幅%", "当日成交额", "symbol"):
-            history_column = column + "_history"
-            if history_column in quotes:
+        # History-derived fields enrich the quote rows; quote fields above
+        # remain authoritative. Preserve explicit False values from history.
+        if "history_data_available_history" in quotes:
+            quotes["history_data_available"] = quotes["history_data_available_history"].fillna(False)
+        for history_column in [c for c in quotes.columns if c.endswith("_history")]:
+            base_column = history_column[:-8]
+            if base_column in {"名称", "最新价", "涨跌幅%", "当日成交额", "symbol", "available_time"}:
                 quotes = quotes.drop(columns=[history_column])
+                continue
+            quotes[base_column] = quotes[history_column]
+            quotes = quotes.drop(columns=[history_column])
     return quotes.sort_values(["当日成交额", "代码"], ascending=[False, True]).reset_index(drop=True)
 
 def empty_scan_result(error):
@@ -1129,11 +1136,19 @@ def main():
     )
     mainline_mapping_panel = runtime_mainline
     spot_sector_fallback_audit = {"status": "NOT_NEEDED"}
-    if runtime_mainline.empty and not industry_membership.empty and not u.empty and not w.empty:
+    if runtime_mainline.empty and not industry_membership.empty and not u.empty:
         try:
-            latest_stock_trade_date = pd.to_datetime(
-                w["trade_date"], errors="coerce"
-            ).dropna().max()
+            latest_stock_trade_date = (
+                pd.to_datetime(w["trade_date"], errors="coerce").dropna().max()
+                if not w.empty and "trade_date" in w else pd.NaT
+            )
+            if pd.isna(latest_stock_trade_date):
+                latest_stock_trade_date = pd.to_datetime(m3.get("latest_trade_date"), errors="coerce")
+            if pd.isna(latest_stock_trade_date):
+                # The date is a labeling anchor only for a one-snapshot cross-section.
+                # It is not asserted to be an exchange trading date.
+                latest_stock_trade_date = pd.Timestamp(now).tz_convert("Asia/Shanghai").normalize()
+                spot_sector_fallback_audit["trade_date_basis"] = "decision_date_label_only"
             if pd.notna(latest_stock_trade_date):
                 spot_sector_panel, spot_sector_fallback_audit = build_spot_industry_strength_panel(
                     industry_membership,
