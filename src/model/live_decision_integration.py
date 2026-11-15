@@ -293,7 +293,7 @@ def build_live_decision_gate_audit(
         # risk are not trusted as sizing decisions.
         entry_price = risk.get("entry_price", np.nan)
         required_risk_fields = (
-            "entry_price", "stop_price", "quantity", "reward_risk",
+            "entry_price", "stop_price", "reward_risk",
             "minimum_reward_risk", "existing_portfolio_risk",
             "existing_position_count", "available_risk_budget",
             "same_industry_or_corr_gt_06",
@@ -305,10 +305,19 @@ def build_live_decision_gate_audit(
                 "minimum_reward_risk", "existing_portfolio_risk",
                 "available_risk_budget",
             ))
-            and isinstance(risk.get("quantity"), int)
-            and not isinstance(risk.get("quantity"), bool)
-            and risk.get("quantity", 0) > 0
-            and ("available_cash" not in risk or _finite(risk.get("available_cash")))
+            and (
+                (
+                    "available_cash" in risk
+                    and not isinstance(risk.get("available_cash"), bool)
+                    and _finite(risk.get("available_cash"))
+                )
+                or (
+                    "available_cash" not in risk
+                    and isinstance(risk.get("quantity"), int)
+                    and not isinstance(risk.get("quantity"), bool)
+                    and risk.get("quantity", 0) > 0
+                )
+            )
             and isinstance(risk.get("existing_position_count"), int)
             and not isinstance(risk.get("existing_position_count"), bool)
             and isinstance(risk.get("same_industry_or_corr_gt_06"), bool)
