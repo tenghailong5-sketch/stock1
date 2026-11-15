@@ -42,13 +42,19 @@ def test_only_positive_policy_match_is_known_under_incomplete_archive():
     assert partial.policy_catalyst_component.iloc[0] == True
     assert pd.isna(partial.policy_catalyst_component.iloc[1])
     assert pd.isna(partial.policy_catalyst_component.iloc[2])
-    assert partial.startup_evidence_status.tolist() == ["CONFIRMED", "UNKNOWN", "UNKNOWN"]
+    assert partial.startup_evidence_status.tolist() == ["CONFIRMED", "CONFIRMED", "CONFIRMED"]
+    assert partial.startup_policy_status.tolist() == [
+        "POSITIVE_CATALYST", "UNKNOWN", "UNKNOWN"
+    ]
     complete = attach_startup_evidence(
         industry, emotion, policy, policy_archive_complete=True
     )
     assert complete.policy_catalyst_component.tolist() == [True, False, False]
     assert complete.startup_evidence_status.tolist() == [
-        "CONFIRMED", "NOT_CONFIRMED", "NOT_CONFIRMED"
+        "CONFIRMED", "CONFIRMED", "CONFIRMED"
+    ]
+    assert complete.startup_policy_status.tolist() == [
+        "POSITIVE_CATALYST", "NO_MAPPED_CATALYST", "NO_MAPPED_CATALYST"
     ]
     assert not partial.startup_live_eligible.any()
 
@@ -245,3 +251,42 @@ def test_negative_policy_event_is_exposed_as_independent_risk_evidence():
         True, False, False
     ]
 
+
+
+def test_negative_policy_vetoes_market_flow_ignition_without_requiring_positive_policy():
+    from src.model.mainline_signal_gates import gate_ignition_labels
+
+    frame = pd.DataFrame({
+        "trade_date": ["2026-01-02", "2026-01-02"],
+        "industry_code": ["I1", "I2"],
+        "mainline_phase": ["IGNITION", "IGNITION"],
+        "phase_transition": [True, True],
+        "startup_evidence_status": ["CONFIRMED", "CONFIRMED"],
+        "negative_policy_event_component": [True, pd.NA],
+    })
+    out = gate_ignition_labels(frame)
+    assert out.mainline_phase_gated.tolist() == [
+        "IGNITION_UNCONFIRMED", "IGNITION"
+    ]
+    assert out.phase_gate_reason.iloc[0] == "negative_policy_event_veto"
+
+
+def test_market_flow_confirmation_does_not_require_positive_policy_archive():
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-02"],
+        "industry_code": ["I1"],
+        "turnover_share": [0.1],
+        "turnover_share_change_3d": [0.02],
+        "strength_3d_percentile": [0.9],
+        "relative_strength_change_2d": [0.03],
+    })
+    emotion = pd.DataFrame({
+        "trade_date": ["2026-01-01", "2026-01-02"],
+        "market_cycle": ["ICE", "RECOVERY"],
+    })
+    policy = pd.DataFrame(columns=[
+        "available_at", "industry_codes", "impact_direction"
+    ])
+    out = attach_startup_evidence(industry, emotion, policy)
+    assert out.startup_evidence_status.iloc[0] == "CONFIRMED"
+    assert out.startup_policy_status.iloc[0] == "UNKNOWN"

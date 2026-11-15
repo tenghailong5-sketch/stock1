@@ -59,10 +59,11 @@ def attach_startup_evidence(
 ) -> pd.DataFrame:
     """Attach three separately auditable ignition components to industry rows.
 
-    A startup is CONFIRMED only when an ICE-to-RECOVERY reversal, a visible
-    positive mapped policy catalyst, and rising industry turnover concentration
-    all coexist. If the policy corpus is not certified complete, absence of a
-    matched positive event remains UNKNOWN, never False.
+    Market-flow confirmation requires an ICE-to-RECOVERY reversal and rising
+    industry leadership/concentration. Policy is a separate overlay: a mapped
+    positive event strengthens context; an observed negative event vetoes the
+    ignition gate. An incomplete policy archive never blocks a market-flow
+    confirmation merely because no positive event was found.
     """
     required_industry = {"trade_date", "industry_code", "turnover_share",
                          "turnover_share_change_3d", "strength_3d_percentile",
@@ -172,17 +173,30 @@ def attach_startup_evidence(
     out.loc[flow_known, "capital_concentration_component"] = out.loc[
         flow_known, list(capital_checks)
     ].all(axis=1)
-    components = [
-        "emotion_reversal_component", "policy_catalyst_component",
-        "capital_concentration_component",
+    # Do not make an incomplete policy corpus a hard prerequisite for market
+    # ignition. Confirm the observable market/flow pair independently, retain
+    # policy as a separate positive/negative overlay, and never infer that an
+    # unobserved policy event does not exist.
+    market_components = [
+        "emotion_reversal_component", "capital_concentration_component",
     ]
-    out["startup_evidence_status"] = "UNKNOWN"
-    all_known = out[components].notna().all(axis=1)
-    out.loc[all_known, "startup_evidence_status"] = (
-        out.loc[all_known, components].all(axis=1).map(
+    out["startup_market_evidence_status"] = "UNKNOWN"
+    market_known = out[market_components].notna().all(axis=1)
+    out.loc[market_known, "startup_market_evidence_status"] = (
+        out.loc[market_known, market_components].all(axis=1).map(
             {True: "CONFIRMED", False: "NOT_CONFIRMED"}
         )
     )
+    out["startup_policy_status"] = "UNKNOWN"
+    out.loc[out["policy_catalyst_component"].eq(True), "startup_policy_status"] = "POSITIVE_CATALYST"
+    out.loc[out["negative_policy_event_component"].eq(True), "startup_policy_status"] = "NEGATIVE_CATALYST"
+    if policy_archive_complete:
+        no_event = (
+            out["policy_catalyst_component"].eq(False)
+            & out["negative_policy_event_component"].eq(False)
+        )
+        out.loc[no_event, "startup_policy_status"] = "NO_MAPPED_CATALYST"
+    out["startup_evidence_status"] = out["startup_market_evidence_status"]
     out["startup_live_eligible"] = False
     out["historical_pit_eligible"] = False
     return out
@@ -232,6 +246,12 @@ def gate_ignition_labels(frame: pd.DataFrame) -> pd.DataFrame:
     out["mainline_phase_gated"] = out["mainline_phase_candidate"]
     candidate = out["mainline_phase_candidate"].eq("IGNITION")
     confirmed = out["startup_evidence_status"].eq("CONFIRMED").fillna(False)
+    negative_policy = (
+        out["negative_policy_event_component"].eq(True).fillna(False)
+        if "negative_policy_event_component" in out.columns
+        else pd.Series(False, index=out.index)
+    )
+    confirmed = confirmed & ~negative_policy
     out.loc[candidate & ~confirmed, "mainline_phase_gated"] = "IGNITION_UNCONFIRMED"
 
     base_transition = (
@@ -263,6 +283,7 @@ def gate_ignition_labels(frame: pd.DataFrame) -> pd.DataFrame:
     out["phase_transition_gated"] = gated_transition.astype(bool)
     out["phase_gate_reason"] = "not_ignition_candidate"
     out.loc[candidate & ~confirmed, "phase_gate_reason"] = "ignition_evidence_not_confirmed"
+    out.loc[candidate & negative_policy, "phase_gate_reason"] = "negative_policy_event_veto"
     out.loc[candidate & confirmed & base_transition, "phase_gate_reason"] = (
         "ignition_confirmed_on_candidate_transition"
     )
