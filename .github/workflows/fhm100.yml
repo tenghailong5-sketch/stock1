@@ -9,7 +9,7 @@ permissions:
   contents: write
 concurrency:
   group: fhm100-daily
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   scan:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
