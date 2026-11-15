@@ -17,7 +17,7 @@ from src.model.m4_industry_observations import select_latest_observed_industry_s
 from src.model.m3_assembler import assemble_m3_history
 from src.collectors.forward_archive import append_jsonl_atomic
 from src.providers.akshare_pit import normalize_daily_history_snapshot
-from src.model.runtime_mainline import scan_runtime_mainlines
+from src.model.runtime_mainline import scan_runtime_mainlines, scan_cached_market_emotion
 from src.model.sw_industry_research import select_sw_industry_research_snapshot
 from src.model.sw_stock_mainline_research import (
     build_sw_stock_mainline_research,
@@ -1115,6 +1115,25 @@ def main():
     # M3 and every captured stock bar are therefore evaluated against the same
     # cutoff; no provider response fetched after the cutoff can leak into the run.
     now=datetime.now(timezone.utc)
+    try:
+        market_emotion_latest, market_emotion_audit = scan_cached_market_emotion(
+            decision_time=now, archive_root=Path("data/forward_archive"), min_sessions=4,
+        )
+    except Exception as emotion_exc:
+        market_emotion_latest = pd.DataFrame()
+        market_emotion_audit = {
+            "status": "UNKNOWN_CACHED_EMOTION_ERROR",
+            "reason": f"{type(emotion_exc).__name__}: {str(emotion_exc)[:220]}",
+            "market_cycle": "UNKNOWN", "historical_pit_eligible": False,
+            "trading_authorization": False,
+        }
+    market_emotion_latest.to_csv(
+        OUT/"market_cycle_latest.csv", index=False, encoding="utf-8-sig"
+    )
+    (OUT/"market_cycle_audit.json").write_text(
+        json.dumps(market_emotion_audit, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
     # The daily path uses current quotes and the latest observed membership snapshot.
     # Historical lifecycle/emotion reconstruction is an optional research lane.
     if current_snapshot_mode:
@@ -1468,6 +1487,11 @@ def main():
             "ranked_count": 0, "row_count": int(len(w)),
             "formal_m5_score": False, "buy_authorization": False,
         }
+    market_cycle_state = str(market_emotion_audit.get("market_cycle", "UNKNOWN"))
+    market_cycle_date = market_emotion_audit.get("latest_trade_date")
+    research_opportunities["market_cycle_state"] = market_cycle_state
+    research_opportunities["market_cycle_trade_date"] = market_cycle_date
+    research_opportunities["market_cycle_status"] = str(market_emotion_audit.get("status", "UNKNOWN"))
     research_opportunities.to_csv(
         OUT/"research_opportunity_rank.csv", index=False, encoding="utf-8-sig"
     )
