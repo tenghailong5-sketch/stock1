@@ -925,8 +925,6 @@ def merge_current_quotes_with_history(snapshot, history_watchlist, *, observed_a
             quotes = quotes.drop(columns=["available_time_history"])
         # History-derived fields enrich the quote rows; quote fields above
         # remain authoritative. Preserve explicit False values from history.
-        if "history_data_available_history" in quotes:
-            quotes["history_data_available"] = quotes["history_data_available_history"].fillna(False)
         for history_column in [c for c in quotes.columns if c.endswith("_history")]:
             base_column = history_column[:-8]
             if base_column in {"名称", "最新价", "涨跌幅%", "当日成交额", "symbol", "available_time"}:
@@ -1151,6 +1149,7 @@ def main():
     )
     # From here on, full-market quotes are the core dataset. Historical bars
     # enrich available symbols but are never required for current discovery.
+    history_success_count = int(len(w))
     w = merge_current_quotes_with_history(
         u, w, observed_at=spot_snapshot_observed_at
     )
@@ -1607,7 +1606,7 @@ def main():
         "live_universe_count": int(len(u)),
         "history_scan_universe_count": int(len(history_universe)),
         "history_pool_audit": history_pool_audit,
-        "valid_history_count": int(len(w)),
+        "valid_history_count": history_success_count,
         "m3_status": str(m3.get("status")),
         "m5_is_diagnostic_only": True,
         "four_layer_decision_integrated": True,
@@ -1622,11 +1621,11 @@ def main():
       f"- 全市场实时行情快照：{len(u)}只（含沪深北及科创板；见market_snapshot.csv）",
       f"- 深度历史扫描池：{len(history_universe)}只；扫描上限={history_pool_audit.get('history_scan_limit')}；全市场扫描={history_pool_audit.get('full_market_history_scan', False)}",
       f"- 扫描范围包含金融股及涨幅超过8%的活跃股；纳入扫描不等于模型通过或追涨买入",
-      f"- 历史数据成功：{len(w)}",f"- 数据异常：{len(e)}",
+      f"- 历史数据成功：{history_success_count}",f"- 数据异常：{len(e)}",
       f"- 行情采集状态：{'正常' if len(u) else '失败/不可用；本次不产生候选'}",
       f"- 基础技术观察名单：{len(c)}",
       f"- 快速初筛通过：{int(w['快速初筛通过'].sum()) if '快速初筛通过' in w else 0}只（临时探索排名，不是正式FHM分数）",
-      f"- M4价格/流动性观察因子已计算：{len(w)}",
+      f"- M4价格/流动性观察因子历史增强样本：{history_success_count}",
       f"- M4观察分位审计记录：{len(observation_audit)}条",
       f"- M4 PIT→M5桥接：{m4_pit_snapshot_audit.get('status')}；本次未伪造PIT输入",
       f"- 个股行情最新可用时间：{latest_stock_available or '无'}；统一决策时点：{now.isoformat()}",
@@ -1641,7 +1640,7 @@ def main():
       f"- 公司行为前瞻账本：{corporate_action_audit.get('status')}；候选扫描={corporate_action_audit.get('symbols_checked', 0)}只；新增事件版本={corporate_action_audit.get('rows_appended', 0)}；仅首次观察之后可用，未验证总回报，不参与评分或交易授权",
       f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
       f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
-      f"- 研究机会排序：{research_opportunity_audit.get('ranked_count', 0)}/{research_opportunity_audit.get('row_count', 0)}只；仅用当日K线结构、成交质量和当前行业观察，不使用未验证跨日收益，不是正式M5分数或买入授权",
+      f"- 研究机会排序：{research_opportunity_audit.get('ranked_count', 0)}/{research_opportunity_audit.get('row_count', 0)}只；优先使用当前涨跌幅、成交额和行业强度，历史K线仅作可选增强；不是正式M5分数或买入授权",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
       f"- 四层决策门：{decision_gate_audit.get('status')}；检查记录={decision_gate_audit.get('candidate_count', 0)}；15分钟扫描={decision_gate_audit.get('minute_scanned_count', 0)}；准入={decision_gate_audit.get('allowed_count', 0)}；阻断={decision_gate_audit.get('blocked_count', 0)}",
       f"- 正式模型状态：{formal_status}",
