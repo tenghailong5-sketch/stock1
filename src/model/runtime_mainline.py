@@ -78,15 +78,25 @@ def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path)
         except Exception as exc:
             failures.append(f"{row.industry_code}:{type(exc).__name__}:{str(exc)[:140]}")
         time.sleep(0.15)
-    if failures:
+    # One provider timeout must not discard every available industry.
+    # Keep the cross-section when at least 90% of the current SW universe is
+    # present on a date; the observed turnover denominator scales all shares
+    # equally, so within-date relative rankings remain comparable.
+    minimum_industries = max(20, int(expected * 0.90 + 0.999999))
+    if not frames:
         raise RuntimeError(
-            f"SW industry series incomplete {len(failures)}/{expected}: "
+            f"SW industry history unavailable for all {expected} industries: "
             + " | ".join(failures[:8])
         )
     panel = pd.concat(frames, ignore_index=True)
     counts = panel.groupby("trade_date").industry_code.nunique()
-    complete_dates = counts[counts == expected].index
+    complete_dates = counts[counts >= minimum_industries].index
     panel = panel.loc[panel.trade_date.isin(complete_dates)].copy()
+    if panel.empty:
+        raise RuntimeError(
+            f"SW industry coverage below {minimum_industries}/{expected} "
+            "for every aligned date: " + " | ".join(failures[:8])
+        )
     market = _read_index_archive(
         archive_root / "index_daily" / "000001.jsonl",
         decision_time=decision_time,
@@ -108,6 +118,11 @@ def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path)
         raise RuntimeError("no complete aligned SW industry/market observations")
     audit = {
         "industry_count": expected,
+        "minimum_industries_per_date": minimum_industries,
+        "minimum_coverage": 0.90,
+        "available_industries": int(panel.industry_code.nunique()),
+        "failed_industry_count": int(len(failures)),
+        "failed_industries": failures,
         "complete_trade_dates": int(panel.trade_date.nunique()),
         "latest_trade_date": panel.trade_date.max().strftime("%Y-%m-%d"),
         "source": "official_SW_index_api_plus_archived_SSE_index",
