@@ -19,6 +19,9 @@ def _frames():
                 "weighting": "amount",
                 "ret": 0.01 * multiplier,
                 "amount": 100.0 * multiplier + index,
+                "n_members": 100,
+                "n_priced": 95,
+                "n_excluded": 5,
                 "source": "derived",
                 "data_version": "v1",
                 "fetched_at": "2026-01-10T08:00:00Z",
@@ -82,3 +85,22 @@ def test_loader_reads_industry_and_explicit_benchmark_with_data_root():
     assert calls[1][1]["symbols"] == ["000001.SH"]
     assert audit["provider"] == "CNEquity"
     assert len(panel) == 4
+
+def test_excludes_low_priced_member_coverage_without_hiding_the_count():
+    industry, market = _frames()
+    industry.loc[industry["industry_code"].eq("801020"), "n_priced"] = 70
+    industry.loc[industry["industry_code"].eq("801020"), "n_excluded"] = 30
+    panel, audit = build_cnequity_mainline_inputs(
+        industry, market, expected_industry_count=2,
+        min_priced_coverage=0.80,
+    )
+    assert set(panel["industry_code"]) == {"801010"}
+    assert audit["low_coverage_rows_excluded"] == 6
+
+
+def test_rejects_inconsistent_industry_member_counts():
+    industry, market = _frames()
+    industry.loc[0, "n_excluded"] = 4
+    with pytest.raises(ValueError, match="inconsistent"):
+        build_cnequity_mainline_inputs(industry, market, expected_industry_count=2)
+
