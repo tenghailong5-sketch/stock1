@@ -899,7 +899,7 @@ def main():
             "full_market_history_scan": bool(len(history_universe) == len(u)),
             "financial_names_excluded_from_research_pool": False,
             "daily_gain_chase_cap_pct": None,
-            "momentum_candidates_included": int(((u["amount"] >= MIN_AMOUNT) & (u["pct_chg"] > 0)).sum()),
+            "momentum_candidates_available": int(((u["amount"] >= MIN_AMOUNT) & (u["pct_chg"] > 0)).sum()),
             "formal_candidate_filter": False,
         }
         (OUT/"history_pool_audit.json").write_text(
