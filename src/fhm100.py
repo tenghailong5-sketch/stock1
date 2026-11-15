@@ -1267,6 +1267,22 @@ def main():
         }
     forward_stock_mainline_audit["spot_sector_fallback"] = spot_sector_fallback_audit
     forward_stock_mainline_audit["industry_flow_archive"] = industry_flow_archive_audit
+    # Carry reviewed-sector candidate counts down to the stock research rows.
+    # This is context only: unmapped/unchecked headlines never alter scores.
+    catalyst_candidates = (
+        runtime_mainline_audit.get("catalyst_sector_candidates", {}).get("candidates", [])
+        if isinstance(runtime_mainline_audit, dict) else []
+    )
+    catalyst_counts = {}
+    for candidate in catalyst_candidates:
+        for industry_name in candidate.get("mapped_industries", []):
+            catalyst_counts[industry_name] = catalyst_counts.get(industry_name, 0) + 1
+    if not forward_stock_mainline.empty and "current_industry_level1" in forward_stock_mainline:
+        forward_stock_mainline["live_catalyst_candidate_count"] = (
+            forward_stock_mainline["current_industry_level1"].map(catalyst_counts).fillna(0).astype(int)
+        )
+    forward_stock_mainline_audit["mapped_catalyst_industry_count"] = int(len(catalyst_counts))
+    forward_stock_mainline_audit["catalyst_candidates_are_score_neutral"] = True
     forward_stock_mainline.to_csv(
         OUT/"forward_stock_mainline_research.csv", index=False, encoding="utf-8-sig"
     )
