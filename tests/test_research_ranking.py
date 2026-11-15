@@ -26,7 +26,7 @@ def test_research_ranking_uses_only_observed_same_session_and_industry_factors()
     assert not audit["uses_raw_cross_session_returns"]
     assert ranked["research_rank_formal_m5_score"].eq(False).all()
     assert ranked["research_rank_buy_authorization"].eq(False).all()
-    assert "快速5日收益%" not in audit["factor_sources"].values
+    assert "快速5日收益%" not in audit["factor_sources"].values()
 
 
 def test_research_ranking_keeps_missing_factors_missing_and_requires_three():
