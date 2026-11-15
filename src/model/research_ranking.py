@@ -265,6 +265,22 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
     event_watch["event_watch_reason"] = "涨幅过大，单列强势事件观察，不进入普通候选池"
     ordinary = valid[valid["pct_chg"].ge(min_pct_change) & valid["pct_chg"].lt(max_pct_change)].copy()
     ordinary = ordinary.sort_values(["research_opportunity_score", "amount", "symbol"], ascending=[False, False, True])
+    # Market emotion controls the breadth of the research watchlist, not the
+    # relative stock score. Unknown emotion preserves discovery but is explicit.
+    regime_caps = {
+        "ICE": 10,
+        "RECOVERY": max_candidates,
+        "TRANSITION": min(max_candidates, 20),
+        "HEAT": min(max_candidates, 15),
+        "EXHAUSTION": min(max_candidates, 5),
+    }
+    regime_state = (
+        str(data["market_cycle_state"].dropna().iloc[0])
+        if "market_cycle_state" in data and data["market_cycle_state"].notna().any()
+        else "UNKNOWN"
+    )
+    regime_cap = int(regime_caps.get(regime_state, max_candidates))
+    effective_candidate_cap = min(max_candidates, regime_cap)
     selected = []; industry_counts = {}
     for _, row in ordinary.iterrows():
         industry = row["shortlist_industry"]
@@ -272,7 +288,7 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
             industry = "UNKNOWN:" + str(row["symbol"])
         if industry_counts.get(industry, 0) >= max_per_industry: continue
         selected.append(row); industry_counts[industry] = industry_counts.get(industry, 0) + 1
-        if len(selected) >= max_candidates: break
+        if len(selected) >= effective_candidate_cap: break
     shortlist = pd.DataFrame(selected, columns=ordinary.columns).reset_index(drop=True)
     if not shortlist.empty:
         shortlist.insert(0, "final_candidate_rank", np.arange(1, len(shortlist) + 1))
@@ -286,9 +302,12 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
         )
         if "market_cycle_state" in shortlist.columns:
             market_risk = shortlist["market_cycle_state"].astype(str).map({
-                "ICE": "市场情绪冰点，等待修复确认",
-                "HEAT": "市场情绪高潮，避免追高",
-                "EXHAUSTION": "市场情绪退潮，暂停新增进攻信号",
+                "ICE": "市场情绪冰点，缩小观察范围，等待修复确认",
+                "RECOVERY": "市场情绪修复，可关注主线持续性",
+                "TRANSITION": "市场情绪过渡期，优先观察主线确认",
+                "HEAT": "市场情绪高潮，缩小观察范围，避免追高",
+                "EXHAUSTION": "市场情绪退潮，严格限制新增进攻候选",
+                "UNKNOWN": "市场情绪数据未知，不授予进攻型信号",
             })
             has_market_risk = market_risk.notna()
             shortlist.loc[has_market_risk, "risk_note"] = (
@@ -299,5 +318,5 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
         event_watch = event_watch.sort_values(["research_opportunity_score", "amount"], ascending=[False, False]).reset_index(drop=True)
         event_watch.insert(0, "event_watch_rank", np.arange(1, len(event_watch) + 1))
         event_watch["buy_authorization"] = False
-    audit = {"status": "READY_RESEARCH_WATCH" if not shortlist.empty else "NO_ORDINARY_CANDIDATES", "ranked_input_count": int(len(data)), "liquid_valid_count": int(len(valid)), "candidate_count": int(len(shortlist)), "event_watch_count": int(len(event_watch)), "industry_cap": int(max_per_industry), "minimum_amount": float(min_amount), "ordinary_pct_change_range": [float(min_pct_change), float(max_pct_change)], "entry_confirmation": "PENDING_15M_CONFIRMATION", "buy_authorization": False}
+    audit = {"status": "READY_RESEARCH_WATCH" if not shortlist.empty else "NO_ORDINARY_CANDIDATES", "ranked_input_count": int(len(data)), "liquid_valid_count": int(len(valid)), "candidate_count": int(len(shortlist)), "event_watch_count": int(len(event_watch)), "market_cycle_state": regime_state, "market_regime_candidate_cap": effective_candidate_cap, "market_regime_policy": "ICE<=10; RECOVERY<=max; TRANSITION<=20; HEAT<=15; EXHAUSTION<=5; UNKNOWN<=max_with_warning", "industry_cap": int(max_per_industry), "minimum_amount": float(min_amount), "ordinary_pct_change_range": [float(min_pct_change), float(max_pct_change)], "entry_confirmation": "PENDING_15M_CONFIRMATION", "buy_authorization": False}
     return shortlist, event_watch, audit
