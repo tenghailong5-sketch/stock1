@@ -459,12 +459,12 @@ def build_m4_pit_factor_snapshot(
     residual = residual[["symbol", "industry_code", "trade_date", "residual_return_5"]]
     base = price.merge(
         stock_pit[["symbol", "industry_code", "trade_date", "available_time", "source_id", "source_revision"]],
-        on="symbol", how="inner", suffixes=("", "_returns"), validate="one_to_one",
+        on=["symbol", "trade_date"], how="inner", suffixes=("", "_returns"), validate="one_to_one",
     )
     base = base.merge(industry, on="industry_code", how="left", validate="many_to_one")
     base = base.merge(
-        residual[["symbol", "residual_return_5"]],
-        on="symbol", how="left", validate="one_to_one",
+        residual[["symbol", "trade_date", "residual_return_5"]],
+        on=["symbol", "trade_date"], how="left", validate="one_to_one",
     )
     base["trade_date"] = pd.to_datetime(base["trade_date"], errors="coerce")
     if base.empty:
@@ -565,11 +565,13 @@ def build_m4_pit_factor_snapshot(
         (industry_returns, "industry_returns"),
         (market_returns, "market_returns"),
     ):
+        available = pd.to_datetime(frame["available_time"], errors="coerce", utc=True)
+        used = frame.loc[available <= cutoff.tz_convert("UTC")]
         base[f"{prefix}_source_ids"] = ";".join(
-            sorted(frame["source_id"].astype(str).str.strip().unique())
+            sorted(used["source_id"].astype(str).str.strip().unique())
         )
         base[f"{prefix}_source_revisions"] = ";".join(
-            sorted(frame["source_revision"].astype(str).str.strip().unique())
+            sorted(used["source_revision"].astype(str).str.strip().unique())
         )
     base["historical_pit_eligible"] = True
     base["availability_basis"] = "derived_from_certified_pit_inputs"
