@@ -91,7 +91,7 @@ def evaluate_event_price_in(
             excess_return_1d=("excess_return_1d", "mean"),
             turnover_share=("turnover_share", "mean"),
         ).sort_values("trade_date")
-        pre = daily.loc[daily["trade_date"] <= event_date].tail(20)
+        pre = daily.loc[daily["trade_date"] < event_date].tail(20)
         post = daily.loc[daily["trade_date"] > event_date]
         pre5 = _compound(pre["excess_return_1d"].tail(5))
         pre20 = _compound(pre["excess_return_1d"].tail(20))
