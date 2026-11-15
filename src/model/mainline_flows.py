@@ -155,6 +155,13 @@ def attach_pit_stock_turnover_concentration(
     missing_base = required_base - set(frame.columns)
     if missing_base:
         raise ValueError("mainline frame missing fields: " + ",".join(sorted(missing_base)))
+    # An empty archive/aggregation result is a data-readiness condition, not a
+    # schema error. Preserve the downstream audit path so live research can run;
+    # non-empty malformed PIT data remains a hard error.
+    if pit_stock_turnover.empty:
+        pit_stock_turnover = pit_stock_turnover.reindex(
+            columns=sorted(PIT_STOCK_TURNOVER_REQUIRED)
+        )
     missing_pit = PIT_STOCK_TURNOVER_REQUIRED - set(pit_stock_turnover.columns)
     if missing_pit:
         raise ValueError("PIT turnover missing fields: " + ",".join(sorted(missing_pit)))
