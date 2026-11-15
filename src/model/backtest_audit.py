@@ -27,7 +27,7 @@ _CANDIDATE_REQUIRED = {
     "symbol", "decision_time", "available_time", "historical_pit_eligible",
     "source_revision", "strategy", "score", "eligible", "corporate_actions_resolved",
     "universe_complete", "delisted_included", "ruleset_version",
-    "available_risk_budget", "market_risk_scale",
+    "available_risk_budget", "market_risk_scale", "m8_trade_allowed",
 }
 _BAR_REQUIRED = {
     "symbol", "trade_date", "available_time", "historical_pit_eligible",
@@ -110,6 +110,8 @@ def audit_backtest_dataset(candidates: pd.DataFrame, bars: pd.DataFrame) -> Back
 
     if not candidates["eligible"].map(lambda x: isinstance(x, bool)).all():
         errors.append("candidate_eligibility_must_be_boolean")
+    if not candidates["m8_trade_allowed"].map(lambda x: isinstance(x, bool)).all():
+        errors.append("candidate_m8_trade_permission_must_be_boolean")
     if not candidates["strategy"].isin(["A", "B", "C"]).all():
         errors.append("candidate_contains_unknown_strategy")
     for col in ("suspended", "limit_up_locked", "limit_down_locked"):
