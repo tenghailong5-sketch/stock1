@@ -32,7 +32,7 @@ def build_live_decision_gate_audit(
     decision_time,
     risk_context_by_symbol: dict | None = None,
     minute_confirmation_fetcher=None,
-    minute_scan_limit: int = 20,
+    minute_scan_limit: int | None = 100,
 ) -> tuple[pd.DataFrame, dict]:
     """Run all four decision gates without inventing missing factor/risk/PIT inputs.
 
@@ -43,8 +43,8 @@ def build_live_decision_gate_audit(
     cutoff = pd.Timestamp(decision_time)
     if cutoff.tzinfo is None:
         raise ValueError("decision_time must be timezone-aware")
-    if minute_scan_limit < 0:
-        raise ValueError("minute_scan_limit cannot be negative")
+    if minute_scan_limit is not None and minute_scan_limit < 0:
+        raise ValueError("minute_scan_limit must be non-negative or None")
     risk_context_by_symbol = risk_context_by_symbol or {}
     minute_confirmation_fetcher = minute_confirmation_fetcher or fetch_live_15m_confirmation
 
@@ -67,7 +67,11 @@ def build_live_decision_gate_audit(
         ranked = ranked.sort_values(rank_col, ascending=False, na_position="last")
     # Preserve rank order for deterministic bounded scans and bind every
     # 15-minute observation to the runner's single frozen decision cutoff.
-    minute_symbols = ranked["代码"].astype(str).str.zfill(6).head(minute_scan_limit).tolist()
+    minute_ranked_symbols = ranked["代码"].astype(str).str.zfill(6)
+    minute_symbols = (
+        minute_ranked_symbols.tolist() if minute_scan_limit is None
+        else minute_ranked_symbols.head(minute_scan_limit).tolist()
+    )
     minute_results = {}
     for symbol in minute_symbols:
         try:
@@ -150,7 +154,7 @@ def build_live_decision_gate_audit(
         concentration_status = str(industry.get("stock_turnover_pit_status", "not_ready"))
         minute = minute_results.get(symbol, {
             "status": "NOT_SCANNED_15M", "entry_ready": False,
-            "reason": "outside_bounded_15m_scan_pool", "historical_pit_eligible": False,
+            "reason": "outside_configured_15m_scan_pool", "historical_pit_eligible": False,
         })
         risk = risk_context_by_symbol.get(symbol, {})
         entry_price = risk.get("entry_price", stock.get("最新价", np.nan))
@@ -204,6 +208,7 @@ def build_live_decision_gate_audit(
         "candidate_count": int(len(result)),
         "unique_stock_count": int(len(symbols)),
         "minute_scanned_count": int(len(minute_symbols)),
+        "minute_scan_limit": "ALL" if minute_scan_limit is None else int(minute_scan_limit),
         "allowed_count": allowed,
         "blocked_count": int(len(result) - allowed),
         "market_context_status": market_context.get("status"),
