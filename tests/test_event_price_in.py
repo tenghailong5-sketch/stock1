@@ -51,7 +51,8 @@ def test_event_price_in_never_uses_same_or_pre_first_seen_session_as_post():
     )
     row = result.iloc[0]
     assert row.post_discovery_sessions_observed == 0
-    assert row.price_in_state == "FULLY_PRICED"
+    assert row.price_in_state == "AWAITING_POST_EVENT_SESSION"
+    assert row.reason == "no_post_event_trading_session_observed"
 
 
 def test_event_price_in_unknown_when_mapping_or_clock_missing():
@@ -62,3 +63,19 @@ def test_event_price_in_unknown_when_mapping_or_clock_missing():
         decision_time=pd.Timestamp("2026-03-02T00:00:00Z"),
     )
     assert result.iloc[0].price_in_state == "UNKNOWN"
+
+
+def test_event_price_in_unknown_when_post_session_has_no_valid_return():
+    history = _history([0.0] * 26, start="2026-01-01")
+    history.loc[history.trade_date == pd.Timestamp("2026-02-06"), "industry_return_1d"] = float("nan")
+    event = {
+        "candidate_id": "event-4",
+        "first_seen_at": "2026-02-05T09:00:00+00:00",
+        "mapped_industries": ["电子"],
+    }
+    result, _ = evaluate_event_price_in(
+        [event], history,
+        decision_time=pd.Timestamp("2026-03-02T00:00:00Z"),
+    )
+    assert result.iloc[0].price_in_state == "UNKNOWN"
+    assert result.iloc[0].reason == "post_event_return_unavailable"
