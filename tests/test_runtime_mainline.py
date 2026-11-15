@@ -6,6 +6,24 @@ import pytest
 from src.model import runtime_mainline
 
 
+@pytest.fixture(autouse=True)
+def _stub_external_discovery(monkeypatch):
+    monkeypatch.setattr(
+        runtime_mainline, "discover_gov_policy_candidates",
+        lambda: ([], {"status": "READY_CANDIDATES_ONLY", "candidate_count": 0}),
+    )
+    monkeypatch.setattr(
+        runtime_mainline, "append_policy_candidates", lambda *args: 0
+    )
+    monkeypatch.setattr(
+        runtime_mainline, "discover_global_news_candidates",
+        lambda: ([], {"status": "READY_CANDIDATES_ONLY", "candidate_count": 0}),
+    )
+    monkeypatch.setattr(
+        runtime_mainline, "append_global_news_candidates", lambda *args: 0
+    )
+
+
 def test_runtime_mainline_scan_connects_phases_and_evidence(monkeypatch, tmp_path):
     dates = pd.bdate_range("2026-01-05", periods=8)
     codes = [f"{i:06d}" for i in range(1, 21)]
