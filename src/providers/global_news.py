@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -36,19 +37,29 @@ def discover_global_news_candidates(*, session=None, clock=None, timeout=12,
     candidates = {}
     failures = []
     succeeded = 0
-    for theme, query in QUERY_THEMES.items():
+    for theme_index, (theme, query) in enumerate(QUERY_THEMES.items()):
         try:
-            response = client.get(
-                API_URL,
-                params={
-                    "query": query,
-                    "mode": "ArtList",
-                    "format": "json",
-                    "maxrecords": per_theme_limit,
-                    "sort": "HybridRel",
-                },
-                timeout=timeout,
-            )
+            # GDELT rate-limits bursts. Keep topic requests sequential with a
+            # small pause and one bounded retry for HTTP 429.
+            if theme_index:
+                time.sleep(1.0)
+            response = None
+            for attempt in range(2):
+                response = client.get(
+                    API_URL,
+                    params={
+                        "query": query,
+                        "mode": "ArtList",
+                        "format": "json",
+                        "maxrecords": per_theme_limit,
+                        "sort": "HybridRel",
+                    },
+                    timeout=timeout,
+                )
+                if getattr(response, "status_code", None) == 429 and attempt == 0:
+                    time.sleep(2.0)
+                    continue
+                break
             response.raise_for_status()
             payload = response.json()
             articles = payload.get("articles", []) if isinstance(payload, dict) else []

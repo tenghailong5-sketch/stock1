@@ -324,3 +324,44 @@ def test_forward_industry_flow_archive_does_not_persist_weekend_snapshots(tmp_pa
     assert not audit["archived"]
     assert audit["status"] == "WAITING_COMPLETED_SESSION_ARCHIVE"
     assert not (tmp_path / "industry_flow_daily.jsonl").exists()
+
+
+def test_full_emotion_assembly_excludes_weekend_provider_snapshot(monkeypatch, tmp_path):
+    sessions = pd.bdate_range("2026-01-05", periods=4)
+    weekend = pd.Timestamp("2026-01-10")
+    history = pd.DataFrame({
+        "trade_date": list(sessions) + [weekend],
+        "breadth": [0.2, 0.25, 0.3, 0.4, 0.01],
+        "limit_up_count": [8, 9, 12, 20, 0],
+        "limit_down_count": [25, 20, 18, 6, 80],
+        "available_time": [pd.Timestamp("2026-01-20T07:00:00Z")] * 5,
+    })
+    calendar = pd.DataFrame({"trade_date": sessions})
+    monkeypatch.setattr(
+        runtime_mainline, "assemble_market_emotion_history",
+        lambda *args, **kwargs: {"status": "READY", "history": history.copy()},
+    )
+    monkeypatch.setattr(runtime_mainline, "_read_index_archive", lambda *args, **kwargs: calendar.copy())
+    monkeypatch.setattr(
+        runtime_mainline, "fetch_market_emotion_pool_history",
+        lambda dates, **kwargs: pd.DataFrame({
+            "trade_date": dates,
+            "available_time": [pd.Timestamp("2026-01-20T07:30:00Z")] * len(dates),
+            "pool_history_status": ["READY"] * len(dates),
+        }),
+    )
+    monkeypatch.setattr(
+        runtime_mainline, "classify_market_cycle",
+        lambda frame: frame.assign(market_cycle="TRANSITION"),
+    )
+    monkeypatch.setattr(
+        runtime_mainline, "audit_emotion_history",
+        lambda frame: {"sessions": len(frame)},
+    )
+    cycles, audit = runtime_mainline._assemble_emotion(
+        decision_time=pd.Timestamp("2026-01-20T08:00:00Z"),
+        archive_root=tmp_path,
+    )
+    assert cycles.trade_date.max() == sessions[-1]
+    assert audit["latest_trade_date"] == "2026-01-08"
+    assert len(cycles) == len(sessions)

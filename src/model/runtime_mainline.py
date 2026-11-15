@@ -182,6 +182,18 @@ def _assemble_emotion(*, decision_time: pd.Timestamp, archive_root: Path) -> tup
             + str(result.get("status")) + "/" + str(result.get("valid_sessions"))
         )
     history = result["history"].copy()
+    # Align emotion rows to completed SSE index sessions before pool lookup.
+    calendar = _read_index_archive(
+        Path(archive_root) / "index_daily" / "000001.jsonl",
+        decision_time=decision_time,
+    )
+    if calendar.empty:
+        raise RuntimeError("completed SSE exchange-session calendar unavailable")
+    calendar_dates = set(pd.to_datetime(calendar["trade_date"], errors="coerce").dt.normalize().dropna())
+    history["trade_date"] = pd.to_datetime(history["trade_date"], errors="coerce").dt.normalize()
+    history = history.loc[history["trade_date"].isin(calendar_dates)].copy()
+    if history.empty:
+        raise RuntimeError("no market-emotion rows align to completed SSE sessions")
     dates = history.trade_date.tail(15).tolist()
     pools = fetch_market_emotion_pool_history(
         dates,

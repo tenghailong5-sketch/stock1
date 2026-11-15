@@ -63,3 +63,35 @@ def test_global_news_archive_deduplicates_candidate_ids(tmp_path):
     assert global_news.append_global_news_candidates(path, rows) == 0
     saved = [json.loads(line) for line in path.read_text().splitlines()]
     assert saved == rows
+
+
+def test_global_news_retries_one_rate_limit_and_throttles_topics(monkeypatch):
+    monkeypatch.setattr(global_news.time, "sleep", lambda _seconds: None)
+
+    class RateLimitResponse(FakeResponse):
+        status_code = 429
+
+    class RetrySession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, *, params, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                return RateLimitResponse({})
+            return FakeResponse({"articles": [{
+                "title": "Central bank policy update",
+                "url": f"https://example.com/article-{self.calls}",
+                "domain": "example.com",
+            }]})
+
+    session = RetrySession()
+    rows, audit = global_news.discover_global_news_candidates(
+        session=session,
+        clock=lambda: datetime(2026, 11, 15, 2, tzinfo=timezone.utc),
+    )
+    assert session.calls == len(global_news.QUERY_THEMES) + 1
+    assert audit["queries_succeeded"] == len(global_news.QUERY_THEMES)
+    assert audit["queries_failed"] == 0
+    assert audit["status"] == "READY_CANDIDATES_ONLY"
+    assert len(rows) == len(global_news.QUERY_THEMES)
