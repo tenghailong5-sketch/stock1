@@ -53,6 +53,19 @@ def test_state_switch_requires_two_consecutive_sessions_and_applies_next_day():
 def test_market_score_missing_state_is_nan():
     assert pd.isna(market_environment_score({"StateScore": .7, "market_state": "INSUFFICIENT_DATA"}))
 
+def test_position_scale_is_continuous_from_market_environment_score():
+    scored = pd.DataFrame({
+        "trade_date": pd.date_range("2026-01-01", periods=4),
+        "raw_market_state": ["RISK_ON", "RISK_ON", "RISK_ON", "RISK_ON"],
+        "StateScore": [.60, .65, .75, .90],
+        "S_trend": [1.0] * 4,
+    })
+    out = apply_state_cooldown(scored)
+    assert out.risk_scale.iloc[2] == pytest.approx(.75)
+    assert out.risk_scale.iloc[3] == pytest.approx(1.0)
+    assert out.position_scale.equals(out.risk_scale)
+    assert out.risk_scale.iloc[3] > out.risk_scale.iloc[2]
+
 
 def test_risk_on_market_mapping_reaches_100_at_max_attainable_score():
     assert market_environment_score({"StateScore": .9, "market_state": "RISK_ON"}) == pytest.approx(100)
