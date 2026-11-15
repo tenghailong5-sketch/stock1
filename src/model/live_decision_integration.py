@@ -236,7 +236,6 @@ def build_live_decision_gate_audit(
         industry_live = (
             membership_live
             and bool(industry)
-            and _truth(industry.get("persistence_ready"))
             and str(industry.get("mainline_phase", "UNKNOWN")) in {"IGNITION", "PEAK", "DECAY"}
         )
         concentration_status = str(industry.get("stock_turnover_pit_status", "not_ready"))
