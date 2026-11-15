@@ -139,3 +139,50 @@ def test_runtime_mainline_keeps_industry_and_emotion_when_policy_archive_is_miss
     assert audit["policy"]["visible_events"] == 0
     assert len(latest) == 20
     assert not audit["historical_pit_eligible"]
+
+
+
+def test_industry_panel_keeps_ninety_percent_when_two_providers_fail(monkeypatch, tmp_path):
+    dates = pd.bdate_range("2026-01-05", periods=8)
+    codes = [f"I{i:02d}" for i in range(20)]
+    groups = pd.DataFrame({
+        "industry_code": codes, "industry_name": [f"industry-{i}" for i in range(20)]
+    })
+    monkeypatch.setattr(
+        runtime_mainline, "fetch_sw_api_first_level_index_list",
+        lambda **kwargs: groups.copy(),
+    )
+
+    def fetch_history(code, **kwargs):
+        if code in {"I18", "I19"}:
+            raise RuntimeError("temporary provider timeout")
+        return pd.DataFrame({
+            "trade_date": dates, "industry_code": code,
+            "return_3": [0.02] * len(dates), "return_5": [0.03] * len(dates),
+            "amount": [1_000_000.0] * len(dates),
+        })
+
+    monkeypatch.setattr(
+        runtime_mainline, "fetch_sw_api_industry_index_history", fetch_history
+    )
+    index_dir = tmp_path / "index_daily"
+    index_dir.mkdir()
+    (index_dir / "000001.jsonl").write_text(
+        "\\n".join(json.dumps({
+            "trade_date": day.strftime("%Y-%m-%d"),
+            "close": 3000 + i * 2,
+            "available_time": "2026-02-01T07:00:00Z",
+        }) for i, day in enumerate(dates)) + "\\n",
+        encoding="utf-8",
+    )
+
+    panel, audit = runtime_mainline._assemble_industry_panel(
+        decision_time=pd.Timestamp("2026-02-01T08:00:00Z"),
+        archive_root=tmp_path,
+    )
+
+    assert audit["industry_count"] == 20
+    assert audit["minimum_industries_per_date"] == 18
+    assert audit["failed_industry_count"] == 2
+    assert audit["available_industries"] == 18
+    assert panel.groupby("trade_date").industry_code.nunique().eq(18).all()
