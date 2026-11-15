@@ -67,6 +67,23 @@ def test_current_diagnostic_mainline_and_missing_m8_inputs_block_all_entries():
     assert audit["blocked_count"] == 3
 
 
+def test_missing_m8_plan_does_not_substitute_latest_quote_as_entry_price():
+    watchlist, m5, market, mainline, membership, risk = _inputs()
+    rows, audit = build_live_decision_gate_audit(
+        watchlist, m5, market, mainline, membership,
+        decision_time="2026-11-14T09:00:00+08:00",
+        minute_confirmation_fetcher=lambda symbol, captured_at=None: {
+            "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
+            "reason": "all_15m_checks_passed",
+        },
+    )
+    assert not rows["allowed"].any()
+    assert rows["m8_risk_context_complete"].eq(False).all()
+    assert rows["reasons"].map(lambda x: "invalid_entry_price" in x).all()
+    assert audit["m8_risk_context_complete_symbol_count"] == 0
+    assert audit["m8_risk_context_missing_symbol_count"] == 1
+
+
 def test_forward_only_membership_snapshot_cannot_authorize_pit_entry():
     watchlist, m5, market, mainline, membership, risk = _inputs()
     membership["historical_pit_eligible"] = False
