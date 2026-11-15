@@ -94,3 +94,15 @@ def test_freshness_filter_uses_gdelt_seen_clock_and_policy_publication_clock():
     assert [row["candidate_id"] for row in rows] == ["fresh-global", "fresh-policy"]
     assert audit["stale_candidates_excluded"] == 1
     assert audit["freshness_window_days"] == 30.0
+
+
+def test_syndicated_headline_deduplication_preserves_non_latin_scripts():
+    rows, audit = map_candidate_sectors(
+        [
+            {"candidate_id": "arabic-a", "title": "رقائق أشباه الموصلات", "summary": "semiconductor"},
+            {"candidate_id": "arabic-b", "title": "رقائق أشباه الموصلات!", "summary": "semiconductor"},
+        ],
+        ["电子"],
+    )
+    assert len(rows) == 1
+    assert audit["duplicate_headlines_suppressed"] == 1
