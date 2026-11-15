@@ -242,6 +242,40 @@ def scan_cached_market_emotion(
                 "historical_pit_eligible": False,
                 "trading_authorization": False,
             }
+        # Align sentiment snapshots to completed exchange sessions. Some
+        # quote providers stamp a weekend retrieval with the calendar date;
+        # that is not a new trading session and must not advance the market cycle.
+        calendar = _read_index_archive(
+            Path(archive_root) / "index_daily" / "000001.jsonl",
+            decision_time=cutoff,
+        )
+        if calendar.empty:
+            return pd.DataFrame(), {
+                "status": "UNKNOWN_NO_COMPLETED_MARKET_SESSION",
+                "valid_sessions": 0,
+                "required_sessions": min_sessions,
+                "market_cycle": "UNKNOWN",
+                "historical_pit_eligible": False,
+                "trading_authorization": False,
+                "cache_only": True,
+            }
+        calendar_dates = set(pd.to_datetime(calendar["trade_date"]).dt.normalize())
+        history = history.copy()
+        history["trade_date"] = pd.to_datetime(
+            history["trade_date"], errors="coerce"
+        ).dt.normalize()
+        history = history.loc[history["trade_date"].isin(calendar_dates)].copy()
+        if history["trade_date"].nunique() < min_sessions:
+            return pd.DataFrame(), {
+                "status": "UNKNOWN_INSUFFICIENT_COMPLETED_SESSIONS",
+                "valid_sessions": int(history["trade_date"].nunique()),
+                "required_sessions": min_sessions,
+                "market_calendar_latest_trade_date": calendar["trade_date"].max().date().isoformat(),
+                "market_cycle": "UNKNOWN",
+                "historical_pit_eligible": False,
+                "trading_authorization": False,
+                "cache_only": True,
+            }
         cycles = classify_market_cycle(history)
         latest = cycles.sort_values("trade_date").tail(1).copy()
         state = str(latest.iloc[0].get("market_cycle", "UNKNOWN"))
@@ -252,6 +286,7 @@ def scan_cached_market_emotion(
             "market_cycle": state,
             "cycle_reason": str(latest.iloc[0].get("cycle_reason", "unknown")),
             "latest_trade_date": trade_date,
+            "market_calendar_latest_trade_date": calendar["trade_date"].max().date().isoformat(),
             "valid_sessions": int(len(cycles)),
             "required_sessions": min_sessions,
             "market_cycle_data_basis": str(latest.iloc[0].get("market_cycle_data_basis", "unknown")),
