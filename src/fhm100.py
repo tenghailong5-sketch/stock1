@@ -28,6 +28,7 @@ from src.model.live_decision_integration import (
 from src.model.mainline_flows import attach_pit_stock_turnover_concentration
 from src.model.archive_readiness import audit_forward_archive
 from src.model.shortline_architecture import audit_shortline_architecture
+from src.model.research_ranking import build_research_opportunity_ranking
 
 OUT=Path("output"); OUT.mkdir(exist_ok=True)
 MIN_AMOUNT=100_000_000
@@ -1144,6 +1145,19 @@ def main():
         pit_factor_snapshot=m4_pit_factor_snapshot,
         decision_time=now,
     )
+    # Keep broad discovery moving independently of formal M5 readiness. This
+    # ranking uses only observed same-session/industry diagnostics and cannot
+    # be mistaken for a formal score or buy authorization.
+    research_opportunities, research_opportunity_audit = build_research_opportunity_ranking(
+        w, m5_input, min_observed_factors=3,
+    )
+    research_opportunities.to_csv(
+        OUT/"research_opportunity_rank.csv", index=False, encoding="utf-8-sig"
+    )
+    (OUT/"research_opportunity_audit.json").write_text(
+        json.dumps(research_opportunity_audit, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
     m5 = evaluate_candidates(m5_input, stage="close") if not m5_input.empty else pd.DataFrame(
         columns=["symbol","strategy","stage","score","eligible","candidate_band","minimum_score","reasons"])
     m5.to_csv(OUT/"m5_diagnostics.csv",index=False,encoding="utf-8-sig")
@@ -1285,6 +1299,7 @@ def main():
       f"- 公司行为前瞻账本：{corporate_action_audit.get('status')}；候选扫描={corporate_action_audit.get('symbols_checked', 0)}只；新增事件版本={corporate_action_audit.get('rows_appended', 0)}；仅首次观察之后可用，未验证总回报，不参与评分或交易授权",
       f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
       f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
+      f"- 研究机会排序：{research_opportunity_audit.get('ranked_count', 0)}/{research_opportunity_audit.get('row_count', 0)}只；仅用当日K线结构、成交质量和当前行业观察，不使用未验证跨日收益，不是正式M5分数或买入授权",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
       f"- 四层决策门：{decision_gate_audit.get('status')}；检查记录={decision_gate_audit.get('candidate_count', 0)}；15分钟扫描={decision_gate_audit.get('minute_scanned_count', 0)}；准入={decision_gate_audit.get('allowed_count', 0)}；阻断={decision_gate_audit.get('blocked_count', 0)}",
       f"- 正式模型状态：{formal_status}",
@@ -1321,6 +1336,7 @@ def main():
       "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
       "archive_readiness":archive_readiness,
       "m4_pit_snapshot_audit":m4_pit_snapshot_audit,
+      "research_opportunity_audit":research_opportunity_audit,
       "shortline_architecture_audit":shortline_architecture,
       "runtime_mainline_audit":runtime_mainline_audit,
       "sw_industry_history_research_audit":sw_history_audit,
