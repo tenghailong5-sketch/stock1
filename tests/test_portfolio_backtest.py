@@ -19,7 +19,7 @@ def candidate(symbol="000001", score=90.0, stop=9.5, strategy="A"):
         "corporate_actions_resolved": True, "universe_complete": True,
         "delisted_included": True, "ruleset_version": "FHM-100-test",
         "stop_price": stop, "available_risk_budget": 5000.0,
-        "market_risk_scale": 1.0,
+        "market_risk_scale": 1.0, "m8_trade_allowed": True,
     }
 
 
