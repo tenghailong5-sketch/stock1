@@ -1,6 +1,7 @@
 import json
 
 import pandas as pd
+import pytest
 
 from src.model import runtime_mainline
 
@@ -265,3 +266,47 @@ def test_cached_market_emotion_missing_archive_degrades_to_unknown(monkeypatch, 
     assert audit["status"] == "UNKNOWN_NO_CACHED_EMOTION"
     assert audit["market_cycle"] == "UNKNOWN"
     assert not audit["trading_authorization"]
+
+
+def test_forward_industry_flow_archive_warms_and_computes_three_session_change(tmp_path):
+    from src.model.forward_industry_flow import attach_forward_industry_flow_changes
+
+    archive = tmp_path / "forward"
+    base = pd.Timestamp("2026-11-09T16:00:00+08:00")
+    latest = None
+    for offset, share in enumerate([0.10, 0.12, 0.15, 0.18]):
+        day = base + pd.Timedelta(days=offset)
+        while day.weekday() >= 5:
+            day += pd.Timedelta(days=1)
+        panel = pd.DataFrame({
+            "industry_name": ["计算机", "传媒"],
+            "trade_date": [day.normalize(), day.normalize()],
+            "turnover_share": [share, 0.20],
+        })
+        latest, audit = attach_forward_industry_flow_changes(
+            panel, decision_time=day, archive_root=archive,
+        )
+    row = latest.set_index("industry_name").loc["计算机"]
+    assert row["turnover_share_change_3d"] == pytest.approx(0.08)
+    assert row["turnover_share_change_1d"] == pytest.approx(0.03)
+    assert audit["status"] == "READY_FORWARD_FLOW_RESEARCH"
+    assert not audit["historical_pit_eligible"]
+    assert not audit["trading_authorization"]
+
+
+def test_forward_industry_flow_archive_does_not_persist_weekend_snapshots(tmp_path):
+    from src.model.forward_industry_flow import attach_forward_industry_flow_changes
+
+    panel = pd.DataFrame({
+        "industry_name": ["计算机"],
+        "trade_date": [pd.Timestamp("2026-11-15")],
+        "turnover_share": [0.2],
+    })
+    result, audit = attach_forward_industry_flow_changes(
+        panel,
+        decision_time=pd.Timestamp("2026-11-15T16:00:00+08:00"),
+        archive_root=tmp_path,
+    )
+    assert not audit["archived"]
+    assert audit["status"] == "WAITING_COMPLETED_SESSION_ARCHIVE"
+    assert not (tmp_path / "industry_flow_daily.jsonl").exists()
