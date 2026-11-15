@@ -4,6 +4,7 @@ import pytest
 from src.fhm100 import (
     select_history_universe,
     select_history_universe_with_supplement,
+    select_research_history_universe,
 )
 
 
@@ -81,3 +82,33 @@ def test_quote_prefilter_rejects_negative_supplement_limit():
     snapshot = pd.DataFrame(columns=["code", "name", "price", "amount", "pct_chg"])
     with pytest.raises(ValueError, match="max_supplement_symbols"):
         select_history_universe_with_supplement(snapshot, max_supplement_symbols=-1)
+
+
+
+def test_shortline_research_pool_includes_financials_and_limit_up_momentum():
+    snapshot = pd.DataFrame([
+        {"code": "000001", "name": "示例银行", "price": 10, "amount": 900, "pct_chg": -1},
+        {"code": "000002", "name": "AI科技", "price": 20, "amount": 500, "pct_chg": 9.8},
+        {"code": "000003", "name": "机器人", "price": 30, "amount": 400, "pct_chg": 3.0},
+        {"code": "000004", "name": "普通股", "price": 40, "amount": 300, "pct_chg": 0.0},
+    ])
+
+    selected = select_research_history_universe(
+        snapshot, max_symbols=3, min_candidate_amount=100, liquidity_share=1 / 3,
+    )
+
+    assert selected["code"].tolist() == ["000001", "000002", "000003"]
+    assert "000001" in set(selected["code"])  # financials are observable
+    assert "000002" in set(selected["code"])  # >8% mover/limit-up leader is observable
+
+
+def test_shortline_research_pool_supports_full_market_history_scan():
+    snapshot = pd.DataFrame([
+        {"code": "000001", "name": "示例银行", "price": 10, "amount": 900, "pct_chg": -1},
+        {"code": "000002", "name": "AI科技", "price": 20, "amount": 500, "pct_chg": 9.8},
+        {"code": "000003", "name": "机器人", "price": 30, "amount": 400, "pct_chg": 3.0},
+    ])
+
+    selected = select_research_history_universe(snapshot, max_symbols=None)
+
+    assert selected["code"].tolist() == ["000001", "000002", "000003"]
