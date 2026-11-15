@@ -26,6 +26,7 @@ from src.model.live_decision_integration import (
 )
 from src.model.mainline_flows import attach_pit_stock_turnover_concentration
 from src.model.archive_readiness import audit_forward_archive
+from src.model.shortline_architecture import audit_shortline_architecture
 
 OUT=Path("output"); OUT.mkdir(exist_ok=True)
 MIN_AMOUNT=100_000_000
@@ -1120,6 +1121,14 @@ def main():
     m5.to_csv(OUT/"m5_diagnostics.csv",index=False,encoding="utf-8-sig")
     m5_readiness = factor_readiness_audit(m5_input, stage="close")
     m5_readiness.to_csv(OUT/"m5_factor_readiness.csv", index=False, encoding="utf-8-sig")
+    shortline_architecture, shortline_pillar_audit = audit_shortline_architecture(m5_input)
+    (OUT/"shortline_architecture_audit.json").write_text(
+        json.dumps(shortline_architecture, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    shortline_pillar_audit.to_csv(
+        OUT/"shortline_pillar_audit.csv", index=False, encoding="utf-8-sig"
+    )
     m5_blockers = summarize_m5_blockers(m5)
     m5_blockers.to_csv(OUT/"m5_blocker_summary.csv",index=False,encoding="utf-8-sig")
 
@@ -1277,6 +1286,7 @@ def main():
       "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
       "archive_readiness":archive_readiness,
       "m4_pit_snapshot_audit":m4_pit_snapshot_audit,
+      "shortline_architecture_audit":shortline_architecture,
       "runtime_mainline_audit":runtime_mainline_audit,
       "sw_industry_history_research_audit":sw_history_audit,
       "sw_stock_mainline_research_audit":sw_stock_mainline_audit,
