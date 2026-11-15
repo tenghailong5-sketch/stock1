@@ -357,3 +357,37 @@ def test_unknown_mainline_phase_remains_in_research_watchlist_without_buy_author
     assert shortlist["mainline_lifecycle_status"].eq("UNKNOWN_RESEARCH_ONLY").all()
     assert not shortlist["buy_authorization"].any()
     assert audit["mainline_phase_filtered_count"] == 0
+
+
+def test_mainline_backed_candidates_rank_ahead_of_momentum_only_watch():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002", "000003"],
+        "名称": ["momentum", "mainline", "mixed"],
+        "最新价": [10, 10, 10],
+        "涨跌幅%": [9.0, 2.0, 5.0],
+        "当日成交额": [900e6, 200e6, 500e6],
+    })
+    m5 = pd.DataFrame({
+        "symbol": ["000001", "000002", "000003"],
+        "industry_relative_strength": [99, 80, 90],
+    })
+    industry = pd.DataFrame({
+        "symbol": ["000001", "000002", "000003"],
+        "current_industry_level1": ["银行", "计算机", "传媒"],
+        "strength_percentile": [0.99, 0.80, 0.90],
+        "turnover_share_change_3d": [None, 0.08, None],
+        "mainline_phase_gated": [None, "IGNITION_UNCONFIRMED", None],
+    })
+    ranked, audit = build_research_opportunity_ranking(
+        watchlist, m5, industry_context=industry,
+    )
+    assert ranked.iloc[0]["symbol"] == "000002"
+    assert ranked.iloc[0]["research_rank_tier"] == "MAINLINE_BACKED_RESEARCH"
+    assert ranked.iloc[1]["research_rank_tier"] == "MOMENTUM_ONLY_WATCH"
+    assert audit["mainline_backed_ranked_count"] == 1
+    assert audit["momentum_only_watch_count"] == 2
+    shortlist, _, _ = build_final_candidate_shortlist(
+        ranked, max_candidates=3, min_amount=100e6,
+    )
+    assert shortlist.iloc[0]["symbol"] == "000002"
+    assert shortlist.iloc[1]["candidate_status"] == "MOMENTUM_ONLY_WATCH"
