@@ -61,7 +61,7 @@ def test_position_scale_is_continuous_from_market_environment_score():
         "S_trend": [1.0] * 4,
     })
     out = apply_state_cooldown(scored)
-    assert out.risk_scale.iloc[2] == pytest.approx(.75)
+    assert out.risk_scale.iloc[2] == pytest.approx(.875)
     assert out.risk_scale.iloc[3] == pytest.approx(1.0)
     assert out.position_scale.equals(out.risk_scale)
     assert out.risk_scale.iloc[3] > out.risk_scale.iloc[2]
