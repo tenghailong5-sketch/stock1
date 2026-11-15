@@ -1,4 +1,5 @@
 from datetime import date
+\nfrom src.model.portfolio_backtest_runner import run_checkpointed_portfolio_backtest
 
 import pandas as pd
 import pytest
@@ -249,3 +250,54 @@ def test_custom_execution_costs_reduce_position_size_conservatively():
                                 transfer_fee_bps=1)
     high_cost = run_portfolio_backtest(candidates, bars, costs=high_costs)
     assert low_cost["open_positions"][0]["shares"] > high_cost["open_positions"][0]["shares"]
+
+
+
+def test_stateful_date_batches_match_one_continuous_portfolio_run():
+    candidates = frame([candidate(stop=9.5)])
+    bars = frame([
+        bar("000001", "2026-01-06"),
+        bar("000001", "2026-01-07", open_=9.4, high=9.5, low=9.2, close=9.3),
+        bar("000001", "2026-01-08", open_=9.8, high=10.0, low=9.7, close=9.9),
+    ])
+    continuous = run_portfolio_backtest(candidates, bars)
+    first = run_portfolio_backtest(
+        candidates, bars, _date_end=date(2026, 1, 6), _include_state=True,
+    )
+    resumed = run_portfolio_backtest(
+        candidates, bars, _state=first["_state"],
+        _date_start=date(2026, 1, 7), _include_state=True,
+    )
+    resumed.pop("_state")
+    for key in (
+        "ending_cash", "ending_equity", "total_return_pct", "realized_pnl",
+        "unrealized_pnl", "open_positions", "fills", "trades", "skipped",
+        "daily_equity", "metrics",
+    ):
+        assert resumed[key] == continuous[key]
+
+
+def test_checkpointed_portfolio_runner_matches_continuous_and_is_idempotent(tmp_path):
+    candidates = frame([candidate(stop=9.5)])
+    bars = frame([
+        bar("000001", "2026-01-06"),
+        bar("000001", "2026-01-07", open_=9.4, high=9.5, low=9.2, close=9.3),
+        bar("000001", "2026-01-08", open_=9.8, high=10.0, low=9.7, close=9.9),
+    ])
+    continuous = run_portfolio_backtest(candidates, bars)
+    kwargs = {
+        "checkpoint_path": str(tmp_path / "portfolio.sqlite"),
+        "run_id": "resume-equivalence",
+        "batch_size": 1,
+    }
+    first = run_checkpointed_portfolio_backtest(candidates, bars, **kwargs)
+    second = run_checkpointed_portfolio_backtest(candidates, bars, **kwargs)
+    for result in (first, second):
+        for key in (
+            "ending_cash", "ending_equity", "total_return_pct", "realized_pnl",
+            "unrealized_pnl", "open_positions", "fills", "trades", "skipped",
+            "daily_equity", "metrics",
+        ):
+            assert result[key] == continuous[key]
+        assert result["checkpoint"]["completed"] == 3
+        assert result["checkpoint"]["pending"] == 0
