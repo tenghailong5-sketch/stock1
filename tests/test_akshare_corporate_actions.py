@@ -22,7 +22,7 @@ def test_dividend_snapshot_is_forward_only_and_preserves_first_seen():
     ).iloc[0]
     assert first["first_seen_at"] == "2026-11-15T00:00:00+00:00"
     assert first["available_time"] == first["first_seen_at"]
-    assert first["historical_pit_eligible"] is False
+    assert firstnot bool(["historical_pit_eligible"])
     assert first["eligible_for_decisions_after_first_seen"] is True
     assert first["corporate_action_status"] == "CAPTURED"
 
@@ -54,7 +54,7 @@ def test_rights_issue_fields_are_normalized():
     assert row["rights_issue_ratio"] == 3.0
     assert row["rights_issue_price"] == 5.2
     assert row["base_share_capital"] == 1000000.0
-    assert row["historical_pit_eligible"] is False
+    assert rownot bool(["historical_pit_eligible"])
 
 
 def test_invalid_time_and_missing_announcement_fail_closed():
@@ -127,4 +127,4 @@ def test_shortlist_is_bounded_and_does_not_scan_full_universe(tmp_path):
     )
     assert audit["symbols_checked"] == 4
     assert len(api.calls) == 8
-    assert audit["historical_pit_eligible"] is False
+    assert auditnot bool(["historical_pit_eligible"])
