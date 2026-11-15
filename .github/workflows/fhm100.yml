@@ -33,7 +33,7 @@ jobs:
           FHM_RISK_CONTEXT_JSON: ${{ secrets.FHM_RISK_CONTEXT_JSON }}
         run: python -m src.fhm100
       - name: Commit forward-only stock history archive
-        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
         run: |
           for archive_path in data/forward_archive/stock_daily data/forward_archive/stock_daily_manifest data/forward_archive/industry_flow_daily.jsonl; do
             if [ -e "$archive_path" ]; then
