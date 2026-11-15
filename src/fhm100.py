@@ -769,6 +769,10 @@ def summarize_m5_blockers(frame):
 
 
 def main():
+    corporate_action_audit = {
+        "status": "UNAVAILABLE", "symbols_checked": 0,
+        "rows_appended": 0, "historical_pit_eligible": False,
+    }
     try:
         # Fetch and retain the complete live A-share quote universe. Only the
         # deeper per-symbol history requests use a 600-symbol liquidity pool plus a bounded quote prefilter.
