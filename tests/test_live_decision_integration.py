@@ -45,7 +45,7 @@ def test_all_four_gates_can_authorize_only_with_complete_inputs():
     watchlist, m5, market, mainline, membership, risk = _inputs()
     rows, audit = build_live_decision_gate_audit(
         watchlist, m5, market, mainline, membership,
-        decision_time="2026-11-14T09:00:00+08:00",
+        decision_time="2026-11-16T10:00:00+08:00",
         risk_context_by_symbol=risk,
         minute_confirmation_fetcher=lambda symbol, captured_at=None: {
             "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
@@ -62,7 +62,7 @@ def test_current_diagnostic_mainline_and_missing_m8_inputs_block_all_entries():
     membership["source_revision"] = ""
     rows, audit = build_live_decision_gate_audit(
         watchlist, m5, market, mainline, membership,
-        decision_time="2026-11-14T09:00:00+08:00",
+        decision_time="2026-11-16T10:00:00+08:00",
         minute_confirmation_fetcher=lambda symbol, captured_at=None: {
             "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
             "reason": "all_15m_checks_passed",
@@ -79,7 +79,7 @@ def test_forward_only_membership_snapshot_can_authorize_live_but_never_pit():
     membership["availability_basis"] = "retrieval_time_only"
     rows, audit = build_live_decision_gate_audit(
         watchlist, m5, market, mainline, membership,
-        decision_time="2026-11-14T09:00:00+08:00",
+        decision_time="2026-11-16T10:00:00+08:00",
         risk_context_by_symbol=risk,
         minute_confirmation_fetcher=lambda symbol, captured_at=None: {
             "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
@@ -97,7 +97,7 @@ def test_unconfirmed_m3_ignition_is_not_live_entry_eligible():
     mainline["mainline_phase_gated"] = "IGNITION_UNCONFIRMED"
     rows, _ = build_live_decision_gate_audit(
         watchlist, m5, market, mainline, membership,
-        decision_time="2026-11-14T09:00:00+08:00",
+        decision_time="2026-11-16T10:00:00+08:00",
         risk_context_by_symbol=risk,
         minute_confirmation_fetcher=lambda symbol, captured_at=None: {
             "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
@@ -111,12 +111,12 @@ def test_unconfirmed_m3_ignition_is_not_live_entry_eligible():
 
 
 def test_stale_or_future_live_industry_snapshots_are_rejected():
-    for available_time in ("2026-11-01T00:00:00Z", "2026-11-14T02:00:01Z"):
+    for available_time in ("2026-11-01T00:00:00Z", "2026-11-16T02:00:01Z"):
         watchlist, m5, market, mainline, membership, risk = _inputs()
         membership["available_time"] = available_time
         rows, _ = build_live_decision_gate_audit(
             watchlist, m5, market, mainline, membership,
-            decision_time="2026-11-14T09:00:00+08:00", risk_context_by_symbol=risk,
+            decision_time="2026-11-16T10:00:00+08:00", risk_context_by_symbol=risk,
             minute_confirmation_fetcher=lambda symbol, **kwargs: {
                 "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
             },
@@ -137,11 +137,11 @@ def test_15m_fetcher_receives_the_frozen_decision_cutoff():
 
     build_live_decision_gate_audit(
         watchlist, m5, market, mainline, membership,
-        decision_time="2026-11-14T09:00:00+08:00",
+        decision_time="2026-11-16T10:00:00+08:00",
         risk_context_by_symbol=risk,
         minute_confirmation_fetcher=fetcher,
     )
-    assert seen == [("600000", pd.Timestamp("2026-11-14T09:00:00+08:00"))]
+    assert seen == [("600000", pd.Timestamp("2026-11-16T10:00:00+08:00"))]
 
 
 def test_expired_membership_interval_cannot_authorize_entry():
@@ -149,7 +149,7 @@ def test_expired_membership_interval_cannot_authorize_entry():
     membership["valid_to"] = "2026-11-01"
     rows, audit = build_live_decision_gate_audit(
         watchlist, m5, market, mainline, membership,
-        decision_time="2026-11-14T09:00:00+08:00",
+        decision_time="2026-11-16T10:00:00+08:00",
         risk_context_by_symbol=risk,
         minute_confirmation_fetcher=lambda symbol, captured_at=None: {
             "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
@@ -166,7 +166,7 @@ def test_missing_15m_confirmation_blocks_entry_even_when_other_inputs_are_ready(
     watchlist, m5, market, mainline, membership, risk = _inputs()
     rows, audit = build_live_decision_gate_audit(
         watchlist, m5, market, mainline, membership,
-        decision_time="2026-11-14T09:00:00+08:00",
+        decision_time="2026-11-16T10:00:00+08:00",
         risk_context_by_symbol=risk,
         minute_confirmation_fetcher=lambda symbol, captured_at=None: {
             "status": "NO_15M_CONFIRMATION", "entry_ready": False,
@@ -229,7 +229,7 @@ def test_15m_confirmation_scan_supports_all_candidates_without_fixed_cap():
             {"symbol": symbol, "strategy": "A", "score": 90.0, "eligible": True}
             for symbol in ("600000", "000001", "300001")
         ]), {"status": "UNKNOWN"}, pd.DataFrame(),
-        pd.DataFrame(), decision_time="2026-11-14T09:00:00+08:00",
+        pd.DataFrame(), decision_time="2026-11-16T10:00:00+08:00",
         minute_confirmation_fetcher=fetcher, minute_scan_limit=None,
     )
 
@@ -252,7 +252,7 @@ def test_15m_scan_skips_symbols_without_any_m5_eligible_strategy():
     seen = []
     rows, audit = build_live_decision_gate_audit(
         watchlist, m5, {"status": "UNKNOWN"}, pd.DataFrame(), pd.DataFrame(),
-        decision_time="2026-11-14T09:00:00+08:00",
+        decision_time="2026-11-16T10:00:00+08:00",
         minute_confirmation_fetcher=lambda symbol, **kwargs: (
             seen.append(symbol) or {"status": "CHECKED", "entry_ready": False, "reason": "test"}
         ),
@@ -294,7 +294,7 @@ def test_15m_full_universe_uses_bounded_parallel_workers(monkeypatch):
     rows, audit = integration.build_live_decision_gate_audit(
         watchlist, m5, {"status": "UNKNOWN"},
         pd.DataFrame(), pd.DataFrame(),
-        decision_time="2026-11-14T09:00:00+08:00",
+        decision_time="2026-11-16T10:00:00+08:00",
         minute_confirmation_fetcher=lambda symbol, **kwargs: {
             "status": "CHECKED", "entry_ready": False
         },
@@ -309,7 +309,7 @@ def test_missing_m8_plan_does_not_substitute_latest_quote_as_entry_price():
     watchlist, m5, market, mainline, membership, risk = _inputs()
     rows, audit = build_live_decision_gate_audit(
         watchlist, m5, market, mainline, membership,
-        decision_time="2026-11-14T09:00:00+08:00",
+        decision_time="2026-11-16T10:00:00+08:00",
         minute_confirmation_fetcher=lambda symbol, captured_at=None: {
             "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
             "reason": "all_15m_checks_passed",

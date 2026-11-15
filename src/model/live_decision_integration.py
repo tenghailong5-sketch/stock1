@@ -24,6 +24,18 @@ def _finite(value) -> bool:
         return False
 
 
+def _within_15m_entry_window(cutoff: pd.Timestamp) -> bool:
+    """Avoid provider calls outside the configured mainland cash-session windows."""
+    local = cutoff.tz_convert("Asia/Shanghai")
+    if local.weekday() >= 5:
+        return False
+    seconds = local.hour * 3600 + local.minute * 60 + local.second
+    return (
+        9 * 3600 + 45 * 60 <= seconds <= 11 * 3600 + 30 * 60
+        or 13 * 3600 + 15 * 60 <= seconds <= 15 * 3600
+    )
+
+
 def _live_snapshot_ready(row: dict, cutoff: pd.Timestamp, *, max_age_hours: float = 240.0) -> bool:
     """Validate a retrieval-time snapshot for forward use only; never grant PIT status."""
     required = {"available_time", "source_id", "source_revision", "availability_basis", "snapshot_scope"}
@@ -179,9 +191,19 @@ def build_live_decision_gate_audit(
             }
 
     minute_results = {}
-    with ThreadPoolExecutor(max_workers=minute_scan_workers) as executor:
-        for symbol, result in executor.map(_fetch_minute, minute_symbols):
-            minute_results[symbol] = result
+    minute_window_open = _within_15m_entry_window(cutoff)
+    if minute_window_open:
+        with ThreadPoolExecutor(max_workers=minute_scan_workers) as executor:
+            for symbol, result in executor.map(_fetch_minute, minute_symbols):
+                minute_results[symbol] = result
+    else:
+        for symbol in minute_symbols:
+            minute_results[symbol] = {
+                "status": "OUTSIDE_15M_ENTRY_WINDOW",
+                "entry_ready": False,
+                "reason": "15m_provider_fetch_skipped_outside_active_cash_session",
+                "historical_pit_eligible": False,
+            }
 
     membership_by_symbol = {}
     if (
@@ -344,7 +366,9 @@ def build_live_decision_gate_audit(
         "candidate_count": int(len(result)),
         "unique_stock_count": int(len(symbols)),
         "m5_eligible_symbol_count": int(len(m5_eligible_symbols)),
-        "minute_scanned_count": int(len(minute_symbols)),
+        "minute_scanned_count": int(len(minute_symbols)) if minute_window_open else 0,
+        "minute_deferred_outside_session_count": int(len(minute_symbols)) if not minute_window_open else 0,
+        "minute_entry_window_open": bool(minute_window_open),
         "minute_scan_limit": "ALL" if minute_scan_limit is None else int(minute_scan_limit),
         "allowed_count": allowed,
         "blocked_count": int(len(result) - allowed),
