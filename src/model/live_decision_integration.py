@@ -24,7 +24,7 @@ def _finite(value) -> bool:
         return False
 
 
-def _live_snapshot_ready(row: dict, cutoff: pd.Timestamp, *, max_age_hours: float = 24.0) -> bool:
+def _live_snapshot_ready(row: dict, cutoff: pd.Timestamp, *, max_age_hours: float = 240.0) -> bool:
     """Validate a retrieval-time snapshot for forward use only; never grant PIT status."""
     required = {"available_time", "source_id", "source_revision", "availability_basis", "snapshot_scope"}
     if not required.issubset(row):
