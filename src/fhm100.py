@@ -774,19 +774,21 @@ def main():
         u=universe()
         OUT.mkdir(exist_ok=True)
         u.to_csv(OUT/"market_snapshot.csv", index=False, encoding="utf-8-sig")
-        # Short-term research pool: liquidity anchor + active non-financial
-        # names. This affects retrieval priority only; FHM A/B/C rules remain intact.
-        history_universe = select_research_history_universe(u, max_symbols=60)
-        history_pool_audit = {
-            "selection_mode": "liquidity_anchor_plus_active_nonfinancial",
-            "primary_history_symbols": int(len(history_universe)),
-            "supplement_selected_symbols": 0,
-            "supplement_deferred_symbols": 0,
-            "history_scan_symbols": int(len(history_universe)),
-            "financial_names_excluded_from_research_pool": True,
-            "daily_gain_chase_cap_pct": 8.0,
+        # Broad research retrieval pool: 600 liquidity-ranked names plus up to
+        # 200 additional active names outside the primary pool. This is a data
+        # retrieval budget only, never a strategy eligibility or buy filter.
+        history_universe, history_pool_audit = select_history_universe_with_supplement(
+            u, max_symbols=600, max_supplement_symbols=200,
+        )
+        history_pool_audit.update({
+            "selection_mode": "liquidity_ranked_primary_plus_active_quote_supplement",
+            "financial_names_excluded_from_research_pool": False,
             "formal_candidate_filter": False,
-        }
+            "live_quote_universe_count": int(len(u)),
+            "deep_history_coverage_ratio": (
+                float(len(history_universe) / len(u)) if len(u) else 0.0
+            ),
+        })
         (OUT/"history_pool_audit.json").write_text(
             json.dumps(history_pool_audit, ensure_ascii=False, indent=2), encoding="utf-8"
         )
