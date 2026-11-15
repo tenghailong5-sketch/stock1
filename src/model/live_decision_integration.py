@@ -185,7 +185,6 @@ def build_live_decision_gate_audit(
             ))
             and isinstance(risk.get("quantity"), int)
             and not isinstance(risk.get("quantity"), bool)
-            and isinstance(risk.get("same_industry_or_corr_gt_06"), bool)
         )
         args = {
             "market_state": market_state or "UNKNOWN",
