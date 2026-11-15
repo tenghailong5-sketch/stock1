@@ -186,3 +186,36 @@ def test_industry_panel_keeps_ninety_percent_when_two_providers_fail(monkeypatch
     assert audit["failed_industry_count"] == 2
     assert audit["available_industries"] == 18
     assert panel.groupby("trade_date").industry_code.nunique().eq(18).all()
+
+
+
+def test_industry_panel_aborts_remaining_batches_after_initial_transport_outage(monkeypatch, tmp_path):
+    import requests
+
+    groups = pd.DataFrame({
+        "industry_code": [f"I{i:02d}" for i in range(20)],
+        "industry_name": [f"industry-{i}" for i in range(20)],
+    })
+    calls = []
+    monkeypatch.setattr(
+        runtime_mainline, "fetch_sw_api_first_level_index_list",
+        lambda **kwargs: groups.copy(),
+    )
+
+    def unavailable(code, **kwargs):
+        calls.append(code)
+        raise requests.exceptions.ReadTimeout("SW endpoint unavailable")
+
+    monkeypatch.setattr(
+        runtime_mainline, "fetch_sw_api_industry_index_history", unavailable
+    )
+    try:
+        runtime_mainline._assemble_industry_panel(
+            decision_time=pd.Timestamp("2026-02-01T08:00:00Z"),
+            archive_root=tmp_path,
+        )
+    except RuntimeError as exc:
+        assert "aborted remaining industry requests early" in str(exc)
+    else:
+        raise AssertionError("an unavailable first batch should abort early")
+    assert len(calls) == 4
