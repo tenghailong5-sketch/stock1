@@ -18,9 +18,10 @@ def _history(daily_returns, *, industry="电子", start="2026-01-01"):
 
 def test_event_price_in_uses_first_seen_clock_and_reports_pricing_in():
     history = _history([0.0] * 20 + [0.025, 0.02, 0.01], start="2026-01-01")
+    history.loc[history.trade_date > pd.Timestamp("2026-01-28"), "turnover"] = 300.0
     event = {
         "candidate_id": "event-1",
-        "first_seen_at": "2026-01-29T09:00:00+00:00",
+        "first_seen_at": "2026-01-28T09:00:00+00:00",
         "mapped_industries": ["电子"],
         "published_at": "2026-01-01T00:00:00Z",
     }
