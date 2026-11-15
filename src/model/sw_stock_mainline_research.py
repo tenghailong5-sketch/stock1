@@ -88,7 +88,7 @@ def build_sw_stock_mainline_research(
             "industry_name", "mainline_phase", "mainline_phase_gated",
             "strength_percentile", "strength_3d_percentile",
             "turnover_share", "turnover_share_change_1d",
-            "turnover_share_change_3d", "startup_evidence_status",
+            "turnover_share_change_3d", "persistence_ready", "startup_evidence_status",
             "peak_evidence", "decay_evidence", "phase_reason",
         ) if column in latest.columns
     ]
@@ -205,7 +205,7 @@ def build_forward_stock_mainline_research(
     fields = [c for c in (
         "industry_code", "industry_name", "mainline_phase", "mainline_phase_gated",
         "strength_percentile", "strength_3d_percentile", "turnover_share",
-        "turnover_share_change_1d", "turnover_share_change_3d",
+        "turnover_share_change_1d", "turnover_share_change_3d", "persistence_ready",
         "startup_evidence_status", "startup_policy_status",
         "policy_catalyst_component", "negative_policy_event_component",
         "emotion_reversal_component", "capital_concentration_component",
