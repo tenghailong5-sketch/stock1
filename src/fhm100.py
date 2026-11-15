@@ -1538,6 +1538,7 @@ def main():
         current_codes = forward_stock_mainline[["symbol", "industry_code"]].copy()
         current_codes["symbol"] = current_codes["symbol"].astype(str).str.zfill(6)
         current_codes = current_codes.rename(columns={"industry_code": "current_forward_industry_code"})
+        w = w.drop(columns=["current_forward_industry_code"], errors="ignore")
         w = w.merge(current_codes, on="symbol", how="left", validate="one_to_one")
         if "sw_history_industry_code" not in w:
             w["sw_history_industry_code"] = w["current_forward_industry_code"]
@@ -1670,6 +1671,7 @@ def main():
                 current_codes = current_codes.rename(
                     columns={"industry_code": "current_forward_industry_code"}
                 )
+                w = w.drop(columns=["current_forward_industry_code"], errors="ignore")
                 w = w.merge(current_codes, on="symbol", how="left", validate="one_to_one")
                 w["sw_history_industry_code"] = w["current_forward_industry_code"]
             history_success_count = int(len(combined_history))
