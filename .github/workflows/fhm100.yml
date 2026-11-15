@@ -14,7 +14,7 @@ jobs:
   scan:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,9 +32,11 @@ jobs:
           # Full-market spot scan stays intact. Daily history is only a small
           # optional enrichment pool; final shortlist top-ups remain enabled.
           FHM_HISTORY_SCAN_MAX_SYMBOLS: "12"
-          FHM_HISTORY_SCAN_WORKERS: "6"
+          FHM_HISTORY_SCAN_WORKERS: "8"
+          FHM_MAINLINE_HISTORY_WORKERS: "8"
+          FHM_HISTORY_CANDIDATE_TOPUP_MAX_SYMBOLS: "20"
           FHM_15M_SCAN_LIMIT: "15"
-          FHM_15M_SCAN_WORKERS: "6"
+          FHM_15M_SCAN_WORKERS: "8"
           FHM_CURRENT_SNAPSHOT_MODE: "0"
           FHM_RISK_CONTEXT_JSON: ${{ secrets.FHM_RISK_CONTEXT_JSON }}
         run: python -m src.fhm100
