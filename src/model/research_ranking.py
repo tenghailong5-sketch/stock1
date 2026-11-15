@@ -11,7 +11,11 @@ import pandas as pd
 
 
 RESEARCH_FACTORS = {
+    # Current quote factors keep the live research rank usable when historical
+    # OHLC is absent. They are explicitly not formal M5/PIT factors.
     "industry_strength": ("industry_relative_strength", True),
+    "current_momentum": ("涨跌幅%", True),
+    "current_liquidity": ("当日成交额", True),
     "price_structure": ("price_structure", True),
     "body_strength": ("BodyStrength", True),
     "upper_shadow_quality": ("upper_shadow_ratio", False),
