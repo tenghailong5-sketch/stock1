@@ -515,6 +515,7 @@ def scan_runtime_mainlines(
         sector_candidates, sector_mapping_audit = map_candidate_sectors(
             [*archived_policy_candidates, *archived_news_candidates],
             latest_rows.get("industry_name", pd.Series(dtype=str)).dropna().astype(str).unique(),
+            decision_time=cutoff,
         )
         # Measure pre-discovery run-up and forward post-discovery repricing.
         # The first-seen clock is authoritative for model availability; publisher
