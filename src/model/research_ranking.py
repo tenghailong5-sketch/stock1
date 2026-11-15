@@ -106,16 +106,31 @@ def build_research_opportunity_ranking(
     matrix = out[ranked_columns]
     out["research_factor_count"] = matrix.notna().sum(axis=1).astype(int)
     out["research_factor_coverage"] = out["research_factor_count"] / len(ranked_columns)
+    # A short-line opportunity rank without a mapped industry/mainline anchor
+    # is just a technical-momentum list. Do not label it an opportunity rank:
+    # keep the diagnostics, but require industry strength plus the configured
+    # number of observed factors before producing a ranked score.
+    mainline_anchor_ready = out["industry_strength_percentile"].notna()
+    out["research_mainline_anchor_ready"] = mainline_anchor_ready
     out["research_opportunity_score"] = (
-        matrix.mean(axis=1).where(out["research_factor_count"] >= min_observed_factors)
+        matrix.mean(axis=1).where(
+            (out["research_factor_count"] >= min_observed_factors)
+            & mainline_anchor_ready
+        )
     )
     out["research_opportunity_rank"] = (
         out["research_opportunity_score"].rank(method="min", ascending=False).astype("Int64")
     )
-    out["research_rank_status"] = np.where(
-        out["research_opportunity_score"].notna(),
-        "RANKED_RESEARCH_ONLY",
-        "INSUFFICIENT_OBSERVED_FACTORS",
+    out["research_rank_status"] = np.select(
+        [
+            ~mainline_anchor_ready,
+            out["research_opportunity_score"].notna(),
+        ],
+        [
+            "MISSING_MAINLINE_CONTEXT",
+            "RANKED_RESEARCH_ONLY",
+        ],
+        default="INSUFFICIENT_OBSERVED_FACTORS",
     )
     out["research_rank_scope"] = "current_run_live_research_pool"
     out["research_rank_factor_set"] = ",".join(available_factors)
@@ -128,11 +143,18 @@ def build_research_opportunity_ranking(
         ascending=[False, False, True], na_position="last",
     ).reset_index(drop=True)
     audit = {
-        "status": "READY_RESEARCH_ONLY" if out["research_opportunity_score"].notna().any()
-                  else "INSUFFICIENT_RESEARCH_FACTOR_COVERAGE",
+        "status": (
+            "READY_RESEARCH_ONLY"
+            if out["research_opportunity_score"].notna().any()
+            else "MAINLINE_CONTEXT_UNAVAILABLE"
+            if not mainline_anchor_ready.any()
+            else "INSUFFICIENT_RESEARCH_FACTOR_COVERAGE"
+        ),
         "row_count": int(len(out)),
         "ranked_count": int(out["research_opportunity_score"].notna().sum()),
         "unranked_count": int(out["research_opportunity_score"].isna().sum()),
+        "mainline_context_ready_count": int(mainline_anchor_ready.sum()),
+        "missing_mainline_context_count": int((~mainline_anchor_ready).sum()),
         "min_observed_factors": min_observed_factors,
         "factor_count": len(RESEARCH_FACTORS),
         "factor_sources": {name: source for name, (source, _) in RESEARCH_FACTORS.items()},

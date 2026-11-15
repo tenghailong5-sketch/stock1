@@ -91,3 +91,23 @@ def test_research_ranking_uses_forward_mainline_context_without_formal_m5_promot
     assert audit["ranked_count"] == 2
     assert ranked["research_rank_formal_m5_score"].eq(False).all()
     assert ranked["research_rank_buy_authorization"].eq(False).all()
+
+
+
+def test_research_ranking_does_not_rank_without_mainline_anchor():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002"],
+        "BodyStrength": [0.9, 0.8],
+        "upper_shadow_ratio": [0.05, 0.08],
+    })
+    m5_input = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "price_structure": [95.0, 90.0],
+        "trade_quality": [98.0, 92.0],
+    })
+    ranked, audit = build_research_opportunity_ranking(watchlist, m5_input)
+    assert audit["status"] == "MAINLINE_CONTEXT_UNAVAILABLE"
+    assert audit["ranked_count"] == 0
+    assert audit["missing_mainline_context_count"] == 2
+    assert ranked.research_rank_status.eq("MISSING_MAINLINE_CONTEXT").all()
+    assert ranked.research_opportunity_score.isna().all()
