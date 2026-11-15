@@ -188,7 +188,10 @@ def test_15m_confirmation_scan_supports_all_candidates_without_fixed_cap():
         return {"status": "CHECKED", "entry_ready": False, "reason": "test"}
 
     rows, audit = build_live_decision_gate_audit(
-        watchlist, pd.DataFrame(), {"status": "UNKNOWN"}, pd.DataFrame(),
+        watchlist, pd.DataFrame([
+            {"symbol": symbol, "strategy": "A", "score": 90.0, "eligible": True}
+            for symbol in ("600000", "000001", "300001")
+        ]), {"status": "UNKNOWN"}, pd.DataFrame(),
         pd.DataFrame(), decision_time="2026-11-14T09:00:00+08:00",
         minute_confirmation_fetcher=fetcher, minute_scan_limit=None,
     )
@@ -198,6 +201,31 @@ def test_15m_confirmation_scan_supports_all_candidates_without_fixed_cap():
     assert audit["minute_scan_limit"] == "ALL"
 
 
+
+
+def test_15m_scan_skips_symbols_without_any_m5_eligible_strategy():
+    watchlist = pd.DataFrame([
+        {"代码": "600000", "当日成交额": 1e9},
+        {"代码": "000001", "当日成交额": 8e8},
+    ])
+    m5 = pd.DataFrame([
+        {"symbol": "600000", "strategy": "A", "score": 90.0, "eligible": True},
+        {"symbol": "000001", "strategy": "A", "score": 70.0, "eligible": False},
+    ])
+    seen = []
+    rows, audit = build_live_decision_gate_audit(
+        watchlist, m5, {"status": "UNKNOWN"}, pd.DataFrame(), pd.DataFrame(),
+        decision_time="2026-11-14T09:00:00+08:00",
+        minute_confirmation_fetcher=lambda symbol, **kwargs: (
+            seen.append(symbol) or {"status": "CHECKED", "entry_ready": False, "reason": "test"}
+        ),
+        minute_scan_limit=None,
+    )
+    assert seen == ["600000"]
+    assert audit["m5_eligible_symbol_count"] == 1
+    assert audit["minute_scanned_count"] == 1
+    blocked = rows.loc[rows["symbol"] == "000001"]
+    assert blocked["minute_reason"].eq("m5_strategy_not_eligible").all()
 
 def test_15m_full_universe_uses_bounded_parallel_workers(monkeypatch):
     from src.model import live_decision_integration as integration
