@@ -78,9 +78,9 @@ def industry_permission(
     PEAK is hold/manage-only; DECAY is blocked. TRANSITION/UNKNOWN and all
     diagnostic or incomplete inputs are blocked rather than treated as neutral.
     """
-    if persistence_ready is not True:
-        return IndustryPermission("BLOCKED", False, "industry_persistence_not_ready")
     if decision_mode == "historical_pit":
+        if persistence_ready is not True:
+            return IndustryPermission("BLOCKED", False, "industry_persistence_not_ready")
         if historical_pit_eligible is not True:
             return IndustryPermission("BLOCKED", False, "industry_history_not_pit_eligible")
         if stock_turnover_pit_status != "ready":
