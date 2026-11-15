@@ -234,11 +234,11 @@ def test_cached_market_emotion_uses_completed_exchange_sessions_only(monkeypatch
     index_dir = tmp_path / "index_daily"
     index_dir.mkdir()
     (index_dir / "000001.jsonl").write_text(
-        "\\n".join(json.dumps({
+        "\n".join(json.dumps({
             "trade_date": day.strftime("%Y-%m-%d"),
             "close": 3000 + i,
             "available_time": "2026-01-20T07:00:00Z",
-        }) for i, day in enumerate(dates)) + "\\n",
+        }) for i, day in enumerate(dates)) + "\n",
         encoding="utf-8",
     )
     calls = []
