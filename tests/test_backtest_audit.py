@@ -14,6 +14,7 @@ def datasets():
         "corporate_actions_resolved": True, "universe_complete": True,
         "delisted_included": True, "ruleset_version": "FHM-100-test",
         "available_risk_budget": 5000.0, "market_risk_scale": 0.8,
+        "m8_trade_allowed": True,
     }])
     bars = pd.DataFrame([{
         "symbol": "000001", "trade_date": "2026-01-06",
