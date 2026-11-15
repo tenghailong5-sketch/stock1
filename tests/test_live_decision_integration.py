@@ -57,6 +57,26 @@ def test_all_four_gates_can_authorize_only_with_complete_inputs():
     assert audit["formal_signal_emitted"] is False
 
 
+def test_missing_m8_correlation_context_blocks_entry():
+    watchlist, m5, market, mainline, membership, risk = _inputs()
+    risk["600000"].pop("same_industry_or_corr_gt_06")
+    rows, audit = build_live_decision_gate_audit(
+        watchlist, m5, market, mainline, membership,
+        decision_time="2026-11-16T10:00:00+08:00",
+        risk_context_by_symbol=risk,
+        minute_confirmation_fetcher=lambda symbol, captured_at=None: {
+            "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
+            "reason": "all_15m_checks_passed",
+        },
+    )
+    assert not rows["allowed"].any()
+    assert rows["m8_risk_context_complete"].eq(False).all()
+    assert rows["reasons"].map(
+        lambda reasons: "invalid_industry_correlation_flag" in reasons
+    ).all()
+    assert audit["m8_risk_context_complete_symbol_count"] == 0
+
+
 def test_current_diagnostic_mainline_and_missing_m8_inputs_block_all_entries():
     watchlist, m5, market, mainline, membership, risk = _inputs()
     membership["source_revision"] = ""
