@@ -86,7 +86,7 @@ def test_research_ranking_uses_forward_mainline_context_without_formal_m5_promot
         watchlist, m5_input, industry_context=industry_context,
     )
     leader = ranked.set_index("symbol").loc["000001"]
-    assert leader["industry_relative_strength"] == 0.9
+    assert leader["industry_relative_strength"] == 90.0
     assert leader["live_mainline_phase_gated"] == "IGNITION_UNCONFIRMED"
     assert audit["ranked_count"] == 2
     assert ranked["research_rank_formal_m5_score"].eq(False).all()
