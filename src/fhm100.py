@@ -817,6 +817,32 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
 
     structure_rank = _cross_section_percentile("CLV")
     trade_quality_rank = _cross_section_percentile("20日平均成交额")
+    # Live-only residual strength: compare today's official quote return with
+    # the same-industry median. This is a same-session observation, not a
+    # substitute for multi-session adjusted returns or historical PIT factors.
+    pct_change_col = next((name for name in ("涨跌幅%", "pct_chg") if name in base), None)
+    residual_group_col = next((
+        name for name in ("current_forward_industry_code", "sw_history_industry_code", "current_industry_level1")
+        if name in base
+    ), None)
+    live_stock_residual_rank = pd.Series(np.nan, index=base.index, dtype=float)
+    live_stock_residual_top20 = pd.Series(None, index=base.index, dtype=object)
+    if pct_change_col is not None and residual_group_col is not None:
+        live_pct = pd.to_numeric(base[pct_change_col], errors="coerce")
+        live_group = base[residual_group_col].astype("string").str.strip()
+        valid_group = live_group.notna() & live_group.ne("")
+        group_size = live_group.where(valid_group).groupby(live_group.where(valid_group)).transform("count")
+        group_median = live_pct.where(valid_group).groupby(live_group.where(valid_group)).transform("median")
+        residual = live_pct - group_median
+        valid_residual = valid_group & group_size.ge(3) & residual.notna()
+        if valid_residual.any():
+            ranks = residual.loc[valid_residual].groupby(live_group.loc[valid_residual]).rank(
+                method="average", pct=True,
+            ) * 100.0
+            live_stock_residual_rank.loc[ranks.index] = ranks
+            live_stock_residual_top20.loc[ranks.index] = (
+                residual.loc[ranks.index].gt(0) & ranks.ge(80.0)
+            ).astype(bool)
     amount_ma20 = pd.to_numeric(
         base.get("20日平均成交额", pd.Series(np.nan, index=base.index)),
         errors="coerce",
@@ -866,13 +892,18 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
             # bounded-universe ranking basis.
             "industry_relative_strength": industry_value,
             "industry_strength": industry_value,
+            "stock_residual_strength": live_stock_residual_rank.loc[idx],
+            "stock_residual_top_20pct": live_stock_residual_top20.loc[idx],
+            "stock_residual_strength_basis": (
+                "same_session_excess_vs_industry_median"
+                if pd.notna(live_stock_residual_rank.loc[idx]) else None
+            ),
             "price_structure": structure_rank.loc[idx],
             "trade_quality": trade_quality_rank.loc[idx],
             # A/B/C factors not supported by this run's PIT data remain absent.
             "industry_top_30pct": (
                 bool(industry_value >= 70.0) if pd.notna(industry_value) else None
             ),
-            "stock_residual_top_20pct": None,
             "amount_ma20_ge_100m": (
                 bool(amount_ma20.loc[idx] >= MIN_AMOUNT)
                 if pd.notna(amount_ma20.loc[idx]) else None
