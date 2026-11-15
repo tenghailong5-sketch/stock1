@@ -576,7 +576,7 @@ def audit_forward_industry_membership(archive_root, expected_symbols, *, decisio
         }
     selected, audit = select_latest_observed_industry_snapshot(
         membership, expected_symbols, decision_time=decision_time,
-        max_age="5D", min_symbol_coverage=0.90,
+        max_age="10D", min_symbol_coverage=0.90,
     )
     audit["archive_file_error_count"] = len(archive_errors)
     audit["archive_file_errors"] = archive_errors
