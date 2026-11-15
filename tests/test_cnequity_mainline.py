@@ -32,6 +32,7 @@ def _frames():
         "symbol": "000001.SH",
         "trade_date": day,
         "close": 100.0 + index,
+        "frequency": "1d",
         "source": "exchange",
         "data_version": "v1",
         "fetched_at": "2026-01-10T08:00:00Z",
