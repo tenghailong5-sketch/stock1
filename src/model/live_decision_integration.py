@@ -293,7 +293,7 @@ def build_live_decision_gate_audit(
         # risk are not trusted as sizing decisions.
         entry_price = risk.get("entry_price", np.nan)
         required_risk_fields = (
-            "entry_price", "stop_price", "available_cash", "reward_risk",
+            "entry_price", "stop_price", "quantity", "reward_risk",
             "minimum_reward_risk", "existing_portfolio_risk",
             "existing_position_count", "available_risk_budget",
             "same_industry_or_corr_gt_06",
@@ -301,10 +301,14 @@ def build_live_decision_gate_audit(
         risk_context_complete = (
             all(field in risk for field in required_risk_fields)
             and all(_finite(risk.get(field)) for field in (
-                "entry_price", "stop_price", "available_cash", "reward_risk",
+                "entry_price", "stop_price", "reward_risk",
                 "minimum_reward_risk", "existing_portfolio_risk",
                 "available_risk_budget",
             ))
+            and isinstance(risk.get("quantity"), int)
+            and not isinstance(risk.get("quantity"), bool)
+            and risk.get("quantity", 0) > 0
+            and ("available_cash" not in risk or _finite(risk.get("available_cash")))
             and isinstance(risk.get("existing_position_count"), int)
             and not isinstance(risk.get("existing_position_count"), bool)
             and isinstance(risk.get("same_industry_or_corr_gt_06"), bool)
@@ -315,7 +319,10 @@ def build_live_decision_gate_audit(
             sizing = size_long_position(
                 entry_price=float(entry_price),
                 stop_price=float(risk["stop_price"]),
-                available_cash=float(risk["available_cash"]),
+                available_cash=float(
+                    risk["available_cash"] if "available_cash" in risk
+                    else risk["quantity"] * float(entry_price)
+                ),
                 open_position_count=risk["existing_position_count"],
                 open_portfolio_risk=float(risk["existing_portfolio_risk"]),
                 available_risk_budget=float(risk["available_risk_budget"]),
