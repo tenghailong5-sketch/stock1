@@ -133,7 +133,6 @@ def build_research_opportunity_ranking(
         policy_scores = {
             "POSITIVE_CATALYST": 100.0,
             "NEGATIVE_CATALYST": 0.0,
-            "NO_MAPPED_CATALYST": 50.0,
         }
         out["live_policy_catalyst_score"] = (
             out["live_startup_policy_status"].astype(str).map(policy_scores)
