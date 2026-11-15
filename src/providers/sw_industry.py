@@ -463,11 +463,11 @@ def fetch_sw_industry_index_history(
         history_fetcher = ak.index_hist_sw
     try:
         raw = history_fetcher(symbol=code, period="day")
-    except KeyError:
+    except Exception:
         if not use_native_adapter:
             raise
-        # AKShare's wrapper selects legacy Chinese columns; if the upstream
-        # payload changes, it raises before returning the underlying data.
+        # AKShare's route can fail on publisher TLS, timeouts or schema drift.
+        # Retry the direct SW trend endpoint using the pinned intermediate CA.
         raw = _fetch_sw_index_history_api(code)
     if raw is None or raw.empty:
         if use_native_adapter:
