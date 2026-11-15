@@ -49,7 +49,7 @@ def test_future_batch_is_not_visible():
     assert audit["status"] == "no_visible_snapshot"
 
 
-def test_latest_visible_incomplete_batch_fails_without_old_batch_fallback():
+def test_latest_visible_incomplete_batch_falls_back_to_recent_complete_batch():
     old = rows("old", "2026-11-11T08:30:00Z")
     new = rows("new", "2026-11-12T08:30:00Z").iloc[:2]
     selected, audit = select_latest_observed_industry_snapshot(
@@ -57,8 +57,11 @@ def test_latest_visible_incomplete_batch_fails_without_old_batch_fallback():
         ["000001", "600000"],
         decision_time="2026-11-12T09:00:00Z",
     )
-    assert selected.empty
-    assert audit["status"] == "incomplete_universe"
+    assert len(selected) == 3
+    assert audit["status"] == "ready_forward_only"
+    assert audit["snapshot_id"] == "old"
+    assert audit["fallback_used"] is True
+    assert audit["skipped_batches"][0]["reason"] == "incomplete_universe"
 
 
 def test_duplicate_symbol_industry_in_latest_batch_fails_closed():
@@ -119,3 +122,38 @@ def test_inconsistent_batch_manifest_is_rejected():
     )
     assert selected.empty
     assert audit["status"] == "invalid_batch_manifest"
+
+
+
+def test_partial_symbol_membership_is_usable_at_ninety_percent_coverage():
+    common = {
+        "snapshot_id": "partial", "expected_industry_count": 2,
+        "observed_at": "2026-11-12T08:30:00Z",
+        "available_time": "2026-11-12T08:30:00Z",
+        "source_id": "sw-provider", "source_revision": "rev",
+        "snapshot_scope": "current_membership_observation_only",
+        "availability_basis": "retrieval_time_only",
+        "historical_pit_eligible": False,
+    }
+    frame = pd.DataFrame([
+        {**common, "symbol": f"{i:06d}", "industry_code": "BK01" if i < 5 else "BK02"}
+        for i in range(9)
+    ])
+    selected, audit = select_latest_observed_industry_snapshot(
+        frame, [f"{i:06d}" for i in range(10)],
+        decision_time="2026-11-12T09:00:00Z",
+    )
+    assert len(selected) == 9
+    assert audit["status"] == "ready_forward_only_partial"
+    assert audit["membership_coverage"] == pytest.approx(0.9)
+    assert audit["historical_pit_eligible"] is False
+
+
+def test_default_five_day_freshness_includes_friday_snapshot_on_monday():
+    selected, audit = select_latest_observed_industry_snapshot(
+        rows(captured="2026-11-13T08:30:00Z"),
+        ["000001", "600000"],
+        decision_time="2026-11-16T09:00:00Z",
+    )
+    assert len(selected) == 3
+    assert audit["status"] == "ready_forward_only"
