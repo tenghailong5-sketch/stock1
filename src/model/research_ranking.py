@@ -180,6 +180,21 @@ def build_research_opportunity_ranking(
     out["research_opportunity_rank"] = (
         out["research_opportunity_score"].rank(method="min", ascending=False).astype("Int64")
     )
+    # Separate genuine mainline-backed opportunities from momentum-only fallbacks.
+    # An industry label or same-day relative strength alone is not proof of a live mainline.
+    mainline_evidence_columns = [
+        "industry_flow_concentration_percentile",
+        "mainline_lifecycle_percentile",
+        "policy_catalyst_percentile",
+    ]
+    mainline_evidence_count = out[mainline_evidence_columns].notna().sum(axis=1)
+    out["research_mainline_evidence_count"] = mainline_evidence_count.astype(int)
+    out["research_rank_tier"] = np.where(
+        mainline_evidence_count.gt(0),
+        "MAINLINE_BACKED_RESEARCH",
+        "MOMENTUM_ONLY_WATCH",
+    )
+    out["research_rank_priority"] = np.where(mainline_evidence_count.gt(0), 0, 1)
     out["research_rank_status"] = np.select(
         [
             out["research_opportunity_score"].notna() & mainline_anchor_ready,
@@ -200,8 +215,8 @@ def build_research_opportunity_ranking(
     out["research_rank_formal_m5_score"] = False
     out["research_rank_buy_authorization"] = False
     out = out.sort_values(
-        ["research_opportunity_score", "research_factor_count", "symbol"],
-        ascending=[False, False, True], na_position="last",
+        ["research_rank_priority", "research_opportunity_score", "research_factor_count", "symbol"],
+        ascending=[True, False, False, True], na_position="last",
     ).reset_index(drop=True)
     audit = {
         "status": (
@@ -222,6 +237,9 @@ def build_research_opportunity_ranking(
         "factor_count": len(RESEARCH_FACTORS),
         "factor_sources": {name: source for name, (source, _, _) in RESEARCH_FACTORS.items()},
         "factor_weights": {name: weight for name, (_, _, weight) in RESEARCH_FACTORS.items() if weight > 0},
+        "mainline_backed_ranked_count": int((out["research_rank_tier"] == "MAINLINE_BACKED_RESEARCH").sum()),
+        "momentum_only_watch_count": int((out["research_rank_tier"] == "MOMENTUM_ONLY_WATCH").sum()),
+        "rank_priority_policy": "mainline-backed opportunities precede momentum-only watches; no missing factor imputation",
         "score_method": "weighted_observed_percentiles_renormalized_per_row",
         "allow_quote_only_fallback": allow_quote_only_fallback,
         "uses_raw_cross_session_returns": False,
@@ -280,7 +298,11 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
         phase_eligible = ~phase_values.isin({"PEAK", "DECAY"})
         phase_filtered_count = int((~phase_eligible).sum())
         ordinary = ordinary.loc[phase_eligible].copy()
-    ordinary = ordinary.sort_values(["research_opportunity_score", "amount", "symbol"], ascending=[False, False, True])
+    if "research_rank_priority" in ordinary:
+        ordinary["research_rank_priority"] = pd.to_numeric(ordinary["research_rank_priority"], errors="coerce").fillna(1)
+        ordinary = ordinary.sort_values(["research_rank_priority", "research_opportunity_score", "amount", "symbol"], ascending=[True, False, False, True])
+    else:
+        ordinary = ordinary.sort_values(["research_opportunity_score", "amount", "symbol"], ascending=[False, False, True])
     # Market emotion controls the breadth of the research watchlist, not the
     # relative stock score. Unknown emotion preserves discovery but is explicit.
     regime_caps = {
@@ -308,7 +330,11 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
     shortlist = pd.DataFrame(selected, columns=ordinary.columns).reset_index(drop=True)
     if not shortlist.empty:
         shortlist.insert(0, "final_candidate_rank", np.arange(1, len(shortlist) + 1))
-        shortlist["candidate_status"] = "RESEARCH_WATCH"
+        shortlist["candidate_status"] = np.where(
+            shortlist.get("research_rank_tier", pd.Series("MOMENTUM_ONLY_WATCH", index=shortlist.index)).eq("MAINLINE_BACKED_RESEARCH"),
+            "MAINLINE_BACKED_RESEARCH_WATCH",
+            "MOMENTUM_ONLY_WATCH",
+        )
         shortlist["entry_confirmation_status"] = "PENDING_15M_CONFIRMATION"
         shortlist["buy_authorization"] = False
         if phase_column:
