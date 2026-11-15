@@ -34,6 +34,12 @@ def classify_market_cycle(frame: pd.DataFrame) -> pd.DataFrame:
     out["limit_balance"] = out.limit_up_count - out.limit_down_count
     out["breadth_change_3d"] = out.breadth.diff(3)
     out["limit_up_change_3d"] = out.limit_up_count.diff(3)
+    # Absolute limit-up counts drift with listing-universe size and market
+    # structure. Compare the current count with its own recent 60-session
+    # distribution instead of using a fixed "30 limit-ups" threshold.
+    out["limit_up_rolling_percentile"] = out.limit_up_count.rolling(
+        window=60, min_periods=4
+    ).rank(pct=True)
     states, reasons = [], []
     for row in out.itertuples():
         if pd.isna(row.breadth_change_3d) or pd.isna(row.limit_up_change_3d):
@@ -48,8 +54,12 @@ def classify_market_cycle(frame: pd.DataFrame) -> pd.DataFrame:
               or (pd.notna(promotion) and promotion < 0.25)
               or (row.breadth < 0.45 and row.limit_down_count > row.limit_up_count)):
             state, why = "EXHAUSTION", "board_failure_or_promotion_collapse"
-        elif row.breadth >= 0.68 and row.limit_up_count >= 30:
-            state, why = "HEAT", "broad_strength_and_many_limit_ups"
+        elif (
+            row.breadth >= 0.68
+            and pd.notna(row.limit_up_rolling_percentile)
+            and row.limit_up_rolling_percentile >= 0.80
+        ):
+            state, why = "HEAT", "broad_strength_and_elevated_recent_limit_up_percentile"
         elif (row.breadth_change_3d > 0.12 and row.limit_up_change_3d > 0
               and row.limit_balance > 0):
             state, why = "RECOVERY", "breadth_and_limit_up_rebound"
