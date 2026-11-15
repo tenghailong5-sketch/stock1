@@ -153,7 +153,25 @@ def build_live_decision_gate_audit(
             "reason": "outside_bounded_15m_scan_pool", "historical_pit_eligible": False,
         })
         risk = risk_context_by_symbol.get(symbol, {})
-        entry_price = risk.get("entry_price", stock.get("最新价", np.nan))
+        # A quote is not a user-approved execution plan. M8 must receive an
+        # explicit planned entry together with stop, size and portfolio risk.
+        entry_price = risk.get("entry_price", np.nan)
+        required_risk_fields = (
+            "entry_price", "stop_price", "quantity", "planned_risk",
+            "reward_risk", "minimum_reward_risk", "existing_portfolio_risk",
+            "existing_position_count", "same_industry_or_corr_gt_06",
+        )
+        risk_context_complete = (
+            all(field in risk for field in required_risk_fields)
+            and all(_finite(risk.get(field)) for field in (
+                "entry_price", "stop_price", "planned_risk", "reward_risk",
+                "minimum_reward_risk", "existing_portfolio_risk",
+                "existing_position_count",
+            ))
+            and isinstance(risk.get("quantity"), int)
+            and not isinstance(risk.get("quantity"), bool)
+            and isinstance(risk.get("same_industry_or_corr_gt_06"), bool)
+        )
         args = {
             "market_state": market_state or "UNKNOWN",
             "market_position_scale": market_scale,
@@ -189,6 +207,7 @@ def build_live_decision_gate_audit(
                 "minute_status": minute.get("status"),
                 "minute_entry_ready": _truth(minute.get("entry_ready")),
                 "minute_reason": minute.get("reason"),
+                "m8_risk_context_complete": bool(risk_context_complete),
                 "stock_industry_code": industry_code or None,
                 "mainline_phase": phase,
                 "stock_turnover_pit_status": concentration_status,
@@ -206,6 +225,12 @@ def build_live_decision_gate_audit(
         "minute_scanned_count": int(len(minute_symbols)),
         "allowed_count": allowed,
         "blocked_count": int(len(result) - allowed),
+        "m8_risk_context_complete_symbol_count": int(
+            result.loc[result["m8_risk_context_complete"], "symbol"].nunique()
+        ) if not result.empty else 0,
+        "m8_risk_context_missing_symbol_count": int(
+            result.loc[~result["m8_risk_context_complete"], "symbol"].nunique()
+        ) if not result.empty else 0,
         "market_context_status": market_context.get("status"),
         "mainline_pit_rows": int(
             mainline.get("historical_pit_eligible", pd.Series(dtype=bool)).eq(True).sum()
