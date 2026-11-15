@@ -394,5 +394,7 @@ def test_m8_live_sizing_uses_explicit_quantity_as_cash_cap_when_cash_is_missing(
             "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
         },
     )
-    assert not rows["allowed"].any()
-    assert rows["m8_risk_context_complete"].eq(False).all()
+    assert rows["allowed"].all()
+    assert rows["m8_risk_context_complete"].all()
+    assert rows["m8_sizing_approved"].all()
+    assert rows["m8_sized_quantity"].eq(400).all()
