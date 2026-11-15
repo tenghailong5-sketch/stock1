@@ -30,6 +30,7 @@ from src.model.shortline_architecture import audit_shortline_architecture
 
 OUT=Path("output"); OUT.mkdir(exist_ok=True)
 MIN_AMOUNT=100_000_000
+RESEARCH_MIN_AMOUNT=50_000_000
 
 def numeric(s): return pd.to_numeric(s,errors="coerce")
 
@@ -185,7 +186,7 @@ def select_history_universe(snapshot, *, max_symbols=600):
 
 
 def select_research_history_universe(
-    snapshot, *, max_symbols=800, min_candidate_amount=MIN_AMOUNT,
+    snapshot, *, max_symbols=800, min_candidate_amount=RESEARCH_MIN_AMOUNT,
     liquidity_share=0.20,
 ):
     """Select a broad short-term research pool without excluding limit-up leaders.
@@ -1084,14 +1085,11 @@ def main():
     quick_columns = ["快速5日收益%", "快速20日收益%", "CLV", "快速量比20日", "快速20日平均成交额"]
     if not w.empty and all(column in w.columns for column in quick_columns):
         percentile = w[quick_columns].apply(pd.to_numeric, errors="coerce").rank(pct=True)
-        w["快速初筛分"] = (percentile.mean(axis=1) * 100).where(percentile.notna().sum(axis=1) >= 4)
-        w["快速初筛通过"] = (
-            (pd.to_numeric(w["快速20日平均成交额"], errors="coerce") >= MIN_AMOUNT)
-            & (pd.to_numeric(w["快速5日收益%"], errors="coerce") > 0)
-            & (pd.to_numeric(w["快速20日收益%"], errors="coerce") > 0)
-            & (pd.to_numeric(w["CLV"], errors="coerce") >= 0.55)
-            & w["快速初筛分"].notna()
-        )
+        # Research ordering is not a formal buy gate. Rank with any three
+        # observed dimensions; do not discard early reversals, pullbacks,
+        # lower-CLV structures or smaller-cap theme leaders at this stage.
+        w["快速初筛分"] = (percentile.mean(axis=1) * 100).where(percentile.notna().sum(axis=1) >= 3)
+        w["快速初筛通过"] = w["快速初筛分"].notna()
     else:
         w["快速初筛分"] = np.nan
         w["快速初筛通过"] = False
