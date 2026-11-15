@@ -327,13 +327,13 @@ def _download_history(code, start, max_attempts=3):
 def history(code,start,archive_root=Path("data/forward_archive")):
     raw=_download_history(code,start)
     captured_at=datetime.now(timezone.utc)  # stamp immediately after provider response
-    if raw is None or len(raw)<25: return None
+    if raw is None or len(raw)<21: return None
     cols={"日期":"date","开盘":"open","收盘":"close","最高":"high","最低":"low","成交量":"volume","成交额":"amount"}
     if any(c not in raw.columns for c in cols): return None
     h=raw.rename(columns=cols).copy()
     for c in ["open","close","high","low","volume","amount"]: h[c]=numeric(h[c])
     h=h.dropna(subset=["open","close","high","low"]).sort_values("date")
-    if len(h)<25: return None
+    if len(h)<21: return None
     # Preserve the provider's original Chinese schema for the auditable archive.
     archive_frame=raw.loc[h.index].copy()
     if "换手率" not in archive_frame.columns:
