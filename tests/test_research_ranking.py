@@ -172,3 +172,25 @@ def test_weighted_quote_only_score_and_final_shortlist_are_diversified():
     assert shortlist["entry_confirmation_status"].eq("PENDING_15M_CONFIRMATION").all()
     assert shortlist["buy_authorization"].eq(False).all()
     assert shortlist_audit["buy_authorization"] is False
+
+
+
+def test_quote_only_fallback_ranks_when_industry_context_is_unavailable():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002", "000003"],
+        "最新价": [10.0, 11.0, 12.0],
+        "涨跌幅%": [5.0, 2.0, -1.0],
+        "当日成交额": [300e6, 200e6, 100e6],
+    })
+    m5_input = pd.DataFrame({"symbol": ["000001", "000002", "000003"]})
+    ranked, audit = build_research_opportunity_ranking(
+        watchlist, m5_input, min_observed_factors=2,
+        allow_quote_only_fallback=True,
+    )
+    assert audit["ranked_count"] == 3
+    assert audit["mainline_context_ready_count"] == 0
+    assert ranked.research_rank_status.eq("RANKED_QUOTE_ONLY_NO_INDUSTRY").all()
+    shortlist, _, shortlist_audit = build_final_candidate_shortlist(ranked, max_candidates=3)
+    assert len(shortlist) == 3
+    assert shortlist_audit["candidate_count"] == 3
+    assert shortlist.buy_authorization.eq(False).all()
