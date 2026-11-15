@@ -12,10 +12,12 @@ import pandas as pd
 
 RESEARCH_FACTORS = {
     # Weights are renormalized across observed factors for each row.
-    "industry_strength": ("industry_relative_strength", True, 0.30),
-    "current_momentum": ("涨跌幅%", True, 0.40),
+    "industry_strength": ("industry_relative_strength", True, 0.25),
+    "current_momentum": ("涨跌幅%", True, 0.30),
     "current_liquidity": ("当日成交额", True, 0.15),
     "industry_flow_concentration": ("industry_turnover_share_change_3d", True, 0.15),
+    "mainline_lifecycle": ("live_mainline_phase_score", True, 0.10),
+    "policy_catalyst": ("live_policy_catalyst_score", True, 0.05),
     "price_structure": ("price_structure", True, 0.0),
     "body_strength": ("BodyStrength", True, 0.0),
     "upper_shadow_quality": ("upper_shadow_ratio", False, 0.0),
@@ -108,6 +110,33 @@ def build_research_opportunity_ranking(
             out["industry_relative_strength"] = pd.to_numeric(
                 out["industry_relative_strength"], errors="coerce"
             ).combine_first(live_strength)
+
+    # Convert only explicitly observed lifecycle/policy states. UNKNOWN stays
+    # missing; a missing catalyst archive is never interpreted as neutral or negative.
+    if "live_mainline_phase_gated" in out:
+        phase_scores = {
+            "IGNITION": 100.0,
+            "IGNITION_UNCONFIRMED": 55.0,
+            "TRANSITION": 60.0,
+            "PEAK": 40.0,
+            "DECAY": 0.0,
+        }
+        out["live_mainline_phase_score"] = (
+            out["live_mainline_phase_gated"].astype(str).map(phase_scores)
+        )
+    else:
+        out["live_mainline_phase_score"] = np.nan
+    if "live_startup_policy_status" in out:
+        policy_scores = {
+            "POSITIVE_CATALYST": 100.0,
+            "NEGATIVE_CATALYST": 0.0,
+            "NO_MAPPED_CATALYST": 50.0,
+        }
+        out["live_policy_catalyst_score"] = (
+            out["live_startup_policy_status"].astype(str).map(policy_scores)
+        )
+    else:
+        out["live_policy_catalyst_score"] = np.nan
 
     ranked_columns = []
     available_factors = []
