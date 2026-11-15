@@ -24,6 +24,27 @@ def _finite(value) -> bool:
         return False
 
 
+def _live_snapshot_ready(row: dict, cutoff: pd.Timestamp, *, max_age_hours: float = 24.0) -> bool:
+    """Validate a retrieval-time snapshot for forward use only; never grant PIT status."""
+    required = {"available_time", "source_id", "source_revision", "availability_basis", "snapshot_scope"}
+    if not required.issubset(row):
+        return False
+    if str(row.get("availability_basis", "")).strip() != "retrieval_time_only":
+        return False
+    if _truth(row.get("historical_pit_eligible")):
+        return False
+    if any(not str(row.get(field, "")).strip() for field in ("source_id", "source_revision", "snapshot_scope")):
+        return False
+    try:
+        available = pd.Timestamp(row["available_time"])
+        if available.tzinfo is None:
+            return False
+        age = cutoff.tz_convert("UTC") - available.tz_convert("UTC")
+        return pd.Timedelta(0) <= age <= pd.Timedelta(hours=max_age_hours)
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def load_risk_context_file(path: str | None) -> tuple[dict, dict]:
     """Load operator-supplied, per-symbol M8 plans without inventing account data.
 
@@ -204,7 +225,22 @@ def build_live_decision_gate_audit(
         industry_pit = (
             membership_pit and _truth(industry.get("historical_pit_eligible"))
         )
+        # Forward mode is a separate permission path. Both the current
+        # membership observation and industry observation must carry fresh,
+        # timestamped source lineage; neither is promoted to historical PIT.
+        membership_live = _live_snapshot_ready(membership_row, cutoff)
+        industry_live = _live_snapshot_ready(industry, cutoff)
+        try:
+            live_valid_from = pd.Timestamp(membership_row.get("valid_from")).normalize()
+            live_valid_to_raw = membership_row.get("valid_to")
+            live_valid_to = pd.Timestamp(live_valid_to_raw).normalize() if pd.notna(live_valid_to_raw) else None
+            live_day = cutoff.tz_convert("Asia/Shanghai").tz_localize(None).normalize()
+            membership_live = membership_live and live_valid_from <= live_day and (live_valid_to is None or live_day < live_valid_to)
+        except (TypeError, ValueError, OverflowError):
+            membership_live = False
+        industry_live = membership_live and industry_live
         concentration_status = str(industry.get("stock_turnover_pit_status", "not_ready"))
+        live_concentration_status = str(industry.get("stock_turnover_live_status", "not_ready"))
         minute = minute_results.get(symbol, {
             "status": "NOT_SCANNED_15M", "entry_ready": False,
             "reason": ("outside_configured_15m_scan_pool" if symbol in m5_eligible_symbols
@@ -237,6 +273,9 @@ def build_live_decision_gate_audit(
             "industry_persistence_ready": industry_ready,
             "industry_historical_pit_eligible": industry_pit,
             "stock_turnover_pit_status": concentration_status,
+            "decision_mode": "live_forward",
+            "industry_live_data_eligible": industry_live,
+            "stock_turnover_live_status": live_concentration_status,
             "strategy_eligible": False,
             "strategy_score": None,
             "entry_ready": _truth(minute.get("entry_ready")),
@@ -269,6 +308,9 @@ def build_live_decision_gate_audit(
                 "stock_industry_code": industry_code or None,
                 "mainline_phase": phase,
                 "stock_turnover_pit_status": concentration_status,
+                "industry_live_data_eligible": industry_live,
+                "stock_turnover_live_status": live_concentration_status,
+                "historical_pit_eligible": industry_pit,
                 "allowed": decision.allowed,
                 "max_allowed_risk": decision.max_allowed_risk,
                 "planned_risk": decision.planned_risk,
@@ -295,6 +337,8 @@ def build_live_decision_gate_audit(
         "mainline_pit_rows": int(
             mainline.get("historical_pit_eligible", pd.Series(dtype=bool)).eq(True).sum()
         ) if mainline is not None and not mainline.empty else 0,
+        "live_forward_ready_rows": int(result.get("industry_live_data_eligible", pd.Series(dtype=bool)).eq(True).sum()) if not result.empty else 0,
+        "decision_mode": "live_forward",
         "formal_signal_emitted": False,
         "decision_time": cutoff.isoformat(),
     }
