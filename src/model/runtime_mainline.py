@@ -145,7 +145,12 @@ def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path)
         decision_time=decision_time,
     )
     panel["trade_date"] = pd.to_datetime(panel.trade_date, errors="coerce").dt.normalize()
-    panel["industry_return_1d"] = pd.to_numeric(panel.daily_return, errors="coerce")
+    if "daily_return" in panel:
+        panel["industry_return_1d"] = pd.to_numeric(panel["daily_return"], errors="coerce")
+    elif "close" in panel:
+        panel["industry_return_1d"] = panel.groupby("industry_code")["close"].pct_change()
+    else:
+        panel["industry_return_1d"] = np.nan
     panel["industry_return_3d"] = pd.to_numeric(panel.return_3, errors="coerce")
     panel["industry_return_5d"] = pd.to_numeric(panel.return_5, errors="coerce")
     panel["turnover"] = pd.to_numeric(panel.amount, errors="coerce")
@@ -154,7 +159,7 @@ def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path)
     panel = panel.merge(market, on="trade_date", how="inner", validate="many_to_one")
     panel["expected_industry_count"] = expected
     required = [
-        "industry_return_1d", "industry_return_3d", "industry_return_5d", "market_return_1d", "market_return_3d",
+        "industry_return_3d", "industry_return_5d", "market_return_3d",
         "market_return_5d", "turnover", "market_turnover",
     ]
     panel = panel.dropna(subset=required)
