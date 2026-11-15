@@ -69,20 +69,37 @@ def industry_permission(
     persistence_ready: bool,
     historical_pit_eligible: bool,
     stock_turnover_pit_status: str,
+    decision_mode: str = "historical_pit",
+    industry_live_data_eligible: bool = False,
+    stock_turnover_live_status: str = "not_ready",
 ) -> IndustryPermission:
     """Only a PIT-verified, ready ignition phase may authorize a fresh entry.
 
     PEAK is hold/manage-only; DECAY is blocked. TRANSITION/UNKNOWN and all
     diagnostic or incomplete inputs are blocked rather than treated as neutral.
     """
-    if persistence_ready is not True:
-        return IndustryPermission("BLOCKED", False, "industry_persistence_not_ready")
-    if historical_pit_eligible is not True:
-        return IndustryPermission("BLOCKED", False, "industry_history_not_pit_eligible")
-    if stock_turnover_pit_status != "ready":
-        return IndustryPermission("BLOCKED", False, "stock_turnover_concentration_not_ready")
+    if decision_mode == "historical_pit":
+        if persistence_ready is not True:
+            return IndustryPermission("BLOCKED", False, "industry_persistence_not_ready")
+        if historical_pit_eligible is not True:
+            return IndustryPermission("BLOCKED", False, "industry_history_not_pit_eligible")
+        if stock_turnover_pit_status != "ready":
+            return IndustryPermission("BLOCKED", False, "stock_turnover_concentration_not_ready")
+    elif decision_mode == "live_forward":
+        if industry_live_data_eligible is not True:
+            return IndustryPermission("BLOCKED", False, "industry_live_snapshot_not_ready")
+        # Stock-level turnover concentration remains a ranking/diagnostic input
+        # in live mode, not a second hard gate. The industry mainline itself
+        # must already pass the live snapshot and persistence checks above.
+    else:
+        return IndustryPermission("BLOCKED", False, "invalid_decision_mode")
     if mainline_phase == "IGNITION":
-        return IndustryPermission("ENTRY_ALLOWED", True, "pit_verified_mainline_ignition")
+        reason = (
+            "live_forward_mainline_ignition"
+            if decision_mode == "live_forward"
+            else "pit_verified_mainline_ignition"
+        )
+        return IndustryPermission("ENTRY_ALLOWED", True, reason)
     if mainline_phase == "PEAK":
         return IndustryPermission("HOLD_ONLY", False, "mainline_peak_no_fresh_entry")
     if mainline_phase == "DECAY":
@@ -99,6 +116,9 @@ def evaluate_trade_decision(
     industry_persistence_ready: bool,
     industry_historical_pit_eligible: bool,
     stock_turnover_pit_status: str,
+    decision_mode: str = "historical_pit",
+    industry_live_data_eligible: bool = False,
+    stock_turnover_live_status: str = "not_ready",
     strategy_eligible: bool,
     strategy_score: float | None,
     entry_ready: bool,
@@ -129,6 +149,9 @@ def evaluate_trade_decision(
         persistence_ready=industry_persistence_ready,
         historical_pit_eligible=industry_historical_pit_eligible,
         stock_turnover_pit_status=stock_turnover_pit_status,
+        decision_mode=decision_mode,
+        industry_live_data_eligible=industry_live_data_eligible,
+        stock_turnover_live_status=stock_turnover_live_status,
     )
     reasons: list[str] = []
     if not market.allow_new_entries:

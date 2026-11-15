@@ -24,6 +24,43 @@ def _finite(value) -> bool:
         return False
 
 
+def _live_snapshot_ready(row: dict, cutoff: pd.Timestamp, *, max_age_hours: float = 240.0) -> bool:
+    """Validate a retrieval-time snapshot for forward use only; never grant PIT status."""
+    required = {"available_time", "source_id", "source_revision", "availability_basis", "snapshot_scope"}
+    if not required.issubset(row):
+        return False
+    if str(row.get("availability_basis", "")).strip() != "retrieval_time_only":
+        return False
+    if _truth(row.get("historical_pit_eligible")):
+        return False
+    if any(not str(row.get(field, "")).strip() for field in ("source_id", "source_revision", "snapshot_scope")):
+        return False
+    try:
+        available = pd.Timestamp(row["available_time"])
+        if available.tzinfo is None:
+            return False
+        age = cutoff.tz_convert("UTC") - available.tz_convert("UTC")
+        if not pd.Timedelta(0) <= age <= pd.Timedelta(hours=max_age_hours):
+            return False
+        # If the provider supplies an effective membership interval, honor it;
+        # retrieval-time evidence does not override an explicitly expired mapping.
+        valid_from_raw = row.get("valid_from")
+        valid_to_raw = row.get("valid_to")
+        if valid_from_raw is not None and not pd.isna(valid_from_raw):
+            valid_from = pd.Timestamp(valid_from_raw).normalize()
+            decision_day = cutoff.tz_convert("Asia/Shanghai").tz_localize(None).normalize()
+            if valid_from > decision_day:
+                return False
+        if valid_to_raw is not None and not pd.isna(valid_to_raw):
+            valid_to = pd.Timestamp(valid_to_raw).normalize()
+            decision_day = cutoff.tz_convert("Asia/Shanghai").tz_localize(None).normalize()
+            if decision_day >= valid_to:
+                return False
+        return True
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def load_risk_context_file(path: str | None) -> tuple[dict, dict]:
     """Load operator-supplied, per-symbol M8 plans without inventing account data.
 
@@ -171,7 +208,9 @@ def build_live_decision_gate_audit(
         membership_row = membership_by_symbol.get(symbol, {})
         industry_code = str(membership_row.get("industry_code", ""))
         industry = latest_mainline.get(industry_code, {})
-        phase = industry.get("mainline_phase", "UNKNOWN")
+        # Respect the M3 ignition evidence gate. Raw candidate phase alone
+        # must never authorize a live entry when startup evidence is unconfirmed.
+        phase = industry.get("mainline_phase_gated", industry.get("mainline_phase", "UNKNOWN"))
         industry_ready = _truth(industry.get("persistence_ready"))
         # The current runner passes a forward-only observed membership snapshot.
         # Never let that mapping authorize a PIT mainline entry, even if a
@@ -204,7 +243,20 @@ def build_live_decision_gate_audit(
         industry_pit = (
             membership_pit and _truth(industry.get("historical_pit_eligible"))
         )
+        # Forward mode is a separate permission path. Both the current
+        # membership observation and industry observation must carry fresh,
+        # timestamped source lineage; neither is promoted to historical PIT.
+        membership_live = _live_snapshot_ready(membership_row, cutoff)
+        # scan_runtime_mainlines already produces the current forward-only
+        # industry panel at this run's cutoff. It does not publish per-row
+        # lineage columns, so use its actual readiness/phase instead of
+        # demanding a second synthetic metadata envelope.
+        # Snapshot readiness and M3 phase authorization are separate gates.
+        # Keep a valid live snapshot eligible here so an unconfirmed/unknown
+        # phase is rejected by industry_permission with the correct M3 reason.
+        industry_live = membership_live and bool(industry)
         concentration_status = str(industry.get("stock_turnover_pit_status", "not_ready"))
+        live_concentration_status = str(industry.get("stock_turnover_live_status", "not_ready"))
         minute = minute_results.get(symbol, {
             "status": "NOT_SCANNED_15M", "entry_ready": False,
             "reason": ("outside_configured_15m_scan_pool" if symbol in m5_eligible_symbols
@@ -237,6 +289,9 @@ def build_live_decision_gate_audit(
             "industry_persistence_ready": industry_ready,
             "industry_historical_pit_eligible": industry_pit,
             "stock_turnover_pit_status": concentration_status,
+            "decision_mode": "live_forward",
+            "industry_live_data_eligible": industry_live,
+            "stock_turnover_live_status": live_concentration_status,
             "strategy_eligible": False,
             "strategy_score": None,
             "entry_ready": _truth(minute.get("entry_ready")),
@@ -269,6 +324,9 @@ def build_live_decision_gate_audit(
                 "stock_industry_code": industry_code or None,
                 "mainline_phase": phase,
                 "stock_turnover_pit_status": concentration_status,
+                "industry_live_data_eligible": industry_live,
+                "stock_turnover_live_status": live_concentration_status,
+                "historical_pit_eligible": industry_pit,
                 "allowed": decision.allowed,
                 "max_allowed_risk": decision.max_allowed_risk,
                 "planned_risk": decision.planned_risk,
@@ -295,6 +353,8 @@ def build_live_decision_gate_audit(
         "mainline_pit_rows": int(
             mainline.get("historical_pit_eligible", pd.Series(dtype=bool)).eq(True).sum()
         ) if mainline is not None and not mainline.empty else 0,
+        "live_forward_ready_rows": int(result.get("industry_live_data_eligible", pd.Series(dtype=bool)).eq(True).sum()) if not result.empty else 0,
+        "decision_mode": "live_forward",
         "formal_signal_emitted": False,
         "decision_time": cutoff.isoformat(),
     }
