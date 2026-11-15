@@ -301,3 +301,41 @@ def test_final_shortlist_excludes_decay_and_peak_industries():
     assert shortlist["symbol"].tolist() == ["000001", "000002"]
     assert audit["mainline_phase_filtered_count"] == 2
     assert not shortlist["buy_authorization"].any()
+
+
+def test_event_price_in_diagnostics_are_carried_without_changing_rank_score():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002"],
+        "涨跌幅%": [3.0, 3.0],
+        "当日成交额": [200e6, 200e6],
+    })
+    m5_input = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "industry_relative_strength": [80.0, 80.0],
+    })
+    base_context = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "current_industry_level1": ["计算机", "传媒"],
+        "strength_percentile": [0.8, 0.8],
+    })
+    price_in_context = base_context.assign(
+        live_catalyst_candidate_count=[3, 1],
+        live_event_price_in_state=["FULLY_PRICED", "UNPRICED"],
+        live_event_price_in_reason=["runup_without_repricing", "no_material_reaction"],
+        live_event_pre_discovery_excess_20d=[0.12, 0.01],
+        live_event_post_discovery_excess_3d=[0.0, 0.025],
+    )
+    baseline, _ = build_research_opportunity_ranking(
+        watchlist, m5_input, industry_context=base_context,
+        min_observed_factors=2,
+    )
+    ranked, _ = build_research_opportunity_ranking(
+        watchlist, m5_input, industry_context=price_in_context,
+        min_observed_factors=2,
+    )
+    by_symbol = ranked.set_index("symbol")
+    baseline_scores = baseline.set_index("symbol")["research_opportunity_score"]
+    assert by_symbol.loc["000001", "live_event_price_in_state"] == "FULLY_PRICED"
+    assert by_symbol.loc["000002", "live_event_price_in_state"] == "UNPRICED"
+    assert by_symbol.loc["000001", "live_catalyst_candidate_count"] == 3
+    assert by_symbol["research_opportunity_score"].equals(baseline_scores)
