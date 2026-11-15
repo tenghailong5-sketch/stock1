@@ -1174,9 +1174,14 @@ def main():
 
     # Execute M2 -> M3 -> M5 -> M8 on every strategy row. Missing PIT,
     # factor, 15-minute or portfolio-risk inputs remain explicit blockers.
+    minute_limit_raw = os.getenv("FHM_15M_SCAN_LIMIT", "100").strip().lower()
+    minute_scan_limit = (
+        None if minute_limit_raw in {"all", "full", "unlimited", "0"}
+        else int(minute_limit_raw)
+    )
     decision_gates, decision_gate_audit = build_live_decision_gate_audit(
         w, m5, m3, runtime_mainline, industry_membership,
-        decision_time=now,
+        decision_time=now, minute_scan_limit=minute_scan_limit,
     )
     decision_gates.to_csv(
         OUT/"four_layer_decision_gates.csv", index=False, encoding="utf-8-sig"
