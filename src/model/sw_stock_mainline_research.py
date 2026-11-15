@@ -167,6 +167,14 @@ def build_forward_stock_mainline_research(
         raise ValueError("PIT-eligible membership is not accepted by forward mapper")
     if not members["snapshot_scope"].astype(str).eq("current_membership_observation_only").all():
         raise ValueError("membership snapshot scope is not current-only")
+    # Preserve provider industry fields; the mapped industry_code comes from mainline.
+    rename_membership = {
+        column: f"membership_{column}"
+        for column in ("industry_code", "industry_name")
+        if column in members.columns
+    }
+    if rename_membership:
+        members = members.rename(columns=rename_membership)
     members = members.loc[members["observed_at"] <= cutoff.tz_convert("UTC")].copy()
     if members.empty or mainline.empty:
         return pd.DataFrame(), {
