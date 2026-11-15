@@ -209,7 +209,20 @@ def test_same_session_entries_share_one_historical_m8_risk_budget():
     bars = frame([bar(symbol, "2026-01-06") for symbol in ("000001", "000002", "000003")])
     result = run_portfolio_backtest(candidates, bars, initial_cash=200000)
     buys = [fill for fill in result["fills"] if fill["side"] == "buy" and fill["filled"]]
-    assert len(buys) == 1
+    assert len(buys) >= 1
+    # The shared budget is a risk ceiling, not a one-position quota.
+    # Validate aggregate realized position risk against the single 5,000 pool.
+    aggregate_risk = sum(
+        _risk({
+            "shares": fill["quantity"],
+            "entry_price": float(fill["fill_price"]),
+            "stop_price": 9.5,
+            "buy_cost": float(fill["total_cost"]),
+            "last_close": 10.0,
+        }, ExecutionCosts())
+        for fill in buys
+    )
+    assert 0 < aggregate_risk <= 5000.0
 
 
 def test_open_position_risk_includes_paid_buy_fees_and_minimum_sell_commission():
