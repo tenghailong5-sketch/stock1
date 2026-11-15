@@ -177,22 +177,39 @@ def test_invalid_volume_fraction_is_rejected():
 
 
 
-def test_portfolio_can_open_more_than_two_positions_with_dynamic_budget():
-    candidates = frame([
+def test_portfolio_can_open_more_than_two_positions_across_distinct_budget_snapshots():
+    rows = [
         candidate(symbol="000001", score=93.0),
         candidate(symbol="000002", score=92.0),
         candidate(symbol="000003", score=91.0),
-    ])
+    ]
+    for index, row in enumerate(rows):
+        day = pd.Timestamp("2026-01-05") + pd.Timedelta(days=index)
+        row["decision_time"] = day.tz_localize("Asia/Shanghai") + pd.Timedelta(hours=15)
+        row["available_time"] = day.tz_localize("Asia/Shanghai") + pd.Timedelta(hours=14, minutes=59)
+    candidates = frame(rows)
     bars = frame([
-        bar("000001", "2026-01-06"),
-        bar("000002", "2026-01-06"),
-        bar("000003", "2026-01-06"),
+        bar(symbol, day)
+        for symbol in ("000001", "000002", "000003")
+        for day in ("2026-01-06", "2026-01-07", "2026-01-08")
     ])
     result = run_portfolio_backtest(candidates, bars, initial_cash=200000)
     buys = [fill for fill in result["fills"] if fill["side"] == "buy" and fill["filled"]]
     assert len(buys) == 3
     assert len(result["open_positions"]) == 3
     assert result["skipped"] == []
+
+
+def test_same_session_entries_share_one_historical_m8_risk_budget():
+    candidates = frame([
+        candidate(symbol="000001", score=93.0),
+        candidate(symbol="000002", score=92.0),
+        candidate(symbol="000003", score=91.0),
+    ])
+    bars = frame([bar(symbol, "2026-01-06") for symbol in ("000001", "000002", "000003")])
+    result = run_portfolio_backtest(candidates, bars, initial_cash=200000)
+    buys = [fill for fill in result["fills"] if fill["side"] == "buy" and fill["filled"]]
+    assert len(buys) == 1
 
 
 def test_open_position_risk_includes_paid_buy_fees_and_minimum_sell_commission():
