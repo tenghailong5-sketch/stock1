@@ -467,3 +467,23 @@ def test_m5_rejects_retrieval_time_only_factor_snapshot_even_if_flagged_eligible
     )
     assert pd.isna(frame.loc[0, "industry_relative_strength"])
     assert frame.loc[0, "m5_pit_factor_provenance"] == "missing_or_ineligible_pit_snapshot"
+
+
+def test_m5_uses_same_session_industry_residual_for_live_forward_diagnostics():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002", "000003", "000004", "000005", "000006"],
+        "current_forward_industry_code": ["A", "A", "A", "B", "B", "B"],
+        "涨跌幅%": [5.0, 2.0, -1.0, 3.0, 2.0, 1.0],
+        "CLV": [0.9, 0.6, 0.3, 0.8, 0.5, 0.2],
+        "20日平均成交额": [200e6, 150e6, 100e6, 200e6, 150e6, 100e6],
+    })
+    frame = fhm100.build_m5_diagnostic_input(
+        watchlist, {"market_state": "RISK_ON", "market_environment_score": 70.0},
+    )
+    by_symbol = frame.set_index("symbol")
+    assert by_symbol.loc["000001", "stock_residual_strength"] == 100.0
+    assert by_symbol.loc["000001", "stock_residual_top_20pct"] is True
+    assert by_symbol.loc["000003", "stock_residual_top_20pct"] is False
+    assert by_symbol.loc["000001", "stock_residual_strength_basis"] == "same_session_excess_vs_industry_median"
+    assert by_symbol["m5_pit_factor_provenance"].eq("missing_or_ineligible_pit_snapshot").all()
+    assert by_symbol["m5_factor_scope"].eq("bounded_live_research_pool_percentile").all()
