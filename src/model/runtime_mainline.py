@@ -170,8 +170,9 @@ def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path)
             if "return_5" not in history:
                 history["return_5"] = history.close.div(history.close.shift(5)).sub(1)
             history = history.dropna(subset=["trade_date", "close", "amount"])
+            history = history.loc[history.close.gt(0) & history.amount.gt(0)].copy()
             if history.empty:
-                raise RuntimeError("no valid index observations with turnover")
+                raise RuntimeError("no valid index observations with positive turnover")
             cache = history.copy()
             if "available_time" not in cache:
                 cache["available_time"] = decision_time.tz_convert("UTC")
