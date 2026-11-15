@@ -323,6 +323,22 @@ def scan_cached_market_emotion(
         }
 
 
+def _read_discovered_candidates(path: str | Path) -> list[dict]:
+    """Read the append-only candidate archive so first_seen_at survives later scans."""
+    target = Path(path)
+    if not target.exists():
+        return []
+    rows = []
+    with target.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            if isinstance(item, dict) and item.get("candidate_id"):
+                rows.append(item)
+    return rows
+
+
 def scan_runtime_mainlines(
     *, decision_time, archive_root: str | Path = Path("data/forward_archive"),
     policy_path: str | Path = Path("data/policy_catalysts/official_policy_events.jsonl"),
@@ -425,8 +441,13 @@ def scan_runtime_mainlines(
         evidence = gate_ignition_labels(evidence)
         latest = evidence.trade_date.max()
         latest_rows = evidence.loc[evidence.trade_date.eq(latest)].copy()
+        # Re-read append-only archives after discovery. This preserves the
+        # original first_seen_at clock across subsequent runs so post-event
+        # reaction windows can accumulate instead of resetting every scan.
+        archived_policy_candidates = _read_discovered_candidates(policy_candidate_path)
+        archived_news_candidates = _read_discovered_candidates(global_news_candidate_path)
         sector_candidates, sector_mapping_audit = map_candidate_sectors(
-            [*policy_candidates, *news_candidates],
+            [*archived_policy_candidates, *archived_news_candidates],
             latest_rows.get("industry_name", pd.Series(dtype=str)).dropna().astype(str).unique(),
         )
         # Measure pre-discovery run-up and forward post-discovery repricing.
