@@ -662,6 +662,7 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
     # Only current effective-date SW mapping is used for descriptive industry
     # strength. The source is explicitly retrieval-time-only in its audit.
     industry_strength = pd.Series(np.nan, index=base.index, dtype=float)
+    industry_context_by_code = {}
     industry_code_col = "sw_history_industry_code"
     if industry_code_col in base and mainline is not None and not mainline.empty:
         required = {"industry_code", "trade_date", "strength_percentile"}
@@ -679,11 +680,19 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
                 # Ambiguous duplicate industry rows are not resolved by row order.
                 counts = latest.groupby("industry_code").size()
                 unique_codes = counts[counts.eq(1)].index
-                lookup = (
-                    latest.loc[latest.industry_code.isin(unique_codes)]
-                    .set_index("industry_code")["strength_percentile"]
-                    .to_dict()
-                )
+                unique_latest = latest.loc[latest.industry_code.isin(unique_codes)].copy()
+                lookup = unique_latest.set_index("industry_code")["strength_percentile"].to_dict()
+                context_columns = [
+                    "mainline_phase", "phase_reason", "strength_percentile",
+                    "turnover_share", "turnover_share_change_3d",
+                    "startup_evidence_status", "policy_evidence_status",
+                    "negative_policy_event_component", "historical_pit_eligible",
+                ]
+                for record in unique_latest.to_dict(orient="records"):
+                    code = str(record.get("industry_code", "")).strip()
+                    industry_context_by_code[code] = {
+                        key: record.get(key) for key in context_columns if key in record
+                    }
                 mapped_codes = base[industry_code_col].astype(str).str.strip()
                 industry_strength = mapped_codes.map(lookup) * 100.0
                 industry_strength = industry_strength.where(
@@ -753,9 +762,20 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
     )
     for idx, stock in base.iterrows():
         industry_value = industry_strength.loc[idx]
+        industry_code = str(stock.get(industry_code_col, "")).strip()
+        industry_context = industry_context_by_code.get(industry_code, {})
         pit_row = pit_by_symbol.get(stock["symbol"], {})
         row = {
             "symbol": stock["symbol"],
+            "mainline_phase": industry_context.get("mainline_phase", "UNKNOWN"),
+            "mainline_phase_reason": industry_context.get("phase_reason"),
+            "mainline_strength_percentile": industry_context.get("strength_percentile"),
+            "mainline_turnover_share": industry_context.get("turnover_share"),
+            "mainline_turnover_share_change_3d": industry_context.get("turnover_share_change_3d"),
+            "mainline_startup_evidence_status": industry_context.get("startup_evidence_status", "UNKNOWN"),
+            "mainline_policy_evidence_status": industry_context.get("policy_evidence_status", "UNKNOWN"),
+            "mainline_negative_policy_component": industry_context.get("negative_policy_event_component"),
+            "mainline_historical_pit_eligible": bool(industry_context.get("historical_pit_eligible", False)),
             "market_state": state,
             # A/C factors that have an explicit live observation and a declared
             # bounded-universe ranking basis.
@@ -1316,6 +1336,9 @@ def main():
       "M4已新增CLV、BodyStrength、5/10/20日收益、20日突破和上影线的横截面观察分位，并输出m4_observation_audit.csv。分位仅在同一交易日、声明的当前高成交额股票池完整覆盖且因子覆盖率达到95%时生成；不完整则全部留空。它们不是价格结构/成交质量复合分，也未接入M5。M3仅在前瞻归档状态READY时传入M5；行业/残差分位及策略硬门槛仍未全部接入，因此M5仍是诊断而非正式评分。",
       "不输出A/B/C正式评分、P_up、预期收益或买入指令；观察名单不等于达到80分门槛。AI仅作文字点评，不参与评分、不放宽硬门槛。",
       "价格口径：本扫描仅用未复权原始日线；尚无点时公司行为账本，分红送转附近的跨日收益/均线可能失真，相关观察值不得进入正式模型评分或回测标签。",
+      "## 研究机会排序（研究观察，不是正式M5分数/买入指令）",
+      (research_opportunities.head(20).to_markdown(index=False)
+       if not research_opportunities.empty else "本次没有达到至少3项可观察因子的研究排名记录。"),
       "## 快速初筛排名（临时研究结果，非正式FHM信号/非买入指令）",
       (w[w["快速初筛通过"]].sort_values("快速初筛分", ascending=False).head(20).to_markdown(index=False)
        if "快速初筛通过" in w and w["快速初筛通过"].any()
