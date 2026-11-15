@@ -137,12 +137,14 @@ def build_research_opportunity_ranking(
     )
     out["research_rank_status"] = np.select(
         [
+            out["research_opportunity_score"].notna() & mainline_anchor_ready,
+            out["research_opportunity_score"].notna() & ~mainline_anchor_ready,
             ~mainline_anchor_ready,
-            out["research_opportunity_score"].notna(),
         ],
         [
+            "RANKED_RESEARCH_ONLY",
+            "RANKED_QUOTE_ONLY_NO_INDUSTRY",
             "MISSING_MAINLINE_CONTEXT",
-            np.where(mainline_anchor_ready, "RANKED_RESEARCH_ONLY", "RANKED_QUOTE_ONLY_NO_INDUSTRY"),
         ],
         default="INSUFFICIENT_OBSERVED_FACTORS",
     )
@@ -159,6 +161,8 @@ def build_research_opportunity_ranking(
     audit = {
         "status": (
             "READY_RESEARCH_ONLY"
+            if out["research_opportunity_score"].notna().any() and mainline_anchor_ready.any()
+            else "READY_QUOTE_ONLY_FALLBACK"
             if out["research_opportunity_score"].notna().any()
             else "MAINLINE_CONTEXT_UNAVAILABLE"
             if not mainline_anchor_ready.any() and not allow_quote_only_fallback
