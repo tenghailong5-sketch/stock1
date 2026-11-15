@@ -66,7 +66,6 @@ KEYWORD_TO_INDUSTRY = {
     "energy sanctions": ("石油石化",),
     "shipping": ("交通运输",),
     "maritime": ("交通运输",),
-    "port": ("交通运输",),
     "film": ("传媒",),
     "gaming": ("传媒",),
     "publishing": ("传媒",),
