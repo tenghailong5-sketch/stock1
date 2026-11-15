@@ -40,7 +40,23 @@ def _live_snapshot_ready(row: dict, cutoff: pd.Timestamp, *, max_age_hours: floa
         if available.tzinfo is None:
             return False
         age = cutoff.tz_convert("UTC") - available.tz_convert("UTC")
-        return pd.Timedelta(0) <= age <= pd.Timedelta(hours=max_age_hours)
+        if not pd.Timedelta(0) <= age <= pd.Timedelta(hours=max_age_hours):
+            return False
+        # If the provider supplies an effective membership interval, honor it;
+        # retrieval-time evidence does not override an explicitly expired mapping.
+        valid_from_raw = row.get("valid_from")
+        valid_to_raw = row.get("valid_to")
+        if valid_from_raw is not None and not pd.isna(valid_from_raw):
+            valid_from = pd.Timestamp(valid_from_raw).normalize()
+            decision_day = cutoff.tz_convert("Asia/Shanghai").tz_localize(None).normalize()
+            if valid_from > decision_day:
+                return False
+        if valid_to_raw is not None and not pd.isna(valid_to_raw):
+            valid_to = pd.Timestamp(valid_to_raw).normalize()
+            decision_day = cutoff.tz_convert("Asia/Shanghai").tz_localize(None).normalize()
+            if decision_day >= valid_to:
+                return False
+        return True
     except (TypeError, ValueError, OverflowError):
         return False
 
