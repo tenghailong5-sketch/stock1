@@ -384,11 +384,11 @@ def test_industry_panel_uses_recent_cached_history_when_both_live_routes_fail(mo
     history_dir.mkdir()
     index_dir.mkdir()
     (universe_dir / "2026-02-14.jsonl").write_text(
-        "\\n".join(json.dumps({
+        "\n".join(json.dumps({
             "industry_code": code,
             "industry_name": f"industry-{i}",
             "observed_at": "2026-02-14T07:00:00Z",
-        }) for i, code in enumerate(codes)) + "\\n",
+        }) for i, code in enumerate(codes)) + "\n",
         encoding="utf-8",
     )
     for i, code in enumerate(codes):
@@ -400,11 +400,11 @@ def test_industry_panel_uses_recent_cached_history_when_both_live_routes_fail(mo
             "available_time": ["2026-02-14T07:00:00Z"] * len(dates),
         }).to_json(history_dir / f"{code}.jsonl", orient="records", lines=True)
     (index_dir / "000001.jsonl").write_text(
-        "\\n".join(json.dumps({
+        "\n".join(json.dumps({
             "trade_date": day.strftime("%Y-%m-%d"),
             "close": 3000.0 + i * 2,
             "available_time": "2026-02-14T07:00:00Z",
-        }) for i, day in enumerate(dates)) + "\\n",
+        }) for i, day in enumerate(dates)) + "\n",
         encoding="utf-8",
     )
 
