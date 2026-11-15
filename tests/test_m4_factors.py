@@ -154,7 +154,7 @@ def test_build_m4_snapshot_ranks_only_complete_declared_universe():
     assert len(out) == 2
     assert out["industry_relative_strength_pct"].notna().all()
     assert out["price_structure_pct"].notna().all()
-    assert out["stock_residual_strength_pct"].isna().all() is False or out["stock_residual_strength_pct"].isna().any()
+    assert out["stock_residual_strength_pct"].notna().any()
     assert out["historical_pit_eligible"].all()
     assert audit.loc[audit.factor_name.eq("price_structure_pct"), "status"].iloc[0] == "ranked"
     assert audit.loc[audit.factor_name.eq("pullback_reversal_structure_pct"), "status"].iloc[0] == "insufficient_factor_coverage"
@@ -622,3 +622,25 @@ def test_residual_strength_rejects_unverified_corporate_action_series():
         window=60, min_periods=40, decision_time="2026-03-10T11:00:00Z",
     )
     assert result.empty
+
+
+def test_build_m4_snapshot_rejects_retrieval_time_only_history_before_calculation():
+    frame = pd.DataFrame({
+        "historical_pit_eligible": [False],
+        "availability_basis": ["retrieval_time_only"],
+        "available_time": [pd.Timestamp("2026-03-10T08:00:00Z")],
+        "source_id": ["akshare"], "source_revision": ["v1"],
+    })
+    with pytest.raises(ValueError, match="not certified historical PIT eligible"):
+        from src.model.m4_factors import _require_historical_pit_eligible
+        _require_historical_pit_eligible(frame, "stock_bars")
+
+
+def test_build_m4_snapshot_rejects_missing_pit_eligibility_metadata():
+    frame = pd.DataFrame({
+        "available_time": [pd.Timestamp("2026-03-10T08:00:00Z")],
+        "source_id": ["provider"], "source_revision": ["v1"],
+    })
+    with pytest.raises(ValueError, match="missing PIT eligibility fields"):
+        from src.model.m4_factors import _require_historical_pit_eligible
+        _require_historical_pit_eligible(frame, "market_returns")
