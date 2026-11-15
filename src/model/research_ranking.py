@@ -82,6 +82,7 @@ def build_research_opportunity_ranking(
             "startup_evidence_status", "startup_policy_status",
             "peak_evidence", "decay_evidence", "phase_gate_reason",
             "membership_observed_at", "mainline_trade_date",
+            "live_catalyst_candidate_count",
         ) if c in context.columns]
         context = context[keep].rename(columns={
             "industry_code": "live_industry_code",
