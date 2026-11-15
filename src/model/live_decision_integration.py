@@ -192,7 +192,9 @@ def build_live_decision_gate_audit(
         membership_row = membership_by_symbol.get(symbol, {})
         industry_code = str(membership_row.get("industry_code", ""))
         industry = latest_mainline.get(industry_code, {})
-        phase = industry.get("mainline_phase", "UNKNOWN")
+        # Respect the M3 ignition evidence gate. Raw candidate phase alone
+        # must never authorize a live entry when startup evidence is unconfirmed.
+        phase = industry.get("mainline_phase_gated", industry.get("mainline_phase", "UNKNOWN"))
         industry_ready = _truth(industry.get("persistence_ready"))
         # The current runner passes a forward-only observed membership snapshot.
         # Never let that mapping authorize a PIT mainline entry, even if a
@@ -236,7 +238,7 @@ def build_live_decision_gate_audit(
         industry_live = (
             membership_live
             and bool(industry)
-            and str(industry.get("mainline_phase", "UNKNOWN")) in {"IGNITION", "PEAK", "DECAY"}
+            and str(phase) in {"IGNITION", "PEAK", "DECAY"}
         )
         concentration_status = str(industry.get("stock_turnover_pit_status", "not_ready"))
         live_concentration_status = str(industry.get("stock_turnover_live_status", "not_ready"))
