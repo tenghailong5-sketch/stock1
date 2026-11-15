@@ -44,6 +44,8 @@ def attach_forward_industry_flow_changes(
         audit.update(status="INVALID_TRADE_DATE")
         return out, audit
     trade_date = dates.max()
+    if getattr(trade_date, "tzinfo", None) is not None:
+        trade_date = trade_date.tz_localize(None)
     shares = pd.to_numeric(out["turnover_share"], errors="coerce")
     snapshot = pd.DataFrame({
         "trade_date": dates.dt.strftime("%Y-%m-%d"),
