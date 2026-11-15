@@ -33,6 +33,7 @@ from src.model.live_decision_integration import (
 )
 from src.model.mainline_flows import attach_pit_stock_turnover_concentration
 from src.model.catalyst_mapping import map_candidate_sectors
+from src.model.catalyst_mapping import map_candidate_sectors
 from src.model.archive_readiness import audit_forward_archive
 from src.model.shortline_architecture import audit_shortline_architecture
 from src.model.research_ranking import build_research_opportunity_ranking, build_final_candidate_shortlist
@@ -1335,6 +1336,64 @@ def main():
         }
     forward_stock_mainline_audit["spot_sector_fallback"] = spot_sector_fallback_audit
     forward_stock_mainline_audit["industry_flow_archive"] = industry_flow_archive_audit
+    # Carry fresh, review-only policy/global-news candidates into the current industry context.
+    # Mapping recovers event visibility during SW history outages; it does not infer impact or authorize trades.
+    catalyst_candidates = (
+        runtime_mainline_audit.get("catalyst_sector_candidates", {}).get("candidates", [])
+        if isinstance(runtime_mainline_audit, dict) else []
+    )
+    catalyst_mapping_fallback_audit = {"status": "NOT_NEEDED"}
+    if not catalyst_candidates and not forward_stock_mainline.empty:
+        archived_candidates = []
+        for archive_path in (
+            Path("data/policy_catalysts/discovered_candidates.jsonl"),
+            Path("data/global_news/discovered_candidates.jsonl"),
+        ):
+            if not archive_path.exists():
+                continue
+            try:
+                with archive_path.open("r", encoding="utf-8") as handle:
+                    archived_candidates.extend(
+                        item for line in handle if line.strip()
+                        for item in [json.loads(line)] if isinstance(item, dict)
+                    )
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+        current_industries = (
+            forward_stock_mainline["current_industry_level1"].dropna().astype(str).unique().tolist()
+            if "current_industry_level1" in forward_stock_mainline else []
+        )
+        catalyst_candidates, catalyst_mapping_fallback_audit = map_candidate_sectors(
+            archived_candidates, current_industries, decision_time=now,
+        )
+    catalyst_counts = {}
+    for candidate in catalyst_candidates:
+        for industry_name in candidate.get("mapped_industries", []):
+            catalyst_counts[industry_name] = catalyst_counts.get(industry_name, 0) + 1
+    price_in_candidates = (
+        runtime_mainline_audit.get("event_price_in", {}).get("candidates", [])
+        if isinstance(runtime_mainline_audit, dict) else []
+    )
+    price_in_by_industry = {}
+    for candidate in price_in_candidates:
+        for industry_name in candidate.get("mapped_industries", []):
+            previous = price_in_by_industry.get(industry_name)
+            current_seen = str(candidate.get("first_seen_at", ""))
+            previous_seen = str(previous.get("first_seen_at", "")) if previous else ""
+            if previous is None or current_seen > previous_seen:
+                price_in_by_industry[industry_name] = candidate
+    if not forward_stock_mainline.empty and "current_industry_level1" in forward_stock_mainline:
+        industry_names = forward_stock_mainline["current_industry_level1"].astype(str)
+        forward_stock_mainline["live_catalyst_candidate_count"] = industry_names.map(catalyst_counts).fillna(0).astype(int)
+        forward_stock_mainline["live_event_price_in_state"] = industry_names.map(lambda name: price_in_by_industry.get(name, {}).get("price_in_state"))
+        forward_stock_mainline["live_event_price_in_reason"] = industry_names.map(lambda name: price_in_by_industry.get(name, {}).get("reason"))
+        forward_stock_mainline["live_event_pre_discovery_excess_20d"] = industry_names.map(lambda name: price_in_by_industry.get(name, {}).get("pre_discovery_excess_20d"))
+        forward_stock_mainline["live_event_post_discovery_excess_3d"] = industry_names.map(lambda name: price_in_by_industry.get(name, {}).get("post_discovery_excess_3d"))
+    forward_stock_mainline_audit["price_in_industry_count"] = int(len(price_in_by_industry))
+    forward_stock_mainline_audit["price_in_is_diagnostic_only"] = True
+    forward_stock_mainline_audit["mapped_catalyst_industry_count"] = int(len(catalyst_counts))
+    forward_stock_mainline_audit["catalyst_mapping_fallback"] = catalyst_mapping_fallback_audit
+    forward_stock_mainline_audit["catalyst_candidates_are_score_neutral"] = True
     # Carry mapped, review-only policy/global-news candidates to stock research rows.
     # This context is deliberately score-neutral until an event is reviewed.
     catalyst_candidates = (
@@ -1464,8 +1523,8 @@ def main():
         sw_history_audit = {"status": "UNAVAILABLE", "historical_pit_eligible": False,
                             "trading_authorization": False}
         try:
-            sw_history = fetch_sw_industry_history()
-            sw_research, sw_history_audit = select_sw_industry_research_snapshot(
+            sw_history = fetch_sw_industry_history(\n                cache_path=Path("data/forward_archive/sw_industry_history_cache.jsonl"),\n                fetched_at=now,\n            )
+            sw_history_audit["provider_status"] = sw_history.attrs.get("provider_status", "LIVE")\n            if sw_history.attrs.get("live_fetch_error"):\n                sw_history_audit["live_fetch_error"] = sw_history.attrs["live_fetch_error"]\n            sw_research, sw_history_audit = select_sw_industry_research_snapshot(
                 sw_history, expected_symbols,
                 as_of_date=now.astimezone(ZoneInfo("Asia/Shanghai")).date(),
             )
