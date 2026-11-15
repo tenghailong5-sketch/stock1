@@ -50,3 +50,17 @@ def test_maps_english_global_headlines_to_current_sw_industries():
     )
     assert export_only == []
     assert export_audit["unmapped_candidates"] == 1
+
+
+def test_suppresses_syndicated_duplicate_headlines_before_industry_counts():
+    rows, audit = map_candidate_sectors(
+        [
+            {"candidate_id": "source-a", "title": "半导体设备出口管制"},
+            {"candidate_id": "source-b", "title": "半导体设备出口管制！"},
+            {"candidate_id": "source-c", "title": "AI infrastructure investment"},
+        ],
+        ["电子", "计算机"],
+    )
+    assert len(rows) == 2
+    assert audit["duplicate_headlines_suppressed"] == 1
+    assert audit["industry_candidate_counts"] == {"电子": 1, "计算机": 1}
