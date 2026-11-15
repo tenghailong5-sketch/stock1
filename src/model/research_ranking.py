@@ -195,9 +195,23 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
         empty = pd.DataFrame()
         return empty, empty, {"status": "NO_RANKED_CANDIDATES", "candidate_count": 0, "event_watch_count": 0, "buy_authorization": False}
     data = ranked.copy()
-    for col in ("price", "amount", "pct_chg", "research_opportunity_score"):
-        if col not in data: data[col] = np.nan
-        data[col] = pd.to_numeric(data[col], errors="coerce")
+    # Normalize both live quote schema and normalized research schema. The
+    # production watchlist currently carries Chinese provider column names.
+    aliases = {
+        "price": ("最新价", "收盘", "close"),
+        "amount": ("当日成交额", "成交额", "turnover"),
+        "pct_chg": ("涨跌幅%", "涨跌幅", "pct_change"),
+    }
+    for target, candidates in aliases.items():
+        if target not in data:
+            source = next((column for column in candidates if column in data), None)
+            data[target] = data[source] if source is not None else np.nan
+        data[target] = pd.to_numeric(data[target], errors="coerce")
+    if "research_opportunity_score" not in data:
+        data["research_opportunity_score"] = np.nan
+    data["research_opportunity_score"] = pd.to_numeric(
+        data["research_opportunity_score"], errors="coerce"
+    )
     if "symbol" not in data:
         if "代码" not in data: raise ValueError("ranked candidates require symbol or 代码")
         data["symbol"] = data["代码"].astype(str).str.strip().str.zfill(6)
