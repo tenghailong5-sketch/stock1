@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from src.model.m4_factors import (
-    industry_relative_strength, price_structure, rank_factor, rank_factor_by_date, residual_strength,
+    build_m4_pit_factor_snapshot, industry_relative_strength, price_structure, rank_factor, rank_factor_by_date, residual_strength,
 )
 
 
@@ -108,6 +108,64 @@ def test_industry_excess_returns():
     assert out.industry_excess_5.iloc[0] == pytest.approx(.05)
     assert out.industry_excess_20.iloc[0] == pytest.approx(.10)
 
+
+
+def test_build_m4_snapshot_ranks_only_complete_declared_universe():
+    dates = pd.bdate_range("2026-01-01", periods=45)
+    available = pd.Timestamp("2026-03-10T08:00:00Z")
+    symbols = ["000001", "000002"]
+    bars_rows, stock_rows = [], []
+    for symbol, offset, industry_code in zip(symbols, [0.0, 0.01], ["I1", "I2"]):
+        for i, date in enumerate(dates):
+            close = 10.0 + i * (0.1 + offset)
+            bars_rows.append({
+                "symbol": symbol, "trade_date": date, "open": close - 0.05,
+                "high": close + 0.1, "low": close - 0.1, "close": close,
+                "volume": 1000.0 + i, "amount": 2e8 + i * 1e6,
+                "available_time": available, "source_id": "bars", "source_revision": "v1",
+                "pit_total_return_close": close, "pit_total_return_high": close + 0.1,
+                "pit_total_return_available_time": available, "corporate_action_status": "VERIFIED",
+            })
+            stock_rows.append({
+                "symbol": symbol, "trade_date": date, "industry_code": industry_code,
+                "pit_total_return_return_5": 0.02 + offset,
+                "pit_total_return_daily_return": 0.001 + offset / 10,
+                "pit_total_return_available_time": available, "corporate_action_status": "VERIFIED",
+                "available_time": available, "source_id": "stock", "source_revision": "v1",
+            })
+    market = pd.DataFrame({
+        "trade_date": dates, "market_return": np.linspace(-0.001, 0.001, len(dates)),
+        "market_return_5": [0.01] * len(dates), "market_return_20": [0.02] * len(dates),
+        "available_time": available, "source_id": "market", "source_revision": "v1",
+    })
+    industry = pd.DataFrame([
+        {"trade_date": date, "industry_code": code, "industry_return": 0.002 + j * 0.001,
+         "industry_return_5": 0.02 + j * 0.01, "return_5": 0.02 + j * 0.01,
+         "return_20": 0.04 + j * 0.01, "available_time": available,
+         "source_id": "industry", "source_revision": "v1"}
+        for date in dates for j, code in enumerate(["I1", "I2"])
+    ])
+    # The residual regression needs independently identifiable benchmark series.
+    industry["industry_return"] = np.tile(np.sin(np.arange(len(dates)) * 0.7) * 0.001, 2)
+    out, audit = build_m4_pit_factor_snapshot(
+        pd.DataFrame(bars_rows), pd.DataFrame(stock_rows), industry, market,
+        decision_time="2026-03-10T09:00:00+08:00", expected_universe_size=2,
+    )
+    assert len(out) == 2
+    assert out["industry_relative_strength_pct"].notna().all()
+    assert out["price_structure_pct"].notna().all()
+    assert out["stock_residual_strength_pct"].isna().all() is False or out["stock_residual_strength_pct"].isna().any()
+    assert out["historical_pit_eligible"].all()
+    assert audit.loc[audit.factor_name.eq("price_structure_pct"), "status"].iloc[0] == "ranked"
+    assert audit.loc[audit.factor_name.eq("pullback_reversal_structure_pct"), "status"].iloc[0] == "insufficient_factor_coverage"
+
+
+def test_build_m4_snapshot_blocks_universe_size_mismatch():
+    with pytest.raises(ValueError, match="expected_universe_size"):
+        build_m4_pit_factor_snapshot(
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+            decision_time="2026-03-10T09:00:00+08:00", expected_universe_size=0,
+        )
 
 def test_rank_factor_direction_and_missing():
     values = pd.Series([1., 2., 3., np.nan])
