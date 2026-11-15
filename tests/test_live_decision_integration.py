@@ -171,3 +171,27 @@ def test_archived_retrieval_only_stock_bars_never_become_historical_pit(tmp_path
     assert audit["status"] == "incomplete_pit_stock_bars"
     assert audit["stock_bar_coverage"] == 0.0
     assert audit["historical_pit_eligible"] is False
+
+
+
+def test_15m_confirmation_scan_supports_all_candidates_without_fixed_cap():
+    watchlist = pd.DataFrame([
+        {"代码": "600000", "最新价": 20.0, "当日成交额": 1e9},
+        {"代码": "000001", "最新价": 10.0, "当日成交额": 8e8},
+        {"代码": "300001", "最新价": 30.0, "当日成交额": 7e8},
+    ])
+    seen = []
+
+    def fetcher(symbol, *, captured_at=None):
+        seen.append(symbol)
+        return {"status": "CHECKED", "entry_ready": False, "reason": "test"}
+
+    rows, audit = build_live_decision_gate_audit(
+        watchlist, pd.DataFrame(), {"status": "UNKNOWN"}, pd.DataFrame(),
+        pd.DataFrame(), decision_time="2026-11-14T09:00:00+08:00",
+        minute_confirmation_fetcher=fetcher, minute_scan_limit=None,
+    )
+
+    assert seen == ["600000", "000001", "300001"]
+    assert audit["minute_scanned_count"] == 3
+    assert audit["minute_scan_limit"] == "ALL"
