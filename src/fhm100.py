@@ -1310,7 +1310,8 @@ def main():
         else int(minute_limit_raw)
     )
     risk_context_by_symbol, risk_context_audit = load_risk_context_file(
-        os.getenv("FHM_RISK_CONTEXT_FILE", "").strip() or None
+        os.getenv("FHM_RISK_CONTEXT_FILE", "").strip() or None,
+        raw_json=os.getenv("FHM_RISK_CONTEXT_JSON", ""),
     )
     decision_gates, decision_gate_audit = build_live_decision_gate_audit(
         w, m5, m3, runtime_mainline, industry_membership,
