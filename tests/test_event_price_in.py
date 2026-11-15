@@ -17,7 +17,7 @@ def _history(daily_returns, *, industry="电子", start="2026-01-01"):
 
 
 def test_event_price_in_uses_first_seen_clock_and_reports_pricing_in():
-    history = _history([0.0] * 20 + [0.025, 0.02, 0.01], start="2026-01-01")
+    history = _history([0.0] * 19 + [0.10, 0.025, 0.02, 0.01], start="2026-01-01")
     history.loc[history.trade_date > pd.Timestamp("2026-01-28"), "turnover"] = 300.0
     event = {
         "candidate_id": "event-1",
@@ -32,6 +32,7 @@ def test_event_price_in_uses_first_seen_clock_and_reports_pricing_in():
     row = result.iloc[0]
     assert row.price_in_state == "PRICING_IN"
     assert row.post_discovery_sessions_observed == 3
+    assert abs(row.pre_discovery_excess_20d) < 1e-12  # same-day bar is excluded
     assert not bool(row.impact_direction_inferred)
     assert not bool(row.historical_pit_eligible)
     assert audit["state_counts"]["PRICING_IN"] == 1
