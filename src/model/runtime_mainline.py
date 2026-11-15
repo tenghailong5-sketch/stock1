@@ -36,6 +36,7 @@ from src.providers.sw_api_industry import (
     fetch_sw_api_first_level_index_list,
     fetch_sw_api_industry_index_history,
 )
+from src.providers.sw_industry import fetch_sw_industry_index_history as fetch_sw_industry_index_history_native
 
 
 def _read_index_archive(path: Path, *, decision_time: pd.Timestamp) -> pd.DataFrame:
@@ -65,93 +66,156 @@ def _read_index_archive(path: Path, *, decision_time: pd.Timestamp) -> pd.DataFr
     )
 
 
+def _read_cached_sw_universe(archive_root: Path, decision_time: pd.Timestamp) -> pd.DataFrame:
+    """Read the latest verified SW first-level universe captured before cutoff."""
+    directory = Path(archive_root) / "sw_industry_universe"
+    if not directory.exists():
+        return pd.DataFrame(columns=["industry_code", "industry_name"])
+    for path in sorted(directory.glob("*.jsonl"), reverse=True):
+        try:
+            rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            frame = pd.DataFrame(rows)
+            if not {"industry_code", "industry_name", "observed_at"}.issubset(frame.columns):
+                continue
+            frame["observed_at"] = pd.to_datetime(frame["observed_at"], errors="coerce", utc=True)
+            frame = frame.loc[frame.observed_at.le(decision_time.tz_convert("UTC"))].dropna(subset=["observed_at"])
+            frame["industry_code"] = frame.industry_code.astype(str).str.strip()
+            frame["industry_name"] = frame.industry_name.astype(str).str.strip()
+            frame = frame.loc[frame.industry_code.str.fullmatch(r"\d{6}", na=False) & frame.industry_name.ne("")]
+            frame = frame.drop_duplicates("industry_code")
+            if len(frame) >= 20:
+                return frame[["industry_code", "industry_name"]].sort_values("industry_code").reset_index(drop=True)
+        except Exception:
+            continue
+    return pd.DataFrame(columns=["industry_code", "industry_name"])
+
+
+def _read_cached_sw_index_history(path: Path, decision_time: pd.Timestamp) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        frame = pd.read_json(path, lines=True)
+        required = {"trade_date", "close", "amount", "available_time"}
+        if frame.empty or not required.issubset(frame.columns):
+            return pd.DataFrame()
+        frame["trade_date"] = pd.to_datetime(frame.trade_date, errors="coerce").dt.normalize()
+        frame["available_time"] = pd.to_datetime(frame.available_time, errors="coerce", utc=True)
+        frame = frame.loc[frame.available_time.le(decision_time.tz_convert("UTC"))].dropna(subset=["trade_date", "close", "amount"])
+        frame = frame.sort_values("trade_date").drop_duplicates("trade_date", keep="last")
+        if len(frame) < 25:
+            return pd.DataFrame()
+        latest = frame.trade_date.max()
+        cutoff_day = decision_time.tz_convert("Asia/Shanghai").normalize().tz_localize(None)
+        if (cutoff_day - latest).days > 7:
+            return pd.DataFrame()
+        return frame
+    except Exception:
+        return pd.DataFrame()
+
+
 def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path) -> tuple[pd.DataFrame, dict]:
-    session = requests.Session()
-    groups = fetch_sw_api_first_level_index_list(session=session)
+    groups = _read_cached_sw_universe(archive_root, decision_time)
+    universe_source = "archived_SW_universe"
+    if groups.empty:
+        try:
+            groups = fetch_sw_api_first_level_index_list()
+            universe_source = "official_SW_index_api"
+        except Exception as exc:
+            raise RuntimeError(
+                "SW industry universe unavailable from live API and archive: "
+                + f"{type(exc).__name__}: {str(exc)[:180]}"
+            ) from exc
     expected = int(len(groups))
     if expected < 20:
         raise RuntimeError(f"SW first-level industry universe incomplete: {expected}")
     end_date = decision_time.tz_convert("Asia/Shanghai").strftime("%Y%m%d")
     start_date = (decision_time.tz_convert("Asia/Shanghai") - pd.Timedelta(days=150)).strftime("%Y%m%d")
+    cache_dir = Path(archive_root) / "industry_index_history"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
     def fetch_one(row):
-        local_session = requests.Session()
+        code = str(row.industry_code)
+        cache_path = cache_dir / f"{code}.jsonl"
         try:
-            history = fetch_sw_api_industry_index_history(
-                str(row.industry_code), start_date=start_date, end_date=end_date,
-                session=local_session,
-            )
+            # Prefer AkShare's separate market-data route; use the SW publisher
+            # endpoint only as a fallback, not as the sole runtime dependency.
+            try:
+                history = fetch_sw_industry_index_history_native(code)
+                history = history.loc[pd.to_datetime(history.trade_date, errors="coerce").between(
+                    pd.Timestamp(start_date), pd.Timestamp(end_date)
+                )].copy()
+                if "return_3" not in history:
+                    close = pd.to_numeric(history.close, errors="coerce")
+                    history["return_3"] = close.div(close.shift(3)).sub(1)
+                if "amount" not in history or pd.to_numeric(history.amount, errors="coerce").notna().sum() == 0:
+                    raise RuntimeError("AkShare SW index response has no usable turnover")
+            except Exception as alternate_exc:
+                try:
+                    history = fetch_sw_api_industry_index_history(
+                        code, start_date=start_date, end_date=end_date
+                    )
+                except Exception as official_exc:
+                    history = _read_cached_sw_index_history(cache_path, decision_time)
+                    if history.empty:
+                        raise RuntimeError(
+                            f"AkShare={type(alternate_exc).__name__}:{str(alternate_exc)[:80]}; "
+                            f"SW_API={type(official_exc).__name__}:{str(official_exc)[:80]}; cache unavailable"
+                        ) from official_exc
+            history["trade_date"] = pd.to_datetime(history.trade_date, errors="coerce").dt.normalize()
+            history = history.loc[history.trade_date.between(pd.Timestamp(start_date), pd.Timestamp(end_date))].copy()
+            history["close"] = pd.to_numeric(history.close, errors="coerce")
+            history["amount"] = pd.to_numeric(history.get("amount"), errors="coerce")
+            if "return_3" not in history:
+                history["return_3"] = history.close.div(history.close.shift(3)).sub(1)
+            if "return_5" not in history:
+                history["return_5"] = history.close.div(history.close.shift(5)).sub(1)
+            history = history.dropna(subset=["trade_date", "close", "amount"])
+            if history.empty:
+                raise RuntimeError("no valid index observations with turnover")
+            cache = history.copy()
+            if "available_time" not in cache:
+                cache["available_time"] = decision_time.tz_convert("UTC")
+            cache["available_time"] = pd.to_datetime(cache.available_time, errors="coerce", utc=True)
+            old = _read_cached_sw_index_history(cache_path, decision_time)
+            if not old.empty:
+                cache = pd.concat([old, cache], ignore_index=True)
+            cache = cache.dropna(subset=["trade_date", "available_time"]).sort_values(["trade_date", "available_time"])
+            cache = cache.drop_duplicates("trade_date", keep="last")
+            cache.assign(
+                trade_date=cache.trade_date.dt.strftime("%Y-%m-%d"),
+                available_time=cache.available_time.astype(str),
+            ).to_json(cache_path, orient="records", lines=True, force_ascii=False)
             history["industry_name"] = str(row.industry_name)
             return history, None
         except Exception as exc:
-            return None, f"{row.industry_code}:{type(exc).__name__}:{str(exc)[:140]}"
-        finally:
-            local_session.close()
+            return None, f"{code}:{type(exc).__name__}:{str(exc)[:160]}"
 
-    # Avoid serially waiting on every SW industry endpoint. Keep concurrency
-    # bounded to reduce provider pressure and preserve per-industry failures.
     workers = max(1, min(int(os.getenv("FHM_MAINLINE_HISTORY_WORKERS", "4")), 8))
-    results = []
-    frames = []
-    failures = []
-    # Query in bounded batches. If the first batch is entirely unavailable due
-    # to transport failures, stop instead of waiting through every industry
-    # endpoint's retry window. The caller can still use the spot-sector fallback.
+    results, frames, failures = [], [], []
     for offset in range(0, len(groups), workers):
         batch = groups.iloc[offset:offset + workers]
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            batch_results = list(executor.map(
-                fetch_one, batch.itertuples(index=False)
-            ))
+            batch_results = list(executor.map(fetch_one, batch.itertuples(index=False)))
         results.extend(batch_results)
         frames.extend(frame for frame, error in batch_results if frame is not None)
         failures.extend(error for frame, error in batch_results if error is not None)
-        transport_errors = (
-            "ReadTimeout", "ConnectTimeout", "ConnectionError", "SSLError"
-        )
-        if (
-            offset == 0
-            and not frames
-            and len(batch_results) == len(batch)
-            and all(
-                error is not None and any(kind in error for kind in transport_errors)
-                for _, error in batch_results
-            )
+        if offset == 0 and not frames and batch_results and all(
+            any(kind in error for kind in ("ReadTimeout", "ConnectTimeout", "ConnectionError", "SSLError"))
+            for _, error in batch_results
         ):
-            raise RuntimeError(
-                "SW industry history transport unavailable in first batch; "
-                "aborted remaining industry requests early: "
-                + " | ".join(failures[:8])
-            )
-    # One provider timeout must not discard every available industry.
-    # Keep the cross-section when at least 90% of the current SW universe is
-    # present on a date; the observed turnover denominator scales all shares
-    # equally, so within-date relative rankings remain comparable.
+            raise RuntimeError("SW industry history unavailable from alternate/live/cache providers: " + " | ".join(failures[:8]))
     minimum_industries = max(1, int(expected * 0.90 + 0.999999))
     if not frames:
-        raise RuntimeError(
-            f"SW industry history unavailable for all {expected} industries: "
-            + " | ".join(failures[:8])
-        )
+        raise RuntimeError(f"SW industry history unavailable for all {expected} industries: " + " | ".join(failures[:8]))
     panel = pd.concat(frames, ignore_index=True)
     counts = panel.groupby("trade_date").industry_code.nunique()
     complete_dates = counts[counts >= minimum_industries].index
     panel = panel.loc[panel.trade_date.isin(complete_dates)].copy()
     if panel.empty:
-        raise RuntimeError(
-            f"SW industry coverage below {minimum_industries}/{expected} "
-            "for every aligned date: " + " | ".join(failures[:8])
-        )
-    market = _read_index_archive(
-        archive_root / "index_daily" / "000001.jsonl",
-        decision_time=decision_time,
-    )
+        raise RuntimeError(f"SW industry coverage below {minimum_industries}/{expected}: " + " | ".join(failures[:8]))
+    market = _read_index_archive(Path(archive_root) / "index_daily" / "000001.jsonl", decision_time=decision_time)
     panel["trade_date"] = pd.to_datetime(panel.trade_date, errors="coerce").dt.normalize()
-    if "daily_return" in panel:
-        panel["industry_return_1d"] = pd.to_numeric(panel["daily_return"], errors="coerce")
-    elif "close" in panel:
-        panel["industry_return_1d"] = panel.groupby("industry_code")["close"].pct_change()
-    else:
-        panel["industry_return_1d"] = np.nan
+    panel["industry_return_1d"] = pd.to_numeric(panel.get("daily_return"), errors="coerce") if "daily_return" in panel else panel.groupby("industry_code").close.pct_change()
     panel["industry_return_3d"] = pd.to_numeric(panel.return_3, errors="coerce")
     panel["industry_return_5d"] = pd.to_numeric(panel.return_5, errors="coerce")
     panel["turnover"] = pd.to_numeric(panel.amount, errors="coerce")
@@ -159,23 +223,18 @@ def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path)
     panel = panel.merge(daily_turnover, on="trade_date", validate="many_to_one")
     panel = panel.merge(market, on="trade_date", how="inner", validate="many_to_one")
     panel["expected_industry_count"] = expected
-    required = [
-        "industry_return_3d", "industry_return_5d", "market_return_3d",
-        "market_return_5d", "turnover", "market_turnover",
-    ]
+    required = ["industry_return_3d", "industry_return_5d", "market_return_3d", "market_return_5d", "turnover", "market_turnover"]
     panel = panel.dropna(subset=required)
     if panel.empty:
         raise RuntimeError("no complete aligned SW industry/market observations")
     audit = {
-        "industry_count": expected,
-        "minimum_industries_per_date": minimum_industries,
-        "minimum_coverage": 0.90,
-        "available_industries": int(panel.industry_code.nunique()),
-        "failed_industry_count": int(len(failures)),
-        "failed_industries": failures,
+        "industry_count": expected, "minimum_industries_per_date": minimum_industries,
+        "minimum_coverage": 0.90, "available_industries": int(panel.industry_code.nunique()),
+        "failed_industry_count": int(len(failures)), "failed_industries": failures,
         "complete_trade_dates": int(panel.trade_date.nunique()),
         "latest_trade_date": panel.trade_date.max().strftime("%Y-%m-%d"),
-        "source": "official_SW_index_api_plus_archived_SSE_index",
+        "source": "archived_SW_universe_plus_AkShare_first_official_SW_API_fallback_and_local_cache",
+        "universe_source": universe_source, "cache_directory": str(cache_dir),
         "historical_pit_eligible": False,
     }
     return panel, audit
