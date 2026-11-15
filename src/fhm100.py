@@ -771,7 +771,14 @@ def summarize_m5_blockers(frame):
 def main():
     # Run PIT archive readiness audit at every model invocation. It is
     # diagnostic only and never upgrades retrieval-time history to PIT.
-    archive_readiness = audit_forward_archive(Path("data/forward_archive"))
+    try:
+        archive_readiness = audit_forward_archive(Path("data/forward_archive"))
+    except Exception as exc:
+        archive_readiness = {
+            "status": "AUDIT_UNAVAILABLE",
+            "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
+            "file_count": 0, "datasets": [], "files": [],
+        }
     (OUT / "archive_readiness.json").write_text(
         json.dumps(archive_readiness, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
