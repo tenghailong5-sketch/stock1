@@ -84,11 +84,6 @@ def map_candidate_sectors(candidates, available_industries):
             continue
         headline = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(candidate.get("title") or "").lower())
         identity = headline or str(candidate.get("candidate_id") or candidate.get("event_id") or "")
-        if identity and identity in seen_headlines:
-            duplicate_headlines += 1
-            continue
-        if identity:
-            seen_headlines.add(identity)
         text = " ".join(str(candidate.get(key) or "") for key in (
             "title", "summary", "catalog", "issuing_agency",
             "discovery_keyword", "theme",
@@ -102,6 +97,11 @@ def map_candidate_sectors(candidates, available_industries):
         if not hits:
             unmapped += 1
             continue
+        if identity and identity in seen_headlines:
+            duplicate_headlines += 1
+            continue
+        if identity:
+            seen_headlines.add(identity)
         row = dict(candidate)
         row["mapped_industries"] = hits
         row["mapping_status"] = "KEYWORD_MATCH_PENDING_REVIEW"
