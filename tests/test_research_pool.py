@@ -4,7 +4,7 @@ import pytest
 from src.fhm100 import select_research_history_universe
 
 
-def test_research_pool_prioritizes_active_nonfinancial_names_and_excludes_financials():
+def test_research_pool_keeps_financials_observable_and_prioritizes_active_names():
     snapshot = pd.DataFrame([
         {"code": "600000", "name": "浦发银行", "price": 10, "amount": 9_000_000_000, "pct_chg": 2},
         {"code": "601398", "name": "工商银行", "price": 8, "amount": 8_000_000_000, "pct_chg": 1},
@@ -18,11 +18,11 @@ def test_research_pool_prioritizes_active_nonfinancial_names_and_excludes_financ
         liquidity_share=1 / 3,
     )
 
-    assert selected["code"].tolist() == ["300001", "300002", "300003"]
-    assert not selected["name"].str.contains("银行|证券|保险").any()
+    assert selected["code"].tolist() == ["600000", "300001", "300002"]
+    assert "600000" in set(selected["code"])
 
 
-def test_research_pool_caps_daily_chase_and_keeps_liquidity_fallback():
+def test_research_pool_includes_limit_up_momentum_without_chase_authorization():
     snapshot = pd.DataFrame([
         {"code": "300001", "name": "涨停科技", "price": 20, "amount": 2_000_000_000, "pct_chg": 10},
         {"code": "300002", "name": "温和成长", "price": 20, "amount": 1_000_000_000, "pct_chg": 3},
@@ -35,7 +35,7 @@ def test_research_pool_caps_daily_chase_and_keeps_liquidity_fallback():
         liquidity_share=1 / 3,
     )
 
-    assert "300001" not in selected["code"].tolist()
+    assert "300001" in selected["code"].tolist()
     assert len(selected) == 3
     assert selected["code"].is_unique
 

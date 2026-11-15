@@ -185,52 +185,46 @@ def select_history_universe(snapshot, *, max_symbols=600):
 
 
 def select_research_history_universe(
-    snapshot, *, max_symbols=60, min_candidate_amount=MIN_AMOUNT,
-    liquidity_share=0.25,
+    snapshot, *, max_symbols=800, min_candidate_amount=MIN_AMOUNT,
+    liquidity_share=0.20,
 ):
-    """Build a short-term research pool without letting defensive financials dominate.
+    """Select a broad short-term research pool without excluding limit-up leaders.
 
-    This changes only which names receive the bounded deep-history requests.
-    It does not change FHM-100 eligibility, strategy weights, or hard gates.
-    The pool combines a small liquidity anchor with active non-financial names
-    showing positive daily momentum; every selected name is still evaluated
-    by the normal history/factor pipeline.
+    max_symbols=None means scan every valid symbol in the live quote snapshot.
+    The pool is retrieval priority only; inclusion is not a formal candidate or
+    a buy signal. Financials and daily movers above 8% remain observable.
     """
-    if max_symbols < 1:
-        raise ValueError("max_symbols must be positive")
+    if max_symbols is not None and max_symbols < 1:
+        raise ValueError("max_symbols must be positive or None")
     if not 0 < liquidity_share <= 1:
         raise ValueError("liquidity_share must be in (0, 1]")
     frame = _validated_spot_frame(snapshot)
-    # Keep a small liquidity anchor, but do not let banks/insurers/brokers
-    # consume the short-term growth research pool.
-    non_financial = frame[
-        (~frame["name"].astype(str).str.contains(r"银行|证券|保险", regex=True, na=False))
-        & (frame["pct_chg"] <= 8.0)
-    ].copy()
-    anchor_count = max(1, min(max_symbols, int(round(max_symbols * liquidity_share))))
-    anchor = non_financial.sort_values(
+    frame = frame.sort_values(
         ["amount", "code"], ascending=[False, True]
-    ).head(anchor_count)
+    ).reset_index(drop=True)
+    if max_symbols is None or max_symbols >= len(frame):
+        return frame.reset_index(drop=True)
+
+    anchor_count = max(1, min(max_symbols, int(round(max_symbols * liquidity_share))))
+    anchor = frame.head(anchor_count)
     remaining = max_symbols - len(anchor)
     if remaining <= 0:
         return anchor.reset_index(drop=True)
-    momentum = non_financial[
-        (~non_financial["code"].isin(set(anchor["code"])))
-        & (non_financial["amount"] >= min_candidate_amount)
-        & (non_financial["pct_chg"] > 0)
-        & (non_financial["pct_chg"] <= 8.0)
+
+    # Include strong active movers, including limit-up/near-limit-up names.
+    # This is a history-retrieval rule, not permission to chase a high opening.
+    momentum = frame[
+        (~frame["code"].isin(set(anchor["code"])))
+        & (frame["amount"] >= min_candidate_amount)
+        & (frame["pct_chg"] > 0)
     ].sort_values(
         ["pct_chg", "amount", "code"], ascending=[False, False, True]
     ).head(remaining)
     selected = pd.concat([anchor, momentum], ignore_index=True)
-    # If the momentum pool is sparse, fill only from other liquid non-financial
-    # names; never silently reintroduce excluded defensive financials.
     if len(selected) < max_symbols:
-        fill = non_financial[
-            ~non_financial["code"].isin(set(selected["code"]))
-        ].sort_values(["amount", "code"], ascending=[False, True]).head(
-            max_symbols - len(selected)
-        )
+        fill = frame[
+            ~frame["code"].isin(set(selected["code"]))
+        ].head(max_symbols - len(selected))
         selected = pd.concat([selected, fill], ignore_index=True)
     return selected.drop_duplicates("code").head(max_symbols).reset_index(drop=True)
 
@@ -888,17 +882,24 @@ def main():
         u=universe()
         OUT.mkdir(exist_ok=True)
         u.to_csv(OUT/"market_snapshot.csv", index=False, encoding="utf-8-sig")
-        # Short-term research pool: liquidity anchor + active non-financial
-        # names. This affects retrieval priority only; FHM A/B/C rules remain intact.
-        history_universe = select_research_history_universe(u, max_symbols=60)
+        # Adaptive short-term research pool. Default is 800 symbols; set
+        # FHM_HISTORY_SCAN_MAX_SYMBOLS=all to request full-market history retrieval.
+        # Scan inclusion never grants M5 eligibility or buy authorization.
+        scan_limit_raw = os.getenv("FHM_HISTORY_SCAN_MAX_SYMBOLS", "800").strip().lower()
+        if scan_limit_raw in {"all", "full", "unlimited", "0"}:
+            scan_limit = None
+        else:
+            scan_limit = int(scan_limit_raw)
+        history_universe = select_research_history_universe(u, max_symbols=scan_limit)
         history_pool_audit = {
-            "selection_mode": "liquidity_anchor_plus_active_nonfinancial",
+            "selection_mode": "liquidity_anchor_plus_active_momentum_and_market_fill",
             "primary_history_symbols": int(len(history_universe)),
-            "supplement_selected_symbols": 0,
-            "supplement_deferred_symbols": 0,
             "history_scan_symbols": int(len(history_universe)),
-            "financial_names_excluded_from_research_pool": True,
-            "daily_gain_chase_cap_pct": 8.0,
+            "history_scan_limit": "ALL" if scan_limit is None else int(scan_limit),
+            "full_market_history_scan": bool(len(history_universe) == len(u)),
+            "financial_names_excluded_from_research_pool": False,
+            "daily_gain_chase_cap_pct": None,
+            "momentum_candidates_available": int(((u["amount"] >= MIN_AMOUNT) & (u["pct_chg"] > 0)).sum()),
             "formal_candidate_filter": False,
         }
         (OUT/"history_pool_audit.json").write_text(
@@ -911,7 +912,7 @@ def main():
         if not w.empty:
             w, observation_audit = rank_price_observations(
                 w, expected_universe_size=len(history_universe),
-                scope_id="research_pool_60_growth_focused"
+                scope_id=f"shortline_research_pool_{len(history_universe)}"
             )
         else:
             observation_audit = pd.DataFrame()
@@ -1173,9 +1174,14 @@ def main():
 
     # Execute M2 -> M3 -> M5 -> M8 on every strategy row. Missing PIT,
     # factor, 15-minute or portfolio-risk inputs remain explicit blockers.
+    minute_limit_raw = os.getenv("FHM_15M_SCAN_LIMIT", "100").strip().lower()
+    minute_scan_limit = (
+        None if minute_limit_raw in {"all", "full", "unlimited", "0"}
+        else int(minute_limit_raw)
+    )
     decision_gates, decision_gate_audit = build_live_decision_gate_audit(
         w, m5, m3, runtime_mainline, industry_membership,
-        decision_time=now,
+        decision_time=now, minute_scan_limit=minute_scan_limit,
     )
     decision_gates.to_csv(
         OUT/"four_layer_decision_gates.csv", index=False, encoding="utf-8-sig"
@@ -1231,8 +1237,8 @@ def main():
     c=w[w["技术观察通过"]&w["流动性观察通过"]]
     lines=["# FHM-100 自动研究扫描报告",f"- 运行时间：{now.isoformat()}",
       f"- 全市场实时行情快照：{len(u)}只（含沪深北及科创板；见market_snapshot.csv）",
-      f"- 深度历史扫描池：{len(history_universe)}只（主池{history_pool_audit.get('primary_history_symbols', 0)}只 + 行情预筛补充{history_pool_audit.get('supplement_selected_symbols', 0)}只；补充池上限200只）",
-      f"- 补充池预筛规则：当日成交额≥1亿元且涨幅为正；符合预筛但本次未补取历史：{history_pool_audit.get('supplement_deferred_symbols', 0)}只；预筛不等于模型通过",
+      f"- 深度历史扫描池：{len(history_universe)}只；扫描上限={history_pool_audit.get('history_scan_limit')}；全市场扫描={history_pool_audit.get('full_market_history_scan', False)}",
+      f"- 扫描范围包含金融股及涨幅超过8%的活跃股；纳入扫描不等于模型通过或追涨买入",
       f"- 历史数据成功：{len(w)}",f"- 数据异常：{len(e)}",
       f"- 行情采集状态：{'正常' if len(u) else '失败/不可用；本次不产生候选'}",
       f"- 基础技术观察名单：{len(c)}",
