@@ -373,6 +373,217 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
         output.append(g.tail(1))
     return pd.concat(output, ignore_index=True) if output else x.assign(residual_return_5=np.nan)
 
+
+def _require_historical_pit_eligible(frame: pd.DataFrame, name: str) -> None:
+    """Reject retrieval-time backfills masquerading as historical PIT observations."""
+    required = {"historical_pit_eligible", "availability_basis", "available_time",
+                "source_id", "source_revision"}
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(f"{name} missing PIT eligibility fields: " + ",".join(sorted(missing)))
+    if frame.empty:
+        raise ValueError(f"{name} has no observations")
+    eligible = frame["historical_pit_eligible"].map(
+        lambda value: value is True or isinstance(value, np.bool_) and bool(value)
+    )
+    if not eligible.all():
+        raise ValueError(f"{name} contains observations not certified historical PIT eligible")
+    basis = frame["availability_basis"].astype(str).str.strip()
+    allowed_basis = {"original_publication_time", "exchange_publication_time"}
+    invalid_basis = ~basis.isin(allowed_basis)
+    if invalid_basis.any():
+        rejected = sorted(basis.loc[invalid_basis].unique().tolist())
+        raise ValueError(
+            f"{name} has unsupported availability_basis: " + ",".join(rejected)
+        )
+    for col in ("source_id", "source_revision"):
+        values = frame[col]
+        if values.isna().any() or values.astype(str).str.strip().eq("").any():
+            raise ValueError(f"{name} has invalid {col}")
+    available = pd.to_datetime(frame["available_time"], errors="coerce", utc=True)
+    if available.isna().any():
+        raise ValueError(f"{name}.available_time contains invalid timestamps")
+
+
+def build_m4_pit_factor_snapshot(
+    stock_bars: pd.DataFrame,
+    stock_returns: pd.DataFrame,
+    industry_returns: pd.DataFrame,
+    market_returns: pd.DataFrame,
+    *,
+    decision_time,
+    expected_universe_size: int,
+    coverage_floor: float = 0.95,
+    hard_gate_snapshot: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build one audited M4 cross-section for one historical decision instant.
+
+    Historical replay must call this once per decision_time. Percentiles are
+    emitted only when the supplied symbol universe exactly matches the declared
+    expected size and each factor meets its coverage floor. Gate flags are
+    copied only from an independently archived, lineage-validated gate snapshot;
+    this builder never infers event, liquidity, breakout or risk approvals.
+    """
+    if isinstance(expected_universe_size, bool) or not isinstance(expected_universe_size, int) or expected_universe_size < 1:
+        raise ValueError("expected_universe_size must be a positive integer")
+    if not 0 < float(coverage_floor) <= 1:
+        raise ValueError("coverage_floor must be within (0,1]")
+    cutoff = pd.Timestamp(decision_time)
+    if cutoff.tzinfo is None:
+        raise ValueError("decision_time must be timezone-aware")
+
+    # All four factor inputs must carry original, auditable point-in-time
+    # availability. Retrieval-time downloads of old history are not PIT data.
+    for frame, name in (
+        (stock_bars, "stock_bars"),
+        (stock_returns, "stock_returns"),
+        (industry_returns, "industry_returns"),
+        (market_returns, "market_returns"),
+    ):
+        _require_historical_pit_eligible(frame, name)
+
+    price = price_structure(stock_bars, decision_time=cutoff)
+    price = price.sort_values("trade_date").groupby("symbol", as_index=False).tail(1).copy()
+    if price["symbol"].duplicated().any():
+        raise ValueError("duplicate latest price rows")
+    stock_pit = _pit_frame(stock_returns, cutoff, "stock returns", ("symbol", "industry_code"))
+    if stock_pit.empty:
+        raise ValueError("no PIT stock return rows available")
+    stock_pit = stock_pit.sort_values("trade_date").groupby("symbol", as_index=False).tail(1)
+    industry = industry_relative_strength(industry_returns, market_returns, cutoff)
+    residual = residual_strength(stock_returns, market_returns, industry_returns, decision_time=cutoff)
+    if not industry.empty:
+        industry = industry[["industry_code", "industry_excess_5", "industry_excess_20"]]
+    else:
+        industry = pd.DataFrame(columns=["industry_code", "industry_excess_5", "industry_excess_20"])
+    residual = residual[["symbol", "industry_code", "trade_date", "residual_return_5"]]
+    base = price.merge(
+        stock_pit[["symbol", "industry_code", "trade_date", "available_time", "source_id", "source_revision"]],
+        on=["symbol", "trade_date"], how="inner", suffixes=("", "_returns"), validate="one_to_one",
+    )
+    base = base.merge(industry, on="industry_code", how="left", validate="many_to_one")
+    base = base.merge(
+        residual[["symbol", "trade_date", "residual_return_5"]],
+        on=["symbol", "trade_date"], how="left", validate="one_to_one",
+    )
+    base["trade_date"] = pd.to_datetime(base["trade_date"], errors="coerce")
+    if base.empty:
+        raise ValueError("no symbols have both PIT price and return observations")
+    if base["trade_date"].nunique() != 1:
+        raise ValueError("M4 snapshot inputs do not share one decision trade_date")
+    base["industry_relative_strength_raw"] = base["industry_excess_5"]
+    base["stock_residual_strength_raw"] = base["residual_return_5"]
+    base["price_structure_raw"] = base["CLV"]
+    # A transparent, observable activity/price-quality proxy; this is a factor,
+    # not a hard liquidity approval. The actual risk/liquidity gate stays external.
+    base["trade_quality_raw"] = base["amount_ma5_to_ma20"]
+    base["pre_pullback_strength_raw"] = base["residual_return_5"]
+    # Pullback structure is unavailable until verified PIT total-return geometry
+    # and the required reversal confirmation are both present.
+    base["pullback_reversal_structure_raw"] = np.nan
+
+    mappings = {
+        "industry_relative_strength_pct": ("industry_relative_strength_raw", True),
+        "stock_residual_strength_pct": ("stock_residual_strength_raw", True),
+        "price_structure_pct": ("price_structure_raw", True),
+        "trade_quality_pct": ("trade_quality_raw", True),
+        "pre_pullback_strength_pct": ("pre_pullback_strength_raw", True),
+        "pullback_reversal_structure_pct": ("pullback_reversal_structure_raw", True),
+    }
+    audits = []
+    for output, (raw, higher) in mappings.items():
+        values = pd.to_numeric(base[raw], errors="coerce")
+        values = values.where(np.isfinite(values))
+        coverage = int(values.notna().sum()) / expected_universe_size
+        universe_ok = len(base) == expected_universe_size
+        status = "ranked" if universe_ok and coverage >= coverage_floor else (
+            "universe_size_mismatch" if not universe_ok else "insufficient_factor_coverage"
+        )
+        base[output] = rank_factor(values, higher_is_better=higher) if status == "ranked" else np.nan
+        audits.append({
+            "factor_name": output, "trade_date": base["trade_date"].iloc[0],
+            "expected_universe_size": expected_universe_size,
+            "observed_universe_size": int(len(base)),
+            "finite_factor_count": int(values.notna().sum()),
+            "factor_coverage": coverage, "coverage_floor": float(coverage_floor),
+            "status": status,
+        })
+
+    gate_fields = (
+        "industry_top_30pct", "stock_residual_top_20pct", "amount_ma20_ge_100m",
+        "breakout_or_confirmed_retest",
+        "no_high_volume_stall_or_repeated_rejection",
+        "pre_pullback_residual_positive", "pullback_between_0_5_and_4pct",
+        "pullback_volume_le_80pct_prior5d", "stop_or_reversal_confirmed",
+        "industry_not_weak", "no_material_negative_event",
+        "liquidity_and_risk_pass",
+    )
+    for field in gate_fields:
+        base[field] = pd.NA
+    # A's explicit 20-session average traded-value floor is directly
+    # derivable from the PIT OHLCV archive; unknown rolling windows stay NA.
+    amount_ma20 = pd.to_numeric(base.get("amount_ma20"), errors="coerce")
+    base["amount_ma20_ge_100m"] = pd.Series(
+        pd.NA, index=base.index, dtype="boolean"
+    )
+    valid_amount = amount_ma20.notna() & np.isfinite(amount_ma20)
+    base.loc[valid_amount, "amount_ma20_ge_100m"] = (
+        amount_ma20.loc[valid_amount] >= 100_000_000
+    )
+    if hard_gate_snapshot is not None:
+        _require_historical_pit_eligible(hard_gate_snapshot, "hard_gate_snapshot")
+        external_gate_fields = tuple(
+            field for field in gate_fields if field != "amount_ma20_ge_100m"
+        )
+        required_gate = {"symbol", "available_time", "source_id", "source_revision", *external_gate_fields}
+        missing = required_gate - set(hard_gate_snapshot.columns)
+        if missing:
+            raise ValueError("hard_gate_snapshot missing: " + ",".join(sorted(missing)))
+        gates = hard_gate_snapshot.copy()
+        available = pd.to_datetime(gates["available_time"], errors="coerce")
+        if available.isna().any() or available.dt.tz is None:
+            raise ValueError("hard_gate_snapshot.available_time must be timezone-aware")
+        gates["available_time"] = available.dt.tz_convert("UTC")
+        gates = gates.loc[gates["available_time"] <= cutoff.tz_convert("UTC")].copy()
+        for col in ("source_id", "source_revision"):
+            if gates[col].isna().any() or gates[col].astype(str).str.strip().eq("").any():
+                raise ValueError("hard_gate_snapshot has invalid lineage")
+        gates["symbol"] = gates["symbol"].astype(str).str.strip()
+        if gates["symbol"].duplicated().any():
+            raise ValueError("duplicate hard_gate_snapshot symbol")
+        for field in external_gate_fields:
+            if not gates[field].map(lambda v: isinstance(v, (bool, np.bool_))).all():
+                raise ValueError("hard gate values must be explicit booleans: " + field)
+        base = base.drop(columns=list(external_gate_fields)).merge(
+            gates[["symbol", *external_gate_fields]], on="symbol", how="left", validate="one_to_one"
+        )
+    # Preserve each input archive's lineage alongside the derived-factor
+    # identity; never overwrite the only record of where observations came from.
+    for frame, prefix in (
+        (stock_bars, "stock_bars"),
+        (stock_returns, "stock_returns"),
+        (industry_returns, "industry_returns"),
+        (market_returns, "market_returns"),
+    ):
+        available = pd.to_datetime(frame["available_time"], errors="coerce", utc=True)
+        used = frame.loc[available <= cutoff.tz_convert("UTC")]
+        base[f"{prefix}_source_ids"] = ";".join(
+            sorted(used["source_id"].astype(str).str.strip().unique())
+        )
+        base[f"{prefix}_source_revisions"] = ";".join(
+            sorted(used["source_revision"].astype(str).str.strip().unique())
+        )
+    base["historical_pit_eligible"] = True
+    base["availability_basis"] = "derived_from_certified_pit_inputs"
+    base["available_time"] = pd.to_datetime(base["available_time"], utc=True)
+    base["source_id"] = "derived:m4_pit_factor_builder"
+    base["source_revision"] = "derived:v2"
+    base["m4_decision_time"] = cutoff.isoformat()
+    base["m4_factor_status"] = "ready"
+    # Incomplete factor ranks remain NA and are visible in the audit; the M5
+    # adapter will not turn them into scores.
+    return base, pd.DataFrame(audits)
+
 def rank_factor(values: pd.Series, higher_is_better: bool = True) -> pd.Series:
     """Rank finite numeric observations; malformed/non-finite values stay missing."""
     numeric = pd.to_numeric(values, errors="coerce")
