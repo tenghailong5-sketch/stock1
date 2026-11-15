@@ -290,3 +290,28 @@ def test_market_flow_confirmation_does_not_require_positive_policy_archive():
     out = attach_startup_evidence(industry, emotion, policy)
     assert out.startup_evidence_status.iloc[0] == "CONFIRMED"
     assert out.startup_policy_status.iloc[0] == "UNKNOWN"
+
+
+
+def test_m3_persistence_ready_requires_confirmed_ignition_and_positive_three_session_flow():
+    from src.model.mainline_signal_gates import gate_ignition_labels
+
+    frame = pd.DataFrame({
+        "mainline_phase": ["IGNITION", "IGNITION", "IGNITION", "IGNITION"],
+        "startup_evidence_status": ["CONFIRMED"] * 4,
+        "turnover_share_change_3d": [0.02, 0.0, -0.01, None],
+        "relative_strength_change_3d": [0.03, 0.02, 0.03, 0.03],
+    })
+    out = gate_ignition_labels(frame)
+    assert out["persistence_ready"].tolist() == [True, False, False, False]
+
+
+def test_m3_persistence_is_false_when_three_session_flow_fields_are_missing():
+    from src.model.mainline_signal_gates import gate_ignition_labels
+
+    frame = pd.DataFrame({
+        "mainline_phase": ["IGNITION"],
+        "startup_evidence_status": ["CONFIRMED"],
+    })
+    out = gate_ignition_labels(frame)
+    assert out["persistence_ready"].tolist() == [False]
