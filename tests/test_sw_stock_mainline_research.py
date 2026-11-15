@@ -85,3 +85,56 @@ def test_rejects_pit_eligible_membership_rows():
         build_sw_stock_mainline_research(
             members, _mainline(), as_of_date="2026-11-15"
         )
+
+
+def test_forward_current_membership_maps_stock_to_mainline_without_pit_authority():
+    from src.model.sw_stock_mainline_research import build_forward_stock_mainline_research
+
+    membership = pd.DataFrame([
+        {"symbol": "600000", "industry_level1": "银行", "observed_at": "2026-11-14T13:00:00Z",
+         "availability_basis": "retrieval_time_only", "historical_pit_eligible": False,
+         "source_id": "swsresearch.sw2021_stock_classification", "source_revision": "rev-a",
+         "snapshot_scope": "current_membership_observation_only", "snapshot_id": "snap-1"},
+        {"symbol": "000001", "industry_level1": "房地产", "observed_at": "2026-11-14T13:00:00Z",
+         "availability_basis": "retrieval_time_only", "historical_pit_eligible": False,
+         "source_id": "swsresearch.sw2021_stock_classification", "source_revision": "rev-b",
+         "snapshot_scope": "current_membership_observation_only", "snapshot_id": "snap-1"},
+    ])
+    mainline = pd.DataFrame([
+        {"industry_code": "801780", "industry_name": "银行", "trade_date": "2026-11-13",
+         "mainline_phase": "IGNITION", "mainline_phase_gated": "IGNITION_UNCONFIRMED",
+         "strength_percentile": 0.9},
+        {"industry_code": "801180", "industry_name": "房地产", "trade_date": "2026-11-13",
+         "mainline_phase": "DECAY", "mainline_phase_gated": "DECAY",
+         "strength_percentile": 0.2},
+    ])
+    result, audit = build_forward_stock_mainline_research(
+        membership, mainline, decision_time="2026-11-15T10:00:00Z"
+    )
+    assert result.set_index("symbol").loc["600000", "mainline_phase"] == "IGNITION"
+    assert result.set_index("symbol").loc["000001", "mainline_phase"] == "DECAY"
+    assert audit["status"] == "READY_RESEARCH_ONLY"
+    assert audit["membership_to_mainline_coverage"] == 1.0
+    assert not result["historical_pit_eligible"].any()
+    assert not result["trading_authorization"].any()
+
+
+def test_forward_mapper_rejects_future_membership_snapshot():
+    from src.model.sw_stock_mainline_research import build_forward_stock_mainline_research
+
+    membership = pd.DataFrame([{
+        "symbol": "600000", "industry_level1": "银行", "observed_at": "2026-11-16T13:00:00Z",
+        "availability_basis": "retrieval_time_only", "historical_pit_eligible": False,
+        "source_id": "swsresearch.sw2021_stock_classification", "source_revision": "rev-a",
+        "snapshot_scope": "current_membership_observation_only", "snapshot_id": "snap-1",
+    }])
+    mainline = pd.DataFrame([{
+        "industry_code": "801780", "industry_name": "银行", "trade_date": "2026-11-13",
+        "mainline_phase": "IGNITION", "mainline_phase_gated": "IGNITION_UNCONFIRMED",
+        "strength_percentile": 0.9,
+    }])
+    result, audit = build_forward_stock_mainline_research(
+        membership, mainline, decision_time="2026-11-15T10:00:00Z"
+    )
+    assert result.empty
+    assert audit["status"] == "NO_CURRENT_MAPPING_INPUTS"
