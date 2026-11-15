@@ -131,3 +131,44 @@ def test_quote_only_current_snapshot_can_rank_with_live_industry_anchor():
     assert ranked["research_rank_status"].eq("RANKED_RESEARCH_ONLY").all()
     assert ranked["research_rank_formal_m5_score"].eq(False).all()
     assert ranked["research_rank_buy_authorization"].eq(False).all()
+
+
+
+def test_weighted_quote_only_score_and_final_shortlist_are_diversified():
+    from src.model.research_ranking import build_final_candidate_shortlist
+
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002", "000003", "000004", "000005", "000006"],
+        "名称": ["A", "B", "C", "D", "E", "F"],
+        "最新价": [10, 11, 12, 13, 14, 15],
+        "涨跌幅%": [4.0, 3.0, 2.0, 5.0, 4.5, 12.0],
+        "当日成交额": [300e6, 250e6, 200e6, 180e6, 160e6, 400e6],
+    })
+    m5_input = pd.DataFrame({
+        "symbol": ["000001", "000002", "000003", "000004", "000005", "000006"],
+        "industry_relative_strength": [95, 90, 85, 80, 75, 99],
+    })
+    industry = pd.DataFrame({
+        "symbol": ["000001", "000002", "000003", "000004", "000005", "000006"],
+        "current_industry_level1": ["银行", "银行", "银行", "计算机", "计算机", "传媒"],
+        "strength_percentile": [0.95, 0.90, 0.85, 0.80, 0.75, 0.99],
+    })
+    ranked, audit = build_research_opportunity_ranking(
+        watchlist, m5_input, industry_context=industry
+    )
+    shortlist, event_watch, shortlist_audit = build_final_candidate_shortlist(
+        ranked, max_candidates=5, max_per_industry=2, min_amount=100e6
+    )
+    assert audit["score_method"] == "weighted_observed_percentiles_renormalized_per_row"
+    assert audit["factor_weights"] == {
+        "industry_strength": 0.35,
+        "current_momentum": 0.45,
+        "current_liquidity": 0.20,
+    }
+    assert len(shortlist) == 4
+    assert shortlist["shortlist_industry"].value_counts().max() <= 2
+    assert len(event_watch) == 1
+    assert event_watch.iloc[0]["symbol"] == "000006"
+    assert shortlist["entry_confirmation_status"].eq("PENDING_15M_CONFIRMATION").all()
+    assert shortlist["buy_authorization"].eq(False).all()
+    assert shortlist_audit["buy_authorization"] is False
