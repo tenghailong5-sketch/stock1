@@ -61,19 +61,24 @@ def _live_snapshot_ready(row: dict, cutoff: pd.Timestamp, *, max_age_hours: floa
         return False
 
 
-def load_risk_context_file(path: str | None) -> tuple[dict, dict]:
-    """Load operator-supplied, per-symbol M8 plans without inventing account data.
+def load_risk_context_file(path: str | None, raw_json: str | None = None) -> tuple[dict, dict]:
+    """Load operator-supplied M8 plans from a file or protected secret JSON.
 
     JSON shape: {"600000": {"entry_price": ..., "stop_price": ...,
     "quantity": ..., "planned_risk": ..., "reward_risk": ...,
     "minimum_reward_risk": ..., "existing_portfolio_risk": ...,
     "existing_position_count": ..., "available_risk_budget": ...}}
     """
-    if not path:
+    if raw_json and raw_json.strip():
+        source = "operator_configured_secret_json"
+    elif path:
+        source = "operator_configured_file"
+    else:
         return {}, {"status": "NOT_CONFIGURED", "symbol_count": 0}
     from pathlib import Path
     try:
-        payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+        payload_text = raw_json if raw_json and raw_json.strip() else Path(path).expanduser().read_text(encoding="utf-8")
+        payload = json.loads(payload_text)
         if not isinstance(payload, dict):
             raise ValueError("risk context JSON root must be an object keyed by symbol")
         normalized = {}
@@ -86,7 +91,7 @@ def load_risk_context_file(path: str | None) -> tuple[dict, dict]:
             normalized[symbol] = context
         return normalized, {
             "status": "LOADED", "symbol_count": len(normalized),
-            "source": "operator_configured_file",
+            "source": source,
         }
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         return {}, {
