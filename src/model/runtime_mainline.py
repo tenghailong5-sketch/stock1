@@ -500,6 +500,7 @@ def scan_runtime_mainlines(
             "gated_phase_counts": latest_rows.mainline_phase_gated.value_counts().to_dict(),
             "startup_evidence_counts": latest_rows.startup_evidence_status.value_counts().to_dict(),
             "confirmed_startups": int(latest_rows.startup_evidence_status.eq("CONFIRMED").sum()),
+            "persistence_ready_count": int(latest_rows.persistence_ready.eq(True).sum()),
             "peak_evidence_true": int(latest_rows.peak_evidence.fillna(False).sum()),
             "decay_evidence_true": int(latest_rows.decay_evidence.fillna(False).sum()),
             "historical_pit_eligible": False,
