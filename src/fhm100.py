@@ -1456,8 +1456,9 @@ def main():
     # be mistaken for a formal score or buy authorization.
     try:
         research_opportunities, research_opportunity_audit = build_research_opportunity_ranking(
-            w, m5_input, min_observed_factors=3,
+            w, m5_input, min_observed_factors=2,
             industry_context=forward_stock_mainline,
+            allow_quote_only_fallback=True,
         )
     except Exception as ranking_exc:
         research_opportunities = pd.DataFrame()
@@ -1723,7 +1724,7 @@ def main():
       f"- 公司行为前瞻账本：{corporate_action_audit.get('status')}；候选扫描={corporate_action_audit.get('symbols_checked', 0)}只；新增事件版本={corporate_action_audit.get('rows_appended', 0)}；仅首次观察之后可用，未验证总回报，不参与评分或交易授权",
       f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
       f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
-      f"- 研究机会排序：{research_opportunity_audit.get('ranked_count', 0)}/{research_opportunity_audit.get('row_count', 0)}只；行业强度35%、当日动量45%、成交额20%，缺失因子不补值；不是正式M5分数或买入授权",
+      f"- 研究机会排序：{research_opportunity_audit.get('ranked_count', 0)}/{research_opportunity_audit.get('row_count', 0)}只；行业强度35%、当日动量45%、成交额20%，行业映射缺失时退化为行情动量+成交额排序；不是正式M5分数或买入授权",
       f"- 最终候选观察名单：{final_candidate_audit.get('candidate_count', 0)}只；单行业最多3只；成交额至少1亿元；涨幅区间-5%至+9.5%；15分钟确认待执行",
       f"- 强势事件观察：{final_candidate_audit.get('event_watch_count', 0)}只；涨幅达到9.5%的股票单独观察，不混入普通候选，不追高",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
