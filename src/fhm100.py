@@ -523,23 +523,22 @@ def audit_forward_industry_membership(archive_root, expected_symbols, *, decisio
     root = Path(archive_root) / "industry_membership"
     files = sorted(root.glob("*.jsonl")) if root.exists() else []
     frames = []
+    archive_errors = []
     for path in files:
         try:
             frame = pd.read_json(path, lines=True, dtype={"symbol": str})
         except (ValueError, OSError) as exc:
-            return pd.DataFrame(), {
-                "status": "invalid_archive_file",
-                "reason": f"{path.name}:{type(exc).__name__}:{str(exc)[:160]}",
-                "expected_universe_size": len(set(map(str, expected_symbols))),
-                "selected_symbol_count": 0,
-                "membership_coverage": 0.0,
-                "historical_pit_eligible": False,
-            }
+            archive_errors.append(
+                f"{path.name}:{type(exc).__name__}:{str(exc)[:160]}"
+            )
+            continue
         if not frame.empty:
             frames.append(frame)
     if not frames:
         return pd.DataFrame(), {
-            "status": "no_snapshot",
+            "status": "invalid_archive_file" if archive_errors else "no_snapshot",
+            "reason": " | ".join(archive_errors[:8]) if archive_errors else None,
+            "archive_file_error_count": len(archive_errors),
             "expected_universe_size": len(set(map(str, expected_symbols))),
             "selected_symbol_count": 0,
             "membership_coverage": 0.0,
@@ -576,8 +575,11 @@ def audit_forward_industry_membership(archive_root, expected_symbols, *, decisio
             "historical_pit_eligible": False,
         }
     selected, audit = select_latest_observed_industry_snapshot(
-        membership, expected_symbols, decision_time=decision_time, max_age="2D"
+        membership, expected_symbols, decision_time=decision_time,
+        max_age="5D", min_symbol_coverage=0.90,
     )
+    audit["archive_file_error_count"] = len(archive_errors)
+    audit["archive_file_errors"] = archive_errors
     return selected, audit
 
 
