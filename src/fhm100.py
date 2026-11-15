@@ -33,7 +33,7 @@ from src.model.live_decision_integration import (
 from src.model.mainline_flows import attach_pit_stock_turnover_concentration
 from src.model.archive_readiness import audit_forward_archive
 from src.model.shortline_architecture import audit_shortline_architecture
-from src.model.research_ranking import build_research_opportunity_ranking
+from src.model.research_ranking import build_research_opportunity_ranking, build_final_candidate_shortlist
 
 OUT=Path("output"); OUT.mkdir(exist_ok=True)
 MIN_AMOUNT=100_000_000
@@ -1470,6 +1470,24 @@ def main():
     research_opportunities.to_csv(
         OUT/"research_opportunity_rank.csv", index=False, encoding="utf-8-sig"
     )
+    try:
+        final_candidates, momentum_event_watch, final_candidate_audit = build_final_candidate_shortlist(
+            research_opportunities, max_candidates=30, max_per_industry=3,
+            min_amount=100_000_000, min_pct_change=-5.0, max_pct_change=9.5,
+        )
+    except Exception as shortlist_exc:
+        final_candidates, momentum_event_watch = pd.DataFrame(), pd.DataFrame()
+        final_candidate_audit = {
+            "status": "SHORTLIST_UNAVAILABLE",
+            "reason": f"{type(shortlist_exc).__name__}: {str(shortlist_exc)[:220]}",
+            "candidate_count": 0, "event_watch_count": 0,
+            "buy_authorization": False,
+        }
+    final_candidates.to_csv(OUT/"final_candidate_shortlist.csv", index=False, encoding="utf-8-sig")
+    momentum_event_watch.to_csv(OUT/"momentum_event_watch.csv", index=False, encoding="utf-8-sig")
+    (OUT/"final_candidate_audit.json").write_text(
+        json.dumps(final_candidate_audit, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
     (OUT/"research_opportunity_audit.json").write_text(
         json.dumps(research_opportunity_audit, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
@@ -1705,7 +1723,9 @@ def main():
       f"- 公司行为前瞻账本：{corporate_action_audit.get('status')}；候选扫描={corporate_action_audit.get('symbols_checked', 0)}只；新增事件版本={corporate_action_audit.get('rows_appended', 0)}；仅首次观察之后可用，未验证总回报，不参与评分或交易授权",
       f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
       f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
-      f"- 研究机会排序：{research_opportunity_audit.get('ranked_count', 0)}/{research_opportunity_audit.get('row_count', 0)}只；优先使用当前涨跌幅、成交额和行业强度，历史K线仅作可选增强；不是正式M5分数或买入授权",
+      f"- 研究机会排序：{research_opportunity_audit.get('ranked_count', 0)}/{research_opportunity_audit.get('row_count', 0)}只；行业强度35%、当日动量45%、成交额20%，缺失因子不补值；不是正式M5分数或买入授权",
+      f"- 最终候选观察名单：{final_candidate_audit.get('candidate_count', 0)}只；单行业最多3只；成交额至少1亿元；涨幅区间-5%至+9.5%；15分钟确认待执行",
+      f"- 强势事件观察：{final_candidate_audit.get('event_watch_count', 0)}只；涨幅达到9.5%的股票单独观察，不混入普通候选，不追高",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
       f"- 四层决策门：{decision_gate_audit.get('status')}；检查记录={decision_gate_audit.get('candidate_count', 0)}；15分钟扫描={decision_gate_audit.get('minute_scanned_count', 0)}；准入={decision_gate_audit.get('allowed_count', 0)}；阻断={decision_gate_audit.get('blocked_count', 0)}",
       f"- 正式模型状态：{formal_status}",
@@ -1722,7 +1742,13 @@ def main():
       "M4已新增CLV、BodyStrength、5/10/20日收益、20日突破和上影线的横截面观察分位，并输出m4_observation_audit.csv。分位仅在同一交易日、声明的当前高成交额股票池完整覆盖且因子覆盖率达到80%；低于80%则不生成分位时生成；不完整则全部留空。它们不是价格结构/成交质量复合分，也未接入M5。M3仅在前瞻归档状态READY时传入M5；行业/残差分位及策略硬门槛仍未全部接入，因此M5仍是诊断而非正式评分。",
       "不输出A/B/C正式评分、P_up、预期收益或买入指令；观察名单不等于达到80分门槛。AI仅作文字点评，不参与评分、不放宽硬门槛。",
       "价格口径：本扫描仅用未复权原始日线；尚无点时公司行为账本，分红送转附近的跨日收益/均线可能失真，相关观察值不得进入正式模型评分或回测标签。",
-      "## 研究机会排序（研究观察，不是正式M5分数/买入指令）",
+      "## 最终候选观察名单（不是买入指令；15分钟确认待执行）",
+      (final_candidates.head(30).to_markdown(index=False)
+       if not final_candidates.empty else "本次没有满足普通候选观察条件的股票；完整排序见research_opportunity_rank.csv。"),
+      "## 强势事件观察（单独监控，不进入普通候选池）",
+      (momentum_event_watch.head(20).to_markdown(index=False)
+       if not momentum_event_watch.empty else "本次无符合条件的强势事件观察股票。"),
+      "## 全市场研究排序（非正式M5分数）",
       (research_opportunities.head(20).to_markdown(index=False)
        if not research_opportunities.empty else "本次没有达到至少3项可观察因子的研究排名记录。"),
       "## 快速初筛排名（临时研究结果，非正式FHM信号/非买入指令）",
@@ -1746,6 +1772,7 @@ def main():
       "archive_readiness":archive_readiness,
       "m4_pit_snapshot_audit":m4_pit_snapshot_audit,
       "research_opportunity_audit":research_opportunity_audit,
+      "final_candidate_audit":final_candidate_audit,
       "shortline_architecture_audit":shortline_architecture,
       "runtime_mainline_audit":runtime_mainline_audit,
       "sw_industry_history_research_audit":sw_history_audit,
