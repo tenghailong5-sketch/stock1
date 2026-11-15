@@ -46,6 +46,8 @@ def attach_forward_industry_flow_changes(
     trade_date = dates.max()
     if getattr(trade_date, "tzinfo", None) is not None:
         trade_date = trade_date.tz_localize(None)
+    trade_date = pd.Timestamp(trade_date).normalize()
+    trade_date_key = trade_date.strftime("%Y-%m-%d")
     shares = pd.to_numeric(out["turnover_share"], errors="coerce")
     snapshot = pd.DataFrame({
         "trade_date": dates.dt.strftime("%Y-%m-%d"),
@@ -55,7 +57,7 @@ def attach_forward_industry_flow_changes(
     # Archive only the latest completed session, never relabel older history
     # with today's retrieval timestamp.
     snapshot = snapshot.loc[
-        snapshot["trade_date"].eq(trade_date.strftime("%Y-%m-%d"))
+        snapshot["trade_date"].eq(trade_date_key)
     ].copy()
     snapshot = snapshot.loc[
         snapshot["industry_name"].ne("")
@@ -65,7 +67,7 @@ def attach_forward_industry_flow_changes(
     eligible = (
         local.weekday() < 5
         and local.time() >= pd.Timestamp("15:05").time()
-        and trade_date.date() == local.date()
+        and trade_date_key == local.strftime("%Y-%m-%d")
         and not snapshot.empty
     )
     existing = []
@@ -85,8 +87,13 @@ def attach_forward_industry_flow_changes(
         snapshot["availability_basis"] = "retrieval_time_only"
         snapshot["historical_pit_eligible"] = False
         history = pd.concat([history, snapshot], ignore_index=True)
-        history["trade_date"] = pd.to_datetime(history["trade_date"], errors="coerce").dt.strftime("%Y-%m-%d")
-        history["captured_at"] = pd.to_datetime(history["captured_at"], errors="coerce", utc=True)
+        history["trade_date"] = pd.to_datetime(history["trade_date"], errors="coerce").dt.normalize().dt.strftime("%Y-%m-%d")
+        # Archive rows may contain both legacy space-separated UTC strings
+        # and fresh ISO-8601 offsets. Pandas' strict single-format inference
+        # silently coerces mixed rows to NaT unless format="mixed" is explicit.
+        history["captured_at"] = pd.to_datetime(
+            history["captured_at"].astype(str), errors="coerce", utc=True, format="mixed"
+        )
         history = history.dropna(subset=["trade_date", "captured_at"])
         history = history.sort_values("captured_at").drop_duplicates(
             ["trade_date", "industry_name"], keep="last"
@@ -114,24 +121,28 @@ def attach_forward_industry_flow_changes(
     )
     latest_rows = []
     for name, group in history.groupby("industry_name", sort=False):
-        group = group.sort_values("trade_date")
-        current = group.loc[group.trade_date.eq(trade_date)]
-        if current.empty:
+        group = group.sort_values("trade_date").drop_duplicates("trade_date", keep="last")
+        # Work from the ordered session window rather than mixing timezone-aware
+        # panel dates with naive archive dates. The latest archived row must be
+        # the requested session; a 3-session change needs current + 3 prior rows.
+        group = group.loc[group.trade_date.dt.strftime("%Y-%m-%d").le(trade_date_key)]
+        if group.empty or group.iloc[-1].trade_date.strftime("%Y-%m-%d") != trade_date_key:
             continue
-        row = current.iloc[-1]
-        prior1 = group.loc[group.trade_date.lt(trade_date)].tail(1)
-        prior3 = group.loc[group.trade_date.lt(trade_date)].tail(3)
+        window = group.tail(4)
+        row = window.iloc[-1]
+        prior1 = window.iloc[-2] if len(window) >= 2 else None
+        prior3 = window.iloc[0] if len(window) >= 4 else None
         latest_rows.append({
             "industry_name": name,
             "turnover_share_change_1d": (
-                float(row.turnover_share - prior1.iloc[-1].turnover_share)
-                if not prior1.empty else float("nan")
+                float(row.turnover_share - prior1.turnover_share)
+                if prior1 is not None else float("nan")
             ),
             "turnover_share_change_3d": (
-                float(row.turnover_share - prior3.iloc[0].turnover_share)
-                if len(prior3) == 3 else float("nan")
+                float(row.turnover_share - prior3.turnover_share)
+                if prior3 is not None else float("nan")
             ),
-            "industry_flow_observation_count": int(len(group.loc[group.trade_date.le(trade_date)])),
+            "industry_flow_observation_count": int(len(group)),
         })
     changes = pd.DataFrame(latest_rows)
     if not changes.empty:
@@ -139,6 +150,10 @@ def attach_forward_industry_flow_changes(
             c for c in ("turnover_share_change_1d", "turnover_share_change_3d",
                         "industry_flow_observation_count") if c in out
         ]).merge(changes, on="industry_name", how="left", validate="many_to_one")
+    else:
+        out["turnover_share_change_1d"] = pd.NA
+        out["turnover_share_change_3d"] = pd.NA
+        out["industry_flow_observation_count"] = 0
     ready = bool(
         not changes.empty
         and pd.to_numeric(changes.get("turnover_share_change_3d"), errors="coerce").notna().any()

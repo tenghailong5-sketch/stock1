@@ -240,7 +240,7 @@ def test_15m_confirmation_scan_supports_all_candidates_without_fixed_cap():
 
 
 
-def test_15m_scan_skips_symbols_without_any_m5_eligible_strategy():
+def test_15m_observation_runs_even_when_m5_strategy_is_not_eligible():
     watchlist = pd.DataFrame([
         {"代码": "600000", "当日成交额": 1e9},
         {"代码": "000001", "当日成交额": 8e8},
@@ -258,11 +258,13 @@ def test_15m_scan_skips_symbols_without_any_m5_eligible_strategy():
         ),
         minute_scan_limit=None,
     )
-    assert seen == ["600000"]
+    assert seen == ["600000", "000001"]
     assert audit["m5_eligible_symbol_count"] == 1
-    assert audit["minute_scanned_count"] == 1
+    assert audit["minute_scanned_count"] == 2
     blocked = rows.loc[rows["symbol"] == "000001"]
-    assert blocked["minute_reason"].eq("m5_strategy_not_eligible").all()
+    assert blocked["m5_eligible"].eq(False).all()
+    assert blocked["allowed"].eq(False).all()
+    assert blocked["minute_status"].eq("CHECKED").all()
 
 def test_15m_full_universe_uses_bounded_parallel_workers(monkeypatch):
     from src.model import live_decision_integration as integration
