@@ -50,9 +50,16 @@ def test_all_four_gates_can_authorize_only_with_complete_inputs():
         minute_confirmation_fetcher=lambda symbol, captured_at=None: {
             "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
             "reason": "all_15m_checks_passed",
+            "entry_reference_price": 20.5, "breakout_trigger_price": 20.2,
+            "stop_reference_price": 19.9, "stop_distance_pct": 2.9268,
+            "invalidation_condition": "15分钟收盘跌破19.9",
         },
     )
     assert rows["allowed"].all()
+    assert rows["entry_reference_price"].eq(20.5).all()
+    assert rows["breakout_trigger_price"].eq(20.2).all()
+    assert rows["stop_reference_price"].eq(19.9).all()
+    assert rows["invalidation_condition"].eq("15分钟收盘跌破19.9").all()
     assert audit["allowed_count"] == 3
     assert audit["formal_signal_emitted"] is False
 
