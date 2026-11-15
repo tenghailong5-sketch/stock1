@@ -29,6 +29,7 @@ def _inputs():
         "entry_price": 20.0, "stop_price": 19.0, "quantity": 500,
         "planned_risk": 600.0, "reward_risk": 2.0, "minimum_reward_risk": 1.5,
         "existing_portfolio_risk": 0.0, "existing_position_count": 0,
+        "available_risk_budget": 1000.0,
         "same_industry_or_corr_gt_06": False,
     }}
     return watchlist, m5, market, mainline, membership, risk
