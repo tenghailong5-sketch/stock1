@@ -1912,11 +1912,21 @@ def main():
         raw_json=os.getenv("FHM_RISK_CONTEXT_JSON", ""),
     )
     try:
+        # The expensive live 15m/M8 pass belongs to the selected research
+        # shortlist, not all 5,378 quote rows. Full-universe discovery and M5
+        # readiness diagnostics remain available in their separate outputs.
+        gate_watchlist = (
+            final_candidates.copy()
+            if not final_candidates.empty
+            else w.iloc[0:0].copy()
+        )
         decision_gates, decision_gate_audit = build_live_decision_gate_audit(
-            w, m5, m3, mainline_mapping_panel, industry_membership,
+            gate_watchlist, m5, m3, mainline_mapping_panel, industry_membership,
             decision_time=now, minute_scan_limit=minute_scan_limit,
             risk_context_by_symbol=risk_context_by_symbol,
         )
+        decision_gate_audit["candidate_source"] = "final_research_shortlist"
+        decision_gate_audit["research_shortlist_count"] = int(len(final_candidates))
     except Exception as gate_exc:
         decision_gates = pd.DataFrame()
         decision_gate_audit = {
