@@ -4,12 +4,20 @@ on:
   push:
     branches:
       - main
+    # Only runtime/model changes trigger a full-market scan. Documentation,
+    # tests and forward archives must not launch or cancel a live research run.
+    paths:
+      - 'src/**'
+      - 'config/**'
+      - 'scripts/**'
+      - 'requirements*.txt'
+      - '.github/workflows/fhm100.yml'
 
 permissions:
   contents: write
 concurrency:
   group: fhm100-daily
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   scan:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
