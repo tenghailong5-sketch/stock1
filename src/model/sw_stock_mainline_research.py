@@ -1,6 +1,7 @@
 """Research-only link between effective-dated SW stocks and live industry mainlines."""
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 
@@ -225,3 +226,131 @@ def build_forward_stock_mainline_research(
         "research_only": True,
     }
     return mapped, audit
+
+
+
+def build_spot_industry_strength_panel(
+    membership: pd.DataFrame,
+    stock_snapshot: pd.DataFrame,
+    *,
+    trade_date,
+    decision_time,
+    snapshot_observed_at,
+) -> tuple[pd.DataFrame, dict]:
+    """Build a one-session sector-strength fallback from a current quote snapshot.
+
+    This fallback can rank current industry strength when the SW index-history
+    endpoint is unavailable. It deliberately emits no lifecycle phase: one
+    session of constituent quotes cannot prove ignition, peak, or decay.
+    """
+    required_membership = {
+        "symbol", "industry_level1", "observed_at", "availability_basis",
+        "historical_pit_eligible", "snapshot_scope",
+    }
+    required_stock = {"code", "pct_chg", "amount"}
+    if not isinstance(membership, pd.DataFrame) or not isinstance(stock_snapshot, pd.DataFrame):
+        raise ValueError("membership and stock_snapshot must be DataFrames")
+    missing = required_membership - set(membership.columns)
+    if missing:
+        raise ValueError("spot membership missing: " + ",".join(sorted(missing)))
+    missing = required_stock - set(stock_snapshot.columns)
+    if missing:
+        raise ValueError("spot stock snapshot missing: " + ",".join(sorted(missing)))
+    cutoff = pd.Timestamp(decision_time)
+    observed = pd.Timestamp(snapshot_observed_at)
+    if cutoff.tzinfo is None or observed.tzinfo is None:
+        raise ValueError("decision_time and snapshot_observed_at must be timezone-aware")
+    cutoff = cutoff.tz_convert("UTC")
+    observed = observed.tz_convert("UTC")
+    if observed > cutoff:
+        raise ValueError("stock quote snapshot is newer than decision_time")
+    members = membership.copy()
+    members["symbol"] = members["symbol"].astype(str).str.strip().str.zfill(6)
+    members["industry_level1"] = members["industry_level1"].astype(str).str.strip()
+    members["observed_at"] = pd.to_datetime(members["observed_at"], errors="coerce", utc=True)
+    if members["observed_at"].isna().any() or (members["observed_at"] > cutoff).any():
+        raise ValueError("membership observation time is invalid or after decision_time")
+    if not members["availability_basis"].astype(str).eq("retrieval_time_only").all():
+        raise ValueError("spot membership must remain retrieval_time_only")
+    if members["historical_pit_eligible"].map(
+        lambda value: value is True or str(value).strip().lower() in {"true", "1", "yes"}
+    ).any():
+        raise ValueError("PIT-eligible membership is not accepted by spot fallback")
+    if not members["snapshot_scope"].astype(str).eq("current_membership_observation_only").all():
+        raise ValueError("spot membership scope must be current-only")
+    latest_snapshot = members["observed_at"].max()
+    members = members.loc[members["observed_at"].eq(latest_snapshot)].copy()
+    members = members.drop_duplicates(["symbol", "industry_level1"])
+    ambiguous = set(members.loc[members.symbol.duplicated(keep=False), "symbol"])
+    members = members.loc[~members.symbol.isin(ambiguous)].copy()
+
+    stocks = stock_snapshot.copy()
+    stocks["symbol"] = stocks["code"].astype(str).str.strip().str[-6:].str.zfill(6)
+    stocks["pct_chg"] = pd.to_numeric(stocks["pct_chg"], errors="coerce")
+    stocks["amount"] = pd.to_numeric(stocks["amount"], errors="coerce")
+    stocks = stocks.loc[
+        stocks["symbol"].str.fullmatch(r"\d{6}", na=False)
+        & np.isfinite(stocks["pct_chg"])
+        & np.isfinite(stocks["amount"])
+        & stocks["amount"].gt(0)
+    ].copy()
+    if stocks["symbol"].duplicated().any():
+        raise ValueError("spot stock snapshot contains duplicate symbols")
+    joined = members.merge(
+        stocks[["symbol", "pct_chg", "amount"]],
+        on="symbol", how="inner", validate="one_to_one",
+    )
+    if joined.empty:
+        return pd.DataFrame(), {
+            "status": "NO_MATCHED_SPOT_STOCKS", "matched_symbols": 0,
+            "ambiguous_membership_symbols_excluded": len(ambiguous),
+            "mainline_phase_available": False,
+            "historical_pit_eligible": False, "trading_authorization": False,
+            "research_only": True,
+        }
+    joined["amount_weighted_return"] = joined["pct_chg"] * joined["amount"]
+    panel = joined.groupby("industry_level1", as_index=False).agg(
+        industry_amount=("amount", "sum"),
+        amount_weighted_return=("amount_weighted_return", "sum"),
+        mean_stock_return_pct=("pct_chg", "mean"),
+        median_stock_return_pct=("pct_chg", "median"),
+        positive_breadth=("pct_chg", lambda values: float((values > 0).mean())),
+        stock_count=("symbol", "nunique"),
+    )
+    panel["amount_weighted_return_pct"] = (
+        panel["amount_weighted_return"] / panel["industry_amount"]
+    )
+    panel["strength_percentile"] = panel["amount_weighted_return_pct"].rank(
+        method="average", pct=True
+    )
+    total_amount = float(panel["industry_amount"].sum())
+    panel["turnover_share"] = panel["industry_amount"] / total_amount
+    panel["industry_code"] = "SWL1:" + panel["industry_level1"].astype(str)
+    panel["industry_name"] = panel["industry_level1"].astype(str)
+    panel["trade_date"] = pd.Timestamp(trade_date).normalize()
+    panel["mainline_phase"] = "UNKNOWN"
+    panel["mainline_phase_gated"] = "UNKNOWN"
+    panel["startup_evidence_status"] = "UNKNOWN"
+    panel["phase_gate_reason"] = "one_session_spot_only_no_lifecycle_history"
+    panel["strength_basis"] = "amount_weighted_current_constituent_return"
+    panel["mainline_phase_available"] = False
+    panel["research_only"] = True
+    panel["historical_pit_eligible"] = False
+    panel["trading_authorization"] = False
+    panel = panel.sort_values(
+        ["strength_percentile", "industry_name"], ascending=[False, True]
+    ).reset_index(drop=True)
+    audit = {
+        "status": "READY_SPOT_ONLY_RESEARCH",
+        "trade_date": pd.Timestamp(trade_date).date().isoformat(),
+        "membership_snapshot_time": latest_snapshot.isoformat(),
+        "stock_snapshot_observed_at": observed.isoformat(),
+        "matched_symbols": int(joined.symbol.nunique()),
+        "industry_count": int(panel.industry_code.nunique()),
+        "ambiguous_membership_symbols_excluded": len(ambiguous),
+        "mainline_phase_available": False,
+        "historical_pit_eligible": False,
+        "trading_authorization": False,
+        "research_only": True,
+    }
+    return panel, audit

@@ -138,3 +138,59 @@ def test_forward_mapper_rejects_future_membership_snapshot():
     )
     assert result.empty
     assert audit["status"] == "NO_CURRENT_MAPPING_INPUTS"
+
+
+
+def test_spot_industry_strength_fallback_ranks_sectors_without_inventing_phase():
+    from src.model.sw_stock_mainline_research import build_spot_industry_strength_panel
+
+    observed = "2026-11-13T08:00:00Z"
+    membership = pd.DataFrame({
+        "symbol": ["000001", "000002", "000003", "000004"],
+        "industry_level1": ["银行", "银行", "电子", "电子"],
+        "observed_at": [observed] * 4,
+        "availability_basis": ["retrieval_time_only"] * 4,
+        "historical_pit_eligible": [False] * 4,
+        "snapshot_scope": ["current_membership_observation_only"] * 4,
+    })
+    stocks = pd.DataFrame({
+        "code": ["000001", "000002", "000003", "000004"],
+        "pct_chg": [0.5, 1.0, 8.0, 6.0],
+        "amount": [100.0, 100.0, 100.0, 100.0],
+    })
+    panel, audit = build_spot_industry_strength_panel(
+        membership, stocks,
+        trade_date="2026-11-13",
+        decision_time="2026-11-13T09:00:00Z",
+        snapshot_observed_at="2026-11-13T08:30:00Z",
+    )
+    assert audit["status"] == "READY_SPOT_ONLY_RESEARCH"
+    assert panel.iloc[0].industry_name == "电子"
+    assert panel.iloc[0].strength_percentile == 1.0
+    assert panel.mainline_phase.eq("UNKNOWN").all()
+    assert panel.mainline_phase_available.eq(False).all()
+    assert panel.historical_pit_eligible.eq(False).all()
+    assert panel.trading_authorization.eq(False).all()
+
+
+def test_spot_industry_strength_fallback_rejects_future_quote_snapshot():
+    from src.model.sw_stock_mainline_research import build_spot_industry_strength_panel
+
+    membership = pd.DataFrame({
+        "symbol": ["000001"], "industry_level1": ["银行"],
+        "observed_at": ["2026-11-13T08:00:00Z"],
+        "availability_basis": ["retrieval_time_only"],
+        "historical_pit_eligible": [False],
+        "snapshot_scope": ["current_membership_observation_only"],
+    })
+    stocks = pd.DataFrame({"code": ["000001"], "pct_chg": [1.0], "amount": [100.0]})
+    try:
+        build_spot_industry_strength_panel(
+            membership, stocks, trade_date="2026-11-13",
+            decision_time="2026-11-13T08:00:00Z",
+            snapshot_observed_at="2026-11-13T08:30:00Z",
+        )
+    except ValueError as exc:
+        assert "newer than decision_time" in str(exc)
+    else:
+        raise AssertionError("future stock quote snapshots must be rejected")
