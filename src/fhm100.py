@@ -938,7 +938,7 @@ def main():
     }
     try:
         # Fetch and retain the complete live A-share quote universe. Only the
-        # deeper per-symbol history requests use a 600-symbol liquidity pool plus a bounded quote prefilter.
+        # deeper per-symbol history requests use the bounded research pool (500 by default).
         u=universe()
         OUT.mkdir(exist_ok=True)
         u.to_csv(OUT/"market_snapshot.csv", index=False, encoding="utf-8-sig")
