@@ -666,3 +666,17 @@ def test_build_m4_snapshot_rejects_unapproved_availability_basis():
     with pytest.raises(ValueError, match="unsupported availability_basis"):
         from src.model.m4_factors import _require_historical_pit_eligible
         _require_historical_pit_eligible(frame, "stock_bars")
+
+
+
+def test_m4_partial_universe_can_rank_when_default_coverage_floor_is_met():
+    from src.model.m4_factors import _m4_universe_factor_status
+
+    assert _m4_universe_factor_status(
+        observed_universe_size=80, expected_universe_size=100,
+        finite_factor_count=80, coverage_floor=0.80,
+    ) == "ranked_partial_universe"
+    assert _m4_universe_factor_status(
+        observed_universe_size=79, expected_universe_size=100,
+        finite_factor_count=79, coverage_floor=0.80,
+    ) == "universe_coverage_below_minimum"
