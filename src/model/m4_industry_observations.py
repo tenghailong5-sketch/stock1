@@ -31,7 +31,7 @@ def select_latest_observed_industry_snapshot(
     expected_symbols,
     *,
     decision_time,
-    max_age="5D",
+    max_age="10D",
     min_symbol_coverage=0.90,
 ) -> tuple[pd.DataFrame, dict]:
     """Select the newest sufficiently complete visible forward-only membership batch.
