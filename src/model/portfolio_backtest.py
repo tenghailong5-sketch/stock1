@@ -77,7 +77,7 @@ def run_portfolio_backtest(
     work["_score"] = pd.to_numeric(work["score"], errors="coerce")
     bars_work = bars.copy()
     bars_work["_date"] = bars_work["trade_date"].map(_as_date)
-    bars_work["_volume"] = bars_work["volume"].map(_volume)
+    bars_work["_volume"] = bars_work["open_auction_volume"].map(_volume)
     dates = sorted(bars_work["_date"].unique())
     bars_by_day = {
         day: {str(row["symbol"]): row for row in group.to_dict(orient="records")}
@@ -142,15 +142,11 @@ def run_portfolio_backtest(
             bar = day_bars.get(symbol)
             if bar is None:
                 continue
-            was_already_triggered = position.get("stop_triggered", False)
-            stop_hit_today = float(bar["low"]) <= position["stop_price"]
-            if not was_already_triggered and not stop_hit_today:
+            if not position.get("stop_triggered", False):
                 continue
-            # Once triggered, an unfilled protective stop remains a pending
-            # market exit. Retry on later sessions even if price rebounds.
-            position["stop_triggered"] = True
-            reference = (float(bar["open"]) if was_already_triggered
-                         else min(float(bar["open"]), position["stop_price"]))
+            # A daily low is only known after the session closes. A stop
+            # triggered by that low can execute no earlier than next session.
+            reference = float(bar["open"])
             result = simulate_daily_fill(
                 side="sell", quantity=position["shares"], reference_price=reference,
                 trade_date=day, entry_date=position["entry_date"],
@@ -254,6 +250,10 @@ def run_portfolio_backtest(
             bar = day_bars.get(symbol)
             if bar is not None:
                 position["last_close"] = float(bar["close"])
+                # Today's low is known only after the opening execution window.
+                # Queue a stop for the next session, never today's open.
+                if position["entry_date"] < day and float(bar["low"]) <= position["stop_price"]:
+                    position["stop_triggered"] = True
             market_value += position["shares"] * position["last_close"]
         daily_equity.append({
             "date": day.isoformat(), "cash": round(cash, 2),
