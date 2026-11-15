@@ -164,7 +164,13 @@ def attach_pit_stock_turnover_concentration(
         )
     missing_pit = PIT_STOCK_TURNOVER_REQUIRED - set(pit_stock_turnover.columns)
     if missing_pit:
-        raise ValueError("PIT turnover missing fields: " + ",".join(sorted(missing_pit)))
+        # Optional live concentration data must never block the mainline scan.
+        # Keep the factor explicitly unavailable; do not synthesize or promote it to PIT.
+        out = frame.copy()
+        out["stock_turnover"] = float("nan")
+        out["stock_turnover_share"] = float("nan")
+        out["stock_turnover_pit_status"] = "missing_pit_schema_skipped:" + ",".join(sorted(missing_pit))
+        return out
     if frame.duplicated(["trade_date", "industry_code"]).any():
         raise ValueError("duplicate mainline industry/date rows are not allowed")
     if pit_stock_turnover.duplicated(["trade_date", "industry_code"]).any():
