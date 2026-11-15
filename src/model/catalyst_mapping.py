@@ -119,7 +119,7 @@ def map_candidate_sectors(candidates, available_industries, *, decision_time=Non
             if observed is None or observed > cutoff or (cutoff - observed).total_seconds() > max_age_days * 86400:
                 stale += 1
                 continue
-        headline = re.sub(r"[\\W_]+", "", str(candidate.get("title") or "").lower(), flags=re.UNICODE)
+        headline = re.sub(r"[\W_]+", "", str(candidate.get("title") or "").lower(), flags=re.UNICODE)
         identity = headline or str(candidate.get("candidate_id") or candidate.get("event_id") or "")
         text = " ".join(str(candidate.get(key) or "") for key in (
             "title", "summary", "catalog", "issuing_agency",
