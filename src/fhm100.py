@@ -611,45 +611,51 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
     pit_by_symbol = {}
     pit_snapshot_status = "not_supplied"
     if pit_factor_snapshot is not None:
-        required_pit = {
-            "symbol", "trade_date", "available_time", "source_id",
-            "source_revision", "availability_basis", "historical_pit_eligible",
-        }
-        missing_pit = required_pit - set(pit_factor_snapshot.columns)
-        if missing_pit:
-            raise ValueError("PIT factor snapshot missing: " + ",".join(sorted(missing_pit)))
-        if decision_time is None:
-            raise ValueError("decision_time is required for PIT factor mapping")
-        cutoff = pd.Timestamp(decision_time)
-        if cutoff.tzinfo is None:
-            raise ValueError("decision_time must be timezone-aware")
-        pit = pit_factor_snapshot.copy()
-        pit["symbol"] = pit["symbol"].astype(str).str.strip().str.zfill(6)
-        pit["trade_date"] = pd.to_datetime(pit["trade_date"], errors="coerce")
-        available = pd.to_datetime(pit["available_time"], errors="coerce")
-        if available.isna().any() or available.dt.tz is None:
-            raise ValueError("PIT factor available_time must be timezone-aware")
-        pit["available_time"] = available.dt.tz_convert("UTC")
-        cutoff_utc = cutoff.tz_convert("UTC")
-        decision_date = cutoff.tz_convert("Asia/Shanghai").date()
-        eligible = (
-            pit["historical_pit_eligible"].map(lambda value: isinstance(value, (bool, np.bool_)) and bool(value))
-            & pit["availability_basis"].astype(str).str.strip().eq("derived_from_certified_pit_inputs")
-            & pit["trade_date"].notna()
-            & (pit["trade_date"].dt.date <= decision_date)
-            & (pit["available_time"] <= cutoff_utc)
-            & pit["source_id"].notna()
-            & pit["source_id"].astype(str).str.strip().ne("")
-            & pit["source_revision"].notna()
-            & pit["source_revision"].astype(str).str.strip().ne("")
-        )
-        pit = pit.loc[eligible].copy()
-        # Duplicate rows are ambiguous; exclude that symbol rather than choosing
-        # an arbitrary provider/revision row.
-        duplicate_symbols = set(pit.loc[pit["symbol"].duplicated(keep=False), "symbol"])
-        pit = pit.loc[~pit["symbol"].isin(duplicate_symbols)]
-        pit_by_symbol = pit.set_index("symbol").to_dict(orient="index")
-        pit_snapshot_status = "validated" if pit_by_symbol else "no_eligible_rows"
+        # An empty snapshot is a valid "no PIT observations" state. Preserve
+        # live-forward research diagnostics instead of aborting the whole scan.
+        # Non-empty snapshots must still satisfy the full certified PIT schema.
+        if pit_factor_snapshot.empty:
+            pit_snapshot_status = "empty_snapshot"
+        else:
+            required_pit = {
+                "symbol", "trade_date", "available_time", "source_id",
+                "source_revision", "availability_basis", "historical_pit_eligible",
+            }
+            missing_pit = required_pit - set(pit_factor_snapshot.columns)
+            if missing_pit:
+                raise ValueError("PIT factor snapshot missing: " + ",".join(sorted(missing_pit)))
+            if decision_time is None:
+                raise ValueError("decision_time is required for PIT factor mapping")
+            cutoff = pd.Timestamp(decision_time)
+            if cutoff.tzinfo is None:
+                raise ValueError("decision_time must be timezone-aware")
+            pit = pit_factor_snapshot.copy()
+            pit["symbol"] = pit["symbol"].astype(str).str.strip().str.zfill(6)
+            pit["trade_date"] = pd.to_datetime(pit["trade_date"], errors="coerce")
+            available = pd.to_datetime(pit["available_time"], errors="coerce")
+            if available.isna().any() or available.dt.tz is None:
+                raise ValueError("PIT factor available_time must be timezone-aware")
+            pit["available_time"] = available.dt.tz_convert("UTC")
+            cutoff_utc = cutoff.tz_convert("UTC")
+            decision_date = cutoff.tz_convert("Asia/Shanghai").date()
+            eligible = (
+                pit["historical_pit_eligible"].map(lambda value: isinstance(value, (bool, np.bool_)) and bool(value))
+                & pit["availability_basis"].astype(str).str.strip().eq("derived_from_certified_pit_inputs")
+                & pit["trade_date"].notna()
+                & (pit["trade_date"].dt.date <= decision_date)
+                & (pit["available_time"] <= cutoff_utc)
+                & pit["source_id"].notna()
+                & pit["source_id"].astype(str).str.strip().ne("")
+                & pit["source_revision"].notna()
+                & pit["source_revision"].astype(str).str.strip().ne("")
+            )
+            pit = pit.loc[eligible].copy()
+            # Duplicate rows are ambiguous; exclude that symbol rather than choosing
+            # an arbitrary provider/revision row.
+            duplicate_symbols = set(pit.loc[pit["symbol"].duplicated(keep=False), "symbol"])
+            pit = pit.loc[~pit["symbol"].isin(duplicate_symbols)]
+            pit_by_symbol = pit.set_index("symbol").to_dict(orient="index")
+            pit_snapshot_status = "validated" if pit_by_symbol else "no_eligible_rows"
 
     def _cross_section_percentile(column):
         if column not in base:
