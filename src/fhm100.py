@@ -1201,6 +1201,59 @@ def main():
     m5_blockers = summarize_m5_blockers(m5)
     m5_blockers.to_csv(OUT/"m5_blocker_summary.csv",index=False,encoding="utf-8-sig")
 
+    # Optional CNEquity historical mainline replay. It is a separate research
+    # lane: reconstructed historical membership/industry indices never become
+    # historical PIT trading evidence or alter today's live candidate gates.
+    cnequity_mainline_audit = {
+        "status": "DISABLED",
+        "historical_pit_eligible": False,
+        "trading_authorization": False,
+    }
+    cnequity_enabled = os.getenv(
+        "FHM_CNEQUITY_MAINLINE_RESEARCH", "0"
+    ).strip().lower() in {"1", "true", "yes"}
+    if cnequity_enabled:
+        try:
+            from src.providers.cnequity_mainline import load_cnequity_mainline_inputs
+            from src.model.mainline_flows import classify_mainlines
+
+            cnequity_root = (
+                os.getenv("FHM_CNEQUITY_DATA_ROOT")
+                or os.getenv("CNE_DATA_ROOT")
+            )
+            cnequity_start = os.getenv("FHM_CNEQUITY_RESEARCH_START", "2020-01-01")
+            cnequity_end = now.astimezone(
+                ZoneInfo("Asia/Shanghai")
+            ).date().isoformat()
+            cnequity_panel, cnequity_mainline_audit = load_cnequity_mainline_inputs(
+                start=cnequity_start,
+                end=cnequity_end,
+                data_root=cnequity_root,
+            )
+            if not cnequity_panel.empty:
+                cnequity_history = classify_mainlines(cnequity_panel)
+                cnequity_history.to_csv(
+                    OUT/"cnequity_historical_mainline_research.csv",
+                    index=False, encoding="utf-8-sig",
+                )
+                cnequity_mainline_audit["phase_counts"] = (
+                    cnequity_history["mainline_phase"].value_counts().to_dict()
+                )
+                cnequity_mainline_audit["status"] = "READY_RESEARCH_ONLY"
+            else:
+                cnequity_mainline_audit["status"] = "NO_ALIGNED_HISTORY"
+        except Exception as exc:
+            cnequity_mainline_audit = {
+                "status": "UNAVAILABLE",
+                "reason": f"{type(exc).__name__}: {str(exc)[:300]}",
+                "historical_pit_eligible": False,
+                "trading_authorization": False,
+            }
+    (OUT/"cnequity_historical_mainline_audit.json").write_text(
+        json.dumps(cnequity_mainline_audit, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+
     # Optional Kronos research sidecar. It runs only when explicitly enabled,
     # uses the exact history snapshots already fetched above, and never alters
     # candidate ordering, M5 scores, or decision-gate authorization.
