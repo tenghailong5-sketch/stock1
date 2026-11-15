@@ -174,14 +174,14 @@ def build_live_decision_gate_audit(
         required_risk_fields = (
             "entry_price", "stop_price", "quantity", "planned_risk",
             "reward_risk", "minimum_reward_risk", "existing_portfolio_risk",
-            "existing_position_count", "same_industry_or_corr_gt_06",
+            "existing_position_count", "available_risk_budget",
         )
         risk_context_complete = (
             all(field in risk for field in required_risk_fields)
             and all(_finite(risk.get(field)) for field in (
                 "entry_price", "stop_price", "planned_risk", "reward_risk",
                 "minimum_reward_risk", "existing_portfolio_risk",
-                "existing_position_count",
+                "existing_position_count", "available_risk_budget",
             ))
             and isinstance(risk.get("quantity"), int)
             and not isinstance(risk.get("quantity"), bool)
@@ -206,7 +206,8 @@ def build_live_decision_gate_audit(
             "minimum_reward_risk": risk.get("minimum_reward_risk", np.nan),
             "existing_portfolio_risk": risk.get("existing_portfolio_risk", np.nan),
             "existing_position_count": risk.get("existing_position_count", -1),
-            "same_industry_or_corr_gt_06": risk.get("same_industry_or_corr_gt_06"),
+            "available_risk_budget": risk.get("available_risk_budget", np.nan),
+            "same_industry_or_corr_gt_06": risk.get("same_industry_or_corr_gt_06", False),
         }
         for strategy in ("A", "B", "C"):
             candidate = m5_lookup.get((symbol, strategy), {})
