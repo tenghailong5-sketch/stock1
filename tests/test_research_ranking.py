@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.model.research_ranking import build_research_opportunity_ranking
+from src.model.research_ranking import build_research_opportunity_ranking, build_final_candidate_shortlist
 
 
 def test_research_ranking_uses_only_observed_same_session_and_industry_factors():
@@ -135,8 +135,6 @@ def test_quote_only_current_snapshot_can_rank_with_live_industry_anchor():
 
 
 def test_weighted_quote_only_score_and_final_shortlist_are_diversified():
-    from src.model.research_ranking import build_final_candidate_shortlist
-
     watchlist = pd.DataFrame({
         "代码": ["000001", "000002", "000003", "000004", "000005", "000006"],
         "名称": ["A", "B", "C", "D", "E", "F"],
