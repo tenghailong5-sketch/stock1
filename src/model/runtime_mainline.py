@@ -119,7 +119,7 @@ def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path)
 
 def _assemble_emotion(*, decision_time: pd.Timestamp, archive_root: Path) -> tuple[pd.DataFrame, dict]:
     result = assemble_market_emotion_history(
-        archive_root, decision_time=decision_time.isoformat(), min_sessions=60
+        archive_root, decision_time=decision_time.isoformat(), min_sessions=20
     )
     if result.get("status") != "READY":
         raise RuntimeError(
