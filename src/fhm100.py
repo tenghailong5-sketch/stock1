@@ -1160,7 +1160,7 @@ def main():
         build_runtime_m4_pit_snapshot(
             decision_time=now,
             input_dir=os.getenv("FHM_M4_PIT_INPUT_DIR", "").strip() or None,
-            coverage_floor=float(os.getenv("FHM_M4_PIT_COVERAGE_FLOOR", "0.80")),
+            coverage_floor=os.getenv("FHM_M4_PIT_COVERAGE_FLOOR", "0.80"),
         )
     )
     m4_pit_factor_snapshot.to_csv(
