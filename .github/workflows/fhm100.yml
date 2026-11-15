@@ -36,7 +36,7 @@ jobs:
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
         run: |
           for archive_path in data/forward_archive/stock_daily data/forward_archive/stock_daily_manifest data/forward_archive/industry_flow_daily.jsonl; do
-            if [ -d "$archive_path" ]; then
+            if [ -e "$archive_path" ]; then
               git add -A "$archive_path"
             fi
           done
