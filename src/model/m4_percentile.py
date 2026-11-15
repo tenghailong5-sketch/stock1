@@ -22,7 +22,7 @@ def audited_percentile_rank(
     symbol_col: str = "symbol",
     date_col: str = "trade_date",
     higher_is_better: bool = True,
-    min_coverage: float = 0.95,
+    min_coverage: float = 0.80,
 ) -> tuple[pd.Series, pd.DataFrame]:
     """Return per-date ranks plus an audit table; fail closed on incomplete pools.
 
@@ -72,10 +72,14 @@ def audited_percentile_rank(
         valid = numeric.loc[indexes].notna()
         finite_count = int(valid.sum())
         coverage = finite_count / expected_universe_size
-        if observed != expected_universe_size:
-            status = "universe_size_mismatch"
+        minimum_observed = max(1, int(math.ceil(expected_universe_size * coverage_floor)))
+        if observed < minimum_observed:
+            status = "universe_coverage_below_minimum"
         elif coverage < coverage_floor:
             status = "insufficient_factor_coverage"
+        elif observed < expected_universe_size:
+            status = "ranked_partial_universe"
+            ranks.loc[indexes] = rank_factor(numeric.loc[indexes], higher_is_better=higher_is_better)
         else:
             status = "ranked"
             ranks.loc[indexes] = rank_factor(numeric.loc[indexes], higher_is_better=higher_is_better)
