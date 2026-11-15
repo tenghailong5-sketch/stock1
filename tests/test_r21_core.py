@@ -3,7 +3,7 @@ import pytest
 from src.model.r21_core import (
     A_WEIGHTS, B_WEIGHTS, C_WEIGHTS, ExitState, MarketState, PositionExit,
     can_open_position, conservative_daily_exit, point_in_time_rows,
-    position_risk_budget, weighted_score,
+    scale_available_risk_budget, weighted_score,
 )
 
 
@@ -34,12 +34,11 @@ def test_point_in_time_excludes_future_and_unknown_availability():
     assert [r["v"] for r in point_in_time_rows(rows, now)] == [1]
 
 
-def test_risk_budget_never_exceeds_portfolio_cap():
-    first = position_risk_budget(1)
-    second = position_risk_budget(2, first_used=first, same_industry_or_corr_gt_06=True)
-    assert first == 2000
-    assert second == 500 or second == 0  # below 600 threshold is rejected
-    assert first + second <= 3000
+def test_dynamic_risk_budget_has_no_legacy_currency_caps():
+    assert scale_available_risk_budget(250000.0, 0.8) == 200000.0
+    assert scale_available_risk_budget(1250.0, 0.4) == 500.0
+    with pytest.raises(ValueError):
+        scale_available_risk_budget(-1.0, 0.5)
 
 
 def test_risk_off_or_missing_inputs_blocks_new_position():
