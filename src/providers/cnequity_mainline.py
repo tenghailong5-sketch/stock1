@@ -53,6 +53,7 @@ def build_cnequity_mainline_inputs(
     market_index,
     *,
     expected_industry_count: int = 31,
+    min_priced_coverage: float = 0.80,
     benchmark_symbol: str = "000001.SH",
 ) -> tuple[pd.DataFrame, dict]:
     """Build the daily input panel required by classify_mainlines().
@@ -65,7 +66,8 @@ def build_cnequity_mainline_inputs(
     market = _frame(market_index, "index_bars")
     required_industry = {
         "trade_date", "industry_code", "level", "weighting", "ret",
-        "amount", "source", "data_version", "fetched_at",
+        "amount", "n_members", "n_priced", "n_excluded",
+        "source", "data_version", "fetched_at",
     }
     required_market = {
         "symbol", "trade_date", "close", "source", "data_version", "fetched_at",
@@ -78,6 +80,8 @@ def build_cnequity_mainline_inputs(
         raise ValueError("index_bars missing: " + ",".join(sorted(missing)))
     if expected_industry_count < 1:
         raise ValueError("expected_industry_count must be positive")
+    if not 0 < float(min_priced_coverage) <= 1:
+        raise ValueError("min_priced_coverage must be in (0, 1]")
 
     industries["trade_date"] = pd.to_datetime(industries["trade_date"], errors="coerce").dt.normalize()
     industries["industry_code"] = industries["industry_code"].astype(str).str.strip()
@@ -97,6 +101,24 @@ def build_cnequity_mainline_inputs(
         raise ValueError("industry amount contains missing or non-finite values")
     if industries["amount"].lt(0).any():
         raise ValueError("industry amount cannot be negative")
+    for column in ("n_members", "n_priced", "n_excluded"):
+        industries[column] = pd.to_numeric(industries[column], errors="coerce")
+        if industries[column].isna().any() or not np.isfinite(industries[column]).all():
+            raise ValueError(f"industry {column} contains missing or non-finite values")
+        if industries[column].lt(0).any():
+            raise ValueError(f"industry {column} cannot be negative")
+    if industries["n_members"].le(0).any():
+        raise ValueError("industry n_members must be positive")
+    if (
+        industries["n_priced"].gt(industries["n_members"]).any()
+        or industries["n_priced"].add(industries["n_excluded"]).ne(industries["n_members"]).any()
+    ):
+        raise ValueError("industry member/priced/excluded counts are inconsistent")
+    industries["member_coverage"] = industries["n_priced"] / industries["n_members"]
+    low_coverage_rows = int(industries["member_coverage"].lt(min_priced_coverage).sum())
+    industries = industries.loc[industries["member_coverage"] >= min_priced_coverage].copy()
+    if industries.empty:
+        raise ValueError("all SW level-1 industry rows are below priced-member coverage")
     industries["fetched_at"] = _aware_utc(industries["fetched_at"], "industry_index.fetched_at")
     if industries["source"].isna().any() or industries["data_version"].isna().any():
         raise ValueError("industry_index source and data_version are required")
@@ -174,6 +196,8 @@ def build_cnequity_mainline_inputs(
         "weighting": "amount",
         "historical_pit_eligible": False,
         "trading_authorization": False,
+        "min_priced_coverage": float(min_priced_coverage),
+        "low_coverage_rows_excluded": low_coverage_rows,
         "note": "Historical reconstruction supports lifecycle research only; it is not PIT trading evidence.",
     }
     return panel, audit
@@ -187,6 +211,7 @@ def load_cnequity_mainline_inputs(
     loader: Callable | None = None,
     benchmark_symbol: str = "000001.SH",
     expected_industry_count: int = 31,
+    min_priced_coverage: float = 0.80,
 ) -> tuple[pd.DataFrame, dict]:
     """Read CNEquity's local industry_index and benchmark index_bars datasets."""
     if loader is None:
@@ -206,6 +231,7 @@ def load_cnequity_mainline_inputs(
     panel, audit = build_cnequity_mainline_inputs(
         industry, market,
         expected_industry_count=expected_industry_count,
+        min_priced_coverage=min_priced_coverage,
         benchmark_symbol=benchmark_symbol,
     )
     audit.update({
