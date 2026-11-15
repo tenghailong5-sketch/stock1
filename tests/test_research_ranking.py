@@ -301,3 +301,59 @@ def test_final_shortlist_excludes_decay_and_peak_industries():
     assert shortlist["symbol"].tolist() == ["000001", "000002"]
     assert audit["mainline_phase_filtered_count"] == 2
     assert not shortlist["buy_authorization"].any()
+
+
+def test_event_price_in_diagnostics_are_carried_without_changing_rank_score():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002"],
+        "涨跌幅%": [3.0, 3.0],
+        "当日成交额": [200e6, 200e6],
+    })
+    m5_input = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "industry_relative_strength": [80.0, 80.0],
+    })
+    base_context = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "current_industry_level1": ["计算机", "传媒"],
+        "strength_percentile": [0.8, 0.8],
+    })
+    price_in_context = base_context.assign(
+        live_catalyst_candidate_count=[3, 1],
+        live_event_price_in_state=["FULLY_PRICED", "UNPRICED"],
+        live_event_price_in_reason=["runup_without_repricing", "no_material_reaction"],
+        live_event_pre_discovery_excess_20d=[0.12, 0.01],
+        live_event_post_discovery_excess_3d=[0.0, 0.025],
+    )
+    baseline, _ = build_research_opportunity_ranking(
+        watchlist, m5_input, industry_context=base_context,
+        min_observed_factors=2,
+    )
+    ranked, _ = build_research_opportunity_ranking(
+        watchlist, m5_input, industry_context=price_in_context,
+        min_observed_factors=2,
+    )
+    by_symbol = ranked.set_index("symbol")
+    baseline_scores = baseline.set_index("symbol")["research_opportunity_score"]
+    assert by_symbol.loc["000001", "live_event_price_in_state"] == "FULLY_PRICED"
+    assert by_symbol.loc["000002", "live_event_price_in_state"] == "UNPRICED"
+    assert by_symbol.loc["000001", "live_catalyst_candidate_count"] == 3
+    assert by_symbol["research_opportunity_score"].equals(baseline_scores)
+
+
+def test_unknown_mainline_phase_remains_in_research_watchlist_without_buy_authorization():
+    ranked = pd.DataFrame({
+        "symbol": ["000001", "000002", "000003"],
+        "最新价": [10.0, 20.0, 30.0],
+        "涨跌幅%": [2.0, 3.0, 4.0],
+        "当日成交额": [300e6, 250e6, 200e6],
+        "research_opportunity_score": [95.0, 90.0, 85.0],
+        "live_industry_level1": ["电子", "计算机", "机械设备"],
+        "live_mainline_phase_gated": ["UNKNOWN", None, "UNKNOWN"],
+        "market_cycle_state": ["TRANSITION"] * 3,
+    })
+    shortlist, _, audit = build_final_candidate_shortlist(ranked, max_candidates=10)
+    assert shortlist["symbol"].tolist() == ["000001", "000002", "000003"]
+    assert shortlist["mainline_lifecycle_status"].eq("UNKNOWN_RESEARCH_ONLY").all()
+    assert not shortlist["buy_authorization"].any()
+    assert audit["mainline_phase_filtered_count"] == 0

@@ -18,9 +18,11 @@ class FakeResponse:
 class FakeSession:
     def __init__(self):
         self.calls = 0
+        self.params = []
 
     def get(self, url, *, params, timeout):
         self.calls += 1
+        self.params.append(dict(params))
         return FakeResponse({
             "articles": [{
                 "title": "Chip export controls discussed",
@@ -41,6 +43,7 @@ def test_global_news_discovery_is_bounded_auditable_and_candidate_only():
         per_theme_limit=5,
     )
     assert session.calls == len(global_news.QUERY_THEMES)
+    assert all(params["timespan"] == "30d" for params in session.params)
     assert len(rows) == 1
     assert rows[0]["theme"] in global_news.QUERY_THEMES
     assert rows[0]["timestamp_basis"].startswith("retrieval_time")
