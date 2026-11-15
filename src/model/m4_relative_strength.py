@@ -69,7 +69,7 @@ def rank_industry_excess(
     decision_time,
     expected_industry_count: int,
     scope_id: str = "archived_industry_universe",
-    min_coverage: float = 0.95,
+    min_coverage: float = 0.80,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Compute 5d/20d industry excess returns and rank within industries."""
     raw = industry_relative_strength(
@@ -101,7 +101,7 @@ def rank_stock_residual_strength(
     window: int = 60,
     min_periods: int = 40,
     scope_id: str = "top_350_turnover_universe",
-    min_coverage: float = 0.95,
+    min_coverage: float = 0.80,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Compute PIT residual returns, then rank stocks within the stock pool."""
     raw = residual_strength(
