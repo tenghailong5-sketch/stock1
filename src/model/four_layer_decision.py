@@ -88,9 +88,11 @@ def industry_permission(
     elif decision_mode == "live_forward":
         if industry_live_data_eligible is not True:
             return IndustryPermission("BLOCKED", False, "industry_live_snapshot_not_ready")
+        if persistence_ready is not True:
+            return IndustryPermission("BLOCKED", False, "industry_persistence_not_ready")
         # Stock-level turnover concentration remains a ranking/diagnostic input
-        # in live mode, not a second hard gate. The industry mainline itself
-        # must already pass the live snapshot and persistence checks above.
+        # in live mode, not a second hard gate. The live industry snapshot and
+        # the M3 persistence test are both mandatory before an ignition entry.
     else:
         return IndustryPermission("BLOCKED", False, "invalid_decision_mode")
     if mainline_phase == "IGNITION":
