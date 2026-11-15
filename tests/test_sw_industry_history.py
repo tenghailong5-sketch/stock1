@@ -107,3 +107,31 @@ def test_fetch_failure_is_reported_not_returned_as_empty_data():
         raise ConnectionError("offline")
     with pytest.raises(RuntimeError, match="fetch/parse failed"):
         fetch_sw_industry_history(http_get=fail_get)
+
+
+def test_fetch_uses_recent_cache_after_live_transport_failure(tmp_path):
+    cache = tmp_path / "sw-history.jsonl"
+    seeded = normalize_sw_industry_history(
+        source_rows(), fetched_at="2026-11-14T00:00:00Z"
+    )
+    seeded.assign(
+        valid_from=seeded.valid_from.dt.strftime("%Y-%m-%d"),
+        valid_to=seeded.valid_to.dt.strftime("%Y-%m-%d"),
+        source_update_date=seeded.source_update_date.dt.strftime("%Y-%m-%d"),
+        observed_at=seeded.observed_at.astype(str),
+        available_time=seeded.available_time.astype(str),
+    ).to_json(cache, orient="records", lines=True, force_ascii=False)
+
+    def fail_get(*args, **kwargs):
+        raise ConnectionError("publisher unavailable")
+
+    result = fetch_sw_industry_history(
+        http_get=fail_get,
+        fetched_at="2026-11-15T00:00:00Z",
+        cache_path=cache,
+        retry_attempts=1,
+    )
+    assert result.attrs["provider_status"] == "CACHED_FALLBACK"
+    assert set(result.symbol) == {"000001", "600000"}
+    assert result.historical_pit_eligible.eq(False).all()
+    assert result.availability_basis.eq("retrieval_time_only").all()
