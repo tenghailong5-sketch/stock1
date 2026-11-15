@@ -32,8 +32,8 @@ def test_event_price_in_uses_first_seen_clock_and_reports_pricing_in():
     row = result.iloc[0]
     assert row.price_in_state == "PRICING_IN"
     assert row.post_discovery_sessions_observed == 3
-    assert row.impact_direction_inferred is False
-    assert row.historical_pit_eligible is False
+    assert not bool(row.impact_direction_inferred)
+    assert not bool(row.historical_pit_eligible)
     assert audit["state_counts"]["PRICING_IN"] == 1
 
 
