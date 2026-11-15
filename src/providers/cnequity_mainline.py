@@ -70,7 +70,8 @@ def build_cnequity_mainline_inputs(
         "source", "data_version", "fetched_at",
     }
     required_market = {
-        "symbol", "trade_date", "close", "source", "data_version", "fetched_at",
+        "symbol", "trade_date", "close", "frequency",
+        "source", "data_version", "fetched_at",
     }
     missing = required_industry - set(industries.columns)
     if missing:
@@ -142,6 +143,8 @@ def build_cnequity_mainline_inputs(
         raise ValueError("observed SW level-1 universe exceeds expected industry count")
 
     market["symbol"] = market["symbol"].astype(str).str.strip().str.upper()
+    market["frequency"] = market["frequency"].astype(str).str.strip().str.lower()
+    market = market.loc[market["frequency"].eq("1d")].copy()
     allowed_symbols = {benchmark_symbol.upper(), benchmark_symbol.split(".")[0]}
     market = market.loc[market["symbol"].isin(allowed_symbols)].copy()
     if market.empty:
