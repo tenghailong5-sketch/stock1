@@ -19,7 +19,10 @@ from src.collectors.forward_archive import append_jsonl_atomic
 from src.providers.akshare_pit import normalize_daily_history_snapshot
 from src.model.runtime_mainline import scan_runtime_mainlines
 from src.model.sw_industry_research import select_sw_industry_research_snapshot
-from src.model.sw_stock_mainline_research import build_sw_stock_mainline_research
+from src.model.sw_stock_mainline_research import (
+    build_sw_stock_mainline_research,
+    build_forward_stock_mainline_research,
+)
 from src.providers.sw_industry_history import fetch_sw_industry_history
 from src.providers.akshare_corporate_actions import archive_shortlist_corporate_actions
 from src.model.live_decision_integration import (
@@ -1049,6 +1052,16 @@ def main():
     (OUT/"industry_membership_forward_audit.json").write_text(
         json.dumps(industry_audit, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
+    forward_stock_mainline, forward_stock_mainline_audit = build_forward_stock_mainline_research(
+        industry_membership, runtime_mainline, decision_time=now,
+    )
+    forward_stock_mainline.to_csv(
+        OUT/"forward_stock_mainline_research.csv", index=False, encoding="utf-8-sig"
+    )
+    (OUT/"forward_stock_mainline_research_audit.json").write_text(
+        json.dumps(forward_stock_mainline_audit, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
 
     # Shenwan effective-date overlay is research context only. Retrieval-time
     # history never enters PIT membership authorization, M5 scores, or ranking.
@@ -1189,6 +1202,7 @@ def main():
     # be mistaken for a formal score or buy authorization.
     research_opportunities, research_opportunity_audit = build_research_opportunity_ranking(
         w, m5_input, min_observed_factors=3,
+        industry_context=forward_stock_mainline,
     )
     research_opportunities.to_csv(
         OUT/"research_opportunity_rank.csv", index=False, encoding="utf-8-sig"
