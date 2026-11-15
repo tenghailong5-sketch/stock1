@@ -160,6 +160,11 @@ def test_build_m4_snapshot_ranks_only_complete_declared_universe():
     assert out["price_structure_pct"].notna().all()
     assert out["stock_residual_strength_pct"].notna().any()
     assert out["historical_pit_eligible"].all()
+    assert out["amount_ma20_ge_100m"].fillna(False).all()
+    assert out["stock_bars_source_ids"].eq("bars").all()
+    assert out["stock_returns_source_ids"].eq("stock").all()
+    assert out["industry_returns_source_ids"].eq("industry").all()
+    assert out["market_returns_source_ids"].eq("market").all()
     assert audit.loc[audit.factor_name.eq("price_structure_pct"), "status"].iloc[0] == "ranked"
     assert audit.loc[audit.factor_name.eq("pullback_reversal_structure_pct"), "status"].iloc[0] == "insufficient_factor_coverage"
 
@@ -648,3 +653,16 @@ def test_build_m4_snapshot_rejects_missing_pit_eligibility_metadata():
     with pytest.raises(ValueError, match="missing PIT eligibility fields"):
         from src.model.m4_factors import _require_historical_pit_eligible
         _require_historical_pit_eligible(frame, "market_returns")
+
+
+
+def test_build_m4_snapshot_rejects_unapproved_availability_basis():
+    frame = pd.DataFrame({
+        "historical_pit_eligible": [True],
+        "availability_basis": ["retrieval_time_only"],
+        "available_time": [pd.Timestamp("2026-03-10T08:00:00Z")],
+        "source_id": ["provider"], "source_revision": ["v1"],
+    })
+    with pytest.raises(ValueError, match="unsupported availability_basis"):
+        from src.model.m4_factors import _require_historical_pit_eligible
+        _require_historical_pit_eligible(frame, "stock_bars")
