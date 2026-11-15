@@ -82,7 +82,7 @@ def map_candidate_sectors(candidates, available_industries):
     for candidate in candidates or []:
         if not isinstance(candidate, dict):
             continue
-        headline = re.sub(r"[^a-z0-9\\u4e00-\\u9fff]+", "", str(candidate.get("title") or "").lower())
+        headline = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(candidate.get("title") or "").lower())
         identity = headline or str(candidate.get("candidate_id") or candidate.get("event_id") or "")
         if identity and identity in seen_headlines:
             duplicate_headlines += 1
