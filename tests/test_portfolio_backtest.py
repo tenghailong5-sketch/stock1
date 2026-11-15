@@ -18,7 +18,8 @@ def candidate(symbol="000001", score=90.0, stop=9.5, strategy="A"):
         "strategy": strategy, "score": score, "eligible": True,
         "corporate_actions_resolved": True, "universe_complete": True,
         "delisted_included": True, "ruleset_version": "FHM-100-test",
-        "stop_price": stop,
+        "stop_price": stop, "available_risk_budget": 5000.0,
+        "market_risk_scale": 1.0,
     }
 
 
@@ -167,7 +168,7 @@ def test_invalid_volume_fraction_is_rejected():
 
 
 
-def test_portfolio_never_opens_more_than_two_positions():
+def test_portfolio_can_open_more_than_two_positions_with_dynamic_budget():
     candidates = frame([
         candidate(symbol="000001", score=93.0),
         candidate(symbol="000002", score=92.0),
@@ -180,9 +181,9 @@ def test_portfolio_never_opens_more_than_two_positions():
     ])
     result = run_portfolio_backtest(candidates, bars)
     buys = [fill for fill in result["fills"] if fill["side"] == "buy" and fill["filled"]]
-    assert len(buys) == 2
-    assert len(result["open_positions"]) == 2
-    assert result["skipped"][-1]["reason"] == "position_sizing_rejected"
+    assert len(buys) == 3
+    assert len(result["open_positions"]) == 3
+    assert result["skipped"] == []
 
 
 def test_open_position_risk_includes_paid_buy_fees_and_minimum_sell_commission():
