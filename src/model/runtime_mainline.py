@@ -211,6 +211,64 @@ def _assemble_emotion(*, decision_time: pd.Timestamp, archive_root: Path) -> tup
     return cycles, audit
 
 
+def scan_cached_market_emotion(
+    *, decision_time, archive_root: str | Path = Path("data/forward_archive"),
+    min_sessions: int = 4,
+) -> tuple[pd.DataFrame, dict]:
+    """Read only already archived breadth/sentiment rows; never fetch history.
+
+    This lightweight path keeps market-cycle context available in current-quote
+    mode without enabling the full industry-history or policy discovery scan.
+    """
+    cutoff = pd.Timestamp(decision_time)
+    if cutoff.tzinfo is None:
+        raise ValueError("decision_time must be timezone-aware")
+    try:
+        result = assemble_market_emotion_history(
+            Path(archive_root), decision_time=cutoff.isoformat(),
+            min_sessions=min_sessions,
+        )
+        history = result.get("history", pd.DataFrame())
+        if not isinstance(history, pd.DataFrame) or history.empty:
+            return pd.DataFrame(), {
+                "status": "UNKNOWN_NO_CACHED_EMOTION",
+                "valid_sessions": int(result.get("valid_sessions", 0)),
+                "required_sessions": min_sessions,
+                "market_cycle": "UNKNOWN",
+                "historical_pit_eligible": False,
+                "trading_authorization": False,
+            }
+        cycles = classify_market_cycle(history)
+        latest = cycles.sort_values("trade_date").tail(1).copy()
+        state = str(latest.iloc[0].get("market_cycle", "UNKNOWN"))
+        trade_date = pd.Timestamp(latest.iloc[0]["trade_date"]).date().isoformat()
+        ready = state != "UNKNOWN"
+        audit = {
+            "status": "READY_CACHED_RESEARCH_ONLY" if ready else "UNKNOWN_CACHED_HISTORY_WARMUP",
+            "market_cycle": state,
+            "cycle_reason": str(latest.iloc[0].get("cycle_reason", "unknown")),
+            "latest_trade_date": trade_date,
+            "valid_sessions": int(len(cycles)),
+            "required_sessions": min_sessions,
+            "market_cycle_data_basis": str(latest.iloc[0].get("market_cycle_data_basis", "unknown")),
+            "historical_pit_eligible": False,
+            "trading_authorization": False,
+            "cache_only": True,
+        }
+        latest["historical_pit_eligible"] = False
+        latest["trading_authorization"] = False
+        return latest, audit
+    except Exception as exc:
+        return pd.DataFrame(), {
+            "status": "UNKNOWN_CACHED_EMOTION_ERROR",
+            "reason": f"{type(exc).__name__}: {str(exc)[:220]}",
+            "market_cycle": "UNKNOWN",
+            "historical_pit_eligible": False,
+            "trading_authorization": False,
+            "cache_only": True,
+        }
+
+
 def scan_runtime_mainlines(
     *, decision_time, archive_root: str | Path = Path("data/forward_archive"),
     policy_path: str | Path = Path("data/policy_catalysts/official_policy_events.jsonl"),
