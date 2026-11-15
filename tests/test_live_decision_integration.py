@@ -94,9 +94,9 @@ def test_forward_only_membership_snapshot_can_authorize_live_but_never_pit():
 
 
 def test_stale_or_future_live_industry_snapshots_are_rejected():
-    for available_time in ("2026-11-12T00:00:00Z", "2026-11-14T02:00:01Z"):
+    for available_time in ("2026-11-01T00:00:00Z", "2026-11-14T02:00:01Z"):
         watchlist, m5, market, mainline, membership, risk = _inputs()
-        mainline["available_time"] = available_time
+        membership["available_time"] = available_time
         rows, _ = build_live_decision_gate_audit(
             watchlist, m5, market, mainline, membership,
             decision_time="2026-11-14T09:00:00+08:00", risk_context_by_symbol=risk,
