@@ -17,7 +17,7 @@ def _inputs():
         "mainline_phase": "IGNITION", "persistence_ready": True,
         "historical_pit_eligible": False, "stock_turnover_pit_status": "not_ready",
         "stock_turnover_live_status": "ready",
-        "available_time": "2026-11-14T08:30:00Z",
+        "available_time": "2026-11-14T00:30:00Z",
         "source_id": "sw-industry-api", "source_revision": "rev-main-1",
         "availability_basis": "retrieval_time_only", "snapshot_scope": "live_industry_cross_section",
     }])
@@ -25,7 +25,7 @@ def _inputs():
         "symbol": "600000", "industry_code": "801010",
         "historical_pit_eligible": False,
         "availability_basis": "retrieval_time_only",
-        "available_time": "2026-11-14T08:30:00Z",
+        "available_time": "2026-11-14T00:30:00Z",
         "source_id": "sw-membership-api", "source_revision": "rev-member-1",
         "snapshot_scope": "current_membership_observation",
         "valid_from": "2020-01-01",
@@ -94,7 +94,7 @@ def test_forward_only_membership_snapshot_can_authorize_live_but_never_pit():
 
 
 def test_stale_or_future_live_industry_snapshots_are_rejected():
-    for available_time in ("2026-11-13T08:00:00Z", "2026-11-14T02:00:01Z"):
+    for available_time in ("2026-11-12T00:00:00Z", "2026-11-14T02:00:01Z"):
         watchlist, m5, market, mainline, membership, risk = _inputs()
         mainline["available_time"] = available_time
         rows, _ = build_live_decision_gate_audit(
