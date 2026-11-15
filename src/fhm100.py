@@ -1108,16 +1108,28 @@ def main():
     # M3 and every captured stock bar are therefore evaluated against the same
     # cutoff; no provider response fetched after the cutoff can leak into the run.
     now=datetime.now(timezone.utc)
-    # Runtime mainline scan is part of this model invocation; no scheduler is involved.
-    try:
-        runtime_mainline, runtime_mainline_audit = scan_runtime_mainlines(decision_time=now)
-    except Exception as mainline_exc:
+    current_snapshot_mode = os.getenv("FHM_CURRENT_SNAPSHOT_MODE", "1").strip().lower() in {"1", "true", "yes", "on"}
+    # The daily path uses current quotes and the latest observed membership snapshot.
+    # Historical lifecycle/emotion reconstruction is an optional research lane.
+    if current_snapshot_mode:
         runtime_mainline = pd.DataFrame()
         runtime_mainline_audit = {
-            "status": "UNAVAILABLE",
-            "reason": f"{type(mainline_exc).__name__}: {str(mainline_exc)[:240]}",
+            "status": "DISABLED_CURRENT_SNAPSHOT_MODE",
+            "reason": "historical industry lifecycle/emotion scan skipped by current-data policy",
+            "latest_trade_date": None, "latest_industry_rows": 0,
+            "confirmed_startups": 0, "emotion": {}, "policy": {},
             "historical_pit_eligible": False, "trading_authorization": False,
         }
+    else:
+        try:
+            runtime_mainline, runtime_mainline_audit = scan_runtime_mainlines(decision_time=now)
+        except Exception as mainline_exc:
+            runtime_mainline = pd.DataFrame()
+            runtime_mainline_audit = {
+                "status": "UNAVAILABLE",
+                "reason": f"{type(mainline_exc).__name__}: {str(mainline_exc)[:240]}",
+                "historical_pit_eligible": False, "trading_authorization": False,
+            }
     runtime_mainline.to_csv(OUT/"runtime_mainline_latest.csv", index=False, encoding="utf-8-sig")
     (OUT/"runtime_mainline_audit.json").write_text(
         json.dumps(runtime_mainline_audit, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
@@ -1132,7 +1144,17 @@ def main():
             pd.Timestamp(spot_snapshot_observed_at).tz_convert("UTC").isoformat()
             if not u.empty else None
         )
-    m3 = load_m3_market_context(decision_time=now)
+    if current_snapshot_mode:
+        m3 = {
+            "status": "SKIPPED_CURRENT_SNAPSHOT_MODE",
+            "reason": "historical M3 archive intentionally skipped; current quote research continues",
+            "market_state": None, "market_environment_score": None,
+            "risk_scale": None, "position_scale": None, "valid_sessions": 0,
+            "latest_trade_date": None, "historical_backtest_eligible": False,
+            "quality_warnings": [],
+        }
+    else:
+        m3 = load_m3_market_context(decision_time=now)
     expected_symbols = u["code"].astype(str).str.zfill(6).tolist() if "code" in u else []
     try:
         industry_membership, industry_audit = audit_forward_industry_membership(
@@ -1217,65 +1239,91 @@ def main():
 
     # Shenwan effective-date overlay is research context only. Retrieval-time
     # history never enters PIT membership authorization, M5 scores, or ranking.
-    sw_history_audit = {"status": "UNAVAILABLE", "historical_pit_eligible": False,
-                        "trading_authorization": False}
-    try:
-        sw_history = fetch_sw_industry_history()
-        sw_research, sw_history_audit = select_sw_industry_research_snapshot(
-            sw_history, expected_symbols,
-            as_of_date=now.astimezone(ZoneInfo("Asia/Shanghai")).date(),
-        )
-        sw_stock_mainline, sw_stock_mainline_audit = build_sw_stock_mainline_research(
-            sw_research, runtime_mainline,
-            as_of_date=now.astimezone(ZoneInfo("Asia/Shanghai")).date(),
-        )
-        sw_stock_mainline.to_csv(
-            OUT/"sw_stock_mainline_research.csv", index=False, encoding="utf-8-sig"
-        )
-        (OUT/"sw_stock_mainline_research_audit.json").write_text(
-            json.dumps(sw_stock_mainline_audit, ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
-        sw_research.to_csv(
-            OUT/"sw_industry_history_research.csv", index=False, encoding="utf-8-sig"
-        )
-        if not sw_research.empty and "symbol" in w.columns:
-            overlay = sw_research[[
-                "symbol", "industry_code", "l1_code", "l2_code", "valid_from", "valid_to"
-            ]].rename(columns={
-                "industry_code": "sw_history_industry_code",
-                "l1_code": "sw_history_l1_code",
-                "l2_code": "sw_history_l2_code",
-                "valid_from": "sw_history_valid_from",
-                "valid_to": "sw_history_valid_to",
-            })
-            w["symbol"] = w["symbol"].astype(str).str.strip().str.zfill(6)
-            w = w.merge(overlay, on="symbol", how="left", validate="many_to_one")
-    except Exception as exc:
+    if current_snapshot_mode:
         sw_history_audit = {
-            "status": "UNAVAILABLE",
-            "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
-            "historical_pit_eligible": False,
-            "trading_authorization": False,
+            "status": "DISABLED_CURRENT_SNAPSHOT_MODE",
+            "historical_pit_eligible": False, "trading_authorization": False,
+            "reason": "effective-date history overlay skipped; current forward membership is used",
         }
         sw_stock_mainline_audit = {
-            "status": "UNAVAILABLE",
-            "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
-            "historical_pit_eligible": False,
-            "trading_authorization": False,
+            "status": "DISABLED_CURRENT_SNAPSHOT_MODE",
+            "historical_pit_eligible": False, "trading_authorization": False,
             "research_only": True,
         }
         pd.DataFrame().to_csv(
             OUT/"sw_stock_mainline_research.csv", index=False, encoding="utf-8-sig"
         )
+        pd.DataFrame().to_csv(
+            OUT/"sw_industry_history_research.csv", index=False, encoding="utf-8-sig"
+        )
         (OUT/"sw_stock_mainline_research_audit.json").write_text(
             json.dumps(sw_stock_mainline_audit, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-    (OUT/"sw_industry_history_research_audit.json").write_text(
-        json.dumps(sw_history_audit, ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8",
-    )
+        (OUT/"sw_industry_history_research_audit.json").write_text(
+            json.dumps(sw_history_audit, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    else:
+        sw_history_audit = {"status": "UNAVAILABLE", "historical_pit_eligible": False,
+                            "trading_authorization": False}
+        try:
+            sw_history = fetch_sw_industry_history()
+            sw_research, sw_history_audit = select_sw_industry_research_snapshot(
+                sw_history, expected_symbols,
+                as_of_date=now.astimezone(ZoneInfo("Asia/Shanghai")).date(),
+            )
+            sw_stock_mainline, sw_stock_mainline_audit = build_sw_stock_mainline_research(
+                sw_research, runtime_mainline,
+                as_of_date=now.astimezone(ZoneInfo("Asia/Shanghai")).date(),
+            )
+            sw_stock_mainline.to_csv(
+                OUT/"sw_stock_mainline_research.csv", index=False, encoding="utf-8-sig"
+            )
+            (OUT/"sw_stock_mainline_research_audit.json").write_text(
+                json.dumps(sw_stock_mainline_audit, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            sw_research.to_csv(
+                OUT/"sw_industry_history_research.csv", index=False, encoding="utf-8-sig"
+            )
+            if not sw_research.empty and "symbol" in w.columns:
+                overlay = sw_research[[
+                    "symbol", "industry_code", "l1_code", "l2_code", "valid_from", "valid_to"
+                ]].rename(columns={
+                    "industry_code": "sw_history_industry_code",
+                    "l1_code": "sw_history_l1_code",
+                    "l2_code": "sw_history_l2_code",
+                    "valid_from": "sw_history_valid_from",
+                    "valid_to": "sw_history_valid_to",
+                })
+                w["symbol"] = w["symbol"].astype(str).str.strip().str.zfill(6)
+                w = w.merge(overlay, on="symbol", how="left", validate="many_to_one")
+        except Exception as exc:
+            sw_history_audit = {
+                "status": "UNAVAILABLE",
+                "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
+                "historical_pit_eligible": False,
+                "trading_authorization": False,
+            }
+            sw_stock_mainline_audit = {
+                "status": "UNAVAILABLE",
+                "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
+                "historical_pit_eligible": False,
+                "trading_authorization": False,
+                "research_only": True,
+            }
+            pd.DataFrame().to_csv(
+                OUT/"sw_stock_mainline_research.csv", index=False, encoding="utf-8-sig"
+            )
+            (OUT/"sw_stock_mainline_research_audit.json").write_text(
+                json.dumps(sw_stock_mainline_audit, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        (OUT/"sw_industry_history_research_audit.json").write_text(
+            json.dumps(sw_history_audit, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
 
     # PR128: aggregate individual stock traded value by PIT industry membership,
     # then attach concentration/share changes to the M3 mainline panel.
@@ -1293,7 +1341,12 @@ def main():
     stock_turnover_audit = {
         "status": "no_target_trade_date", "historical_pit_eligible": False,
     }
-    if pd.notna(latest_stock_day) and expected_symbols:
+    if current_snapshot_mode:
+        stock_turnover_audit = {
+            "status": "DISABLED_CURRENT_SNAPSHOT_MODE",
+            "historical_pit_eligible": False,
+        }
+    elif pd.notna(latest_stock_day) and expected_symbols:
         try:
             pit_stock_turnover, stock_turnover_audit = aggregate_archived_stock_turnover(
                 Path("data/forward_archive"), expected_symbols,
