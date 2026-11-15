@@ -141,7 +141,7 @@ def test_expired_membership_interval_cannot_authorize_entry():
     )
     assert not rows["allowed"].any()
     assert rows["reasons"].map(
-        lambda reasons: "industry_history_not_pit_eligible" in reasons
+        lambda reasons: "industry_live_snapshot_not_ready" in reasons
     ).all()
 
 
