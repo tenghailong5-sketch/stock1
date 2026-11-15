@@ -23,7 +23,7 @@ def test_dividend_snapshot_is_forward_only_and_preserves_first_seen():
     assert first["first_seen_at"] == "2026-11-15T00:00:00+00:00"
     assert first["available_time"] == first["first_seen_at"]
     assert not bool(first["historical_pit_eligible"])
-    assert first["eligible_for_decisions_after_first_seen"] is True
+    assert bool(first["eligible_for_decisions_after_first_seen"])
     assert first["corporate_action_status"] == "CAPTURED"
 
     changed = raw.copy()
