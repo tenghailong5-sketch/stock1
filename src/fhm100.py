@@ -195,18 +195,21 @@ def select_history_universe(snapshot, *, max_symbols=600):
 
 def select_research_history_universe(
     snapshot, *, max_symbols=800, min_candidate_amount=RESEARCH_MIN_AMOUNT,
-    liquidity_share=0.20,
+    liquidity_share=0.25, momentum_share=0.25,
 ):
-    """Select a broad short-term research pool without excluding limit-up leaders.
+    """Select a stratified short-term research pool for optional history retrieval.
 
-    max_symbols=None means scan every valid symbol in the live quote snapshot.
-    The pool is retrieval priority only; inclusion is not a formal candidate or
-    a buy signal. Financials and daily movers above 8% remain observable.
+    The pool balances high-liquidity names, active positive movers, strong
+    momentum names, and liquid pullbacks. It is retrieval priority only:
+    inclusion is not a formal candidate or a buy signal. max_symbols=None
+    scans every valid quote; financials and daily movers above 8% remain visible.
     """
     if max_symbols is not None and max_symbols < 1:
         raise ValueError("max_symbols must be positive or None")
     if not 0 < liquidity_share <= 1:
         raise ValueError("liquidity_share must be in (0, 1]")
+    if not 0 <= momentum_share <= 1:
+        raise ValueError("momentum_share must be in [0, 1]")
     frame = _validated_spot_frame(snapshot)
     frame = frame.sort_values(
         ["amount", "code"], ascending=[False, True]
@@ -214,29 +217,49 @@ def select_research_history_universe(
     if max_symbols is None or max_symbols >= len(frame):
         return frame.reset_index(drop=True)
 
+    selected = []
+    selected_codes = set()
+
+    def take(pool, count):
+        if count <= 0:
+            return
+        eligible = pool.loc[~pool["code"].isin(selected_codes)]
+        chosen = eligible.head(count)
+        if not chosen.empty:
+            selected.append(chosen)
+            selected_codes.update(chosen["code"].astype(str))
+
     anchor_count = max(1, min(max_symbols, int(round(max_symbols * liquidity_share))))
-    anchor = frame.head(anchor_count)
-    remaining = max_symbols - len(anchor)
-    if remaining <= 0:
-        return anchor.reset_index(drop=True)
+    momentum_count = max(0, min(max_symbols - anchor_count, int(round(max_symbols * momentum_share))))
+    active_amount_count = max(0, (max_symbols - anchor_count - momentum_count) // 2)
+    pullback_count = max_symbols - anchor_count - momentum_count - active_amount_count
 
-    # Include strong active movers, including limit-up/near-limit-up names.
-    # This is a history-retrieval rule, not permission to chase a high opening.
-    momentum = frame[
-        (~frame["code"].isin(set(anchor["code"])))
-        & (frame["amount"] >= min_candidate_amount)
-        & (frame["pct_chg"] > 0)
-    ].sort_values(
-        ["pct_chg", "amount", "code"], ascending=[False, False, True]
-    ).head(remaining)
-    selected = pd.concat([anchor, momentum], ignore_index=True)
-    if len(selected) < max_symbols:
-        fill = frame[
-            ~frame["code"].isin(set(selected["code"]))
-        ].head(max_symbols - len(selected))
-        selected = pd.concat([selected, fill], ignore_index=True)
-    return selected.drop_duplicates("code").head(max_symbols).reset_index(drop=True)
+    # Tier 1: broad liquidity anchors.
+    take(frame, anchor_count)
 
+    active = frame.loc[
+        (frame["amount"] >= min_candidate_amount) & (frame["pct_chg"] > 0)
+    ]
+    # Tier 2: active positive names ranked by traded value, not daily gain.
+    take(active.sort_values(["amount", "pct_chg", "code"], ascending=[False, False, True]),
+         active_amount_count)
+    # Tier 3: preserve genuine momentum/limit-up leaders as a separate sleeve.
+    take(active.sort_values(["pct_chg", "amount", "code"], ascending=[False, False, True]),
+         momentum_count)
+    # Tier 4: include liquid weakness/pullbacks for reversal strategies.
+    pullbacks = frame.loc[
+        (frame["amount"] >= min_candidate_amount) & (frame["pct_chg"] <= 0)
+    ].sort_values(["amount", "code"], ascending=[False, True])
+    take(pullbacks, pullback_count)
+
+    if selected:
+        result = pd.concat(selected, ignore_index=True)
+    else:
+        result = frame.iloc[0:0].copy()
+    if len(result) < max_symbols:
+        fill = frame.loc[~frame["code"].isin(selected_codes)].head(max_symbols - len(result))
+        result = pd.concat([result, fill], ignore_index=True)
+    return result.drop_duplicates("code").head(max_symbols).reset_index(drop=True)
 
 def select_history_universe_with_supplement(
     snapshot, *, max_symbols=600, max_supplement_symbols=200,
