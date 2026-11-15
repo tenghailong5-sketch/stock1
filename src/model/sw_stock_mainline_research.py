@@ -203,7 +203,6 @@ def build_forward_stock_mainline_research(
         latest[fields], left_on="industry_level1", right_on="industry_name",
         how="left", validate="many_to_one",
     )
-    matched = mapped["mainline_phase"].notna()
     mapped["membership_observed_at"] = latest_snapshot_time
     mapped["mainline_trade_date"] = latest_date
     mapped["research_only"] = True
@@ -211,6 +210,7 @@ def build_forward_stock_mainline_research(
     mapped["trading_authorization"] = False
     mapped = mapped.rename(columns={"industry_level1": "current_industry_level1"})
     mapped = mapped.sort_values("symbol").reset_index(drop=True)
+    matched = mapped["mainline_phase"].notna()
     audit = {
         "status": "READY_RESEARCH_ONLY" if bool(matched.all()) and len(mapped) else "INCOMPLETE_RESEARCH_COVERAGE",
         "membership_snapshot_time": latest_snapshot_time.isoformat(),
