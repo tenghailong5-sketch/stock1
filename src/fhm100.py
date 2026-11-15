@@ -18,6 +18,7 @@ from src.model.m3_assembler import assemble_m3_history
 from src.collectors.forward_archive import append_jsonl_atomic
 from src.providers.akshare_pit import normalize_daily_history_snapshot
 from src.model.runtime_mainline import scan_runtime_mainlines, scan_cached_market_emotion
+from src.model.forward_industry_flow import attach_forward_industry_flow_changes
 from src.model.sw_industry_research import select_sw_industry_research_snapshot
 from src.model.sw_stock_mainline_research import (
     build_sw_stock_mainline_research,
@@ -1242,6 +1243,17 @@ def main():
                 "trading_authorization": False,
             }
     try:
+        mainline_mapping_panel, industry_flow_archive_audit = attach_forward_industry_flow_changes(
+            mainline_mapping_panel, decision_time=now,
+            archive_root=Path("data/forward_archive"),
+        )
+    except Exception as flow_exc:
+        industry_flow_archive_audit = {
+            "status": "FORWARD_FLOW_ARCHIVE_ERROR",
+            "reason": f"{type(flow_exc).__name__}: {str(flow_exc)[:200]}",
+            "historical_pit_eligible": False, "trading_authorization": False,
+        }
+    try:
         forward_stock_mainline, forward_stock_mainline_audit = build_forward_stock_mainline_research(
             industry_membership, mainline_mapping_panel, decision_time=now,
         )
@@ -1254,6 +1266,7 @@ def main():
             "research_only": True,
         }
     forward_stock_mainline_audit["spot_sector_fallback"] = spot_sector_fallback_audit
+    forward_stock_mainline_audit["industry_flow_archive"] = industry_flow_archive_audit
     forward_stock_mainline.to_csv(
         OUT/"forward_stock_mainline_research.csv", index=False, encoding="utf-8-sig"
     )
