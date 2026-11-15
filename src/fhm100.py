@@ -799,7 +799,7 @@ def main():
         if not w.empty:
             w, observation_audit = rank_price_observations(
                 w, expected_universe_size=len(history_universe),
-                scope_id="research_pool_60_growth_focused"
+                scope_id="broad_history_pool_600_plus_200"
             )
         else:
             observation_audit = pd.DataFrame()
