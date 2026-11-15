@@ -109,18 +109,21 @@ def evaluate_event_price_in(
         post_count = int(len(post))
         if len(pre) < 5 or not np.isfinite(pre20):
             state, reason = "UNKNOWN", "insufficient_pre_event_sessions"
-        elif np.isfinite(post3) and post3 <= -0.03 and np.isfinite(post1) and post1 > 0:
+        elif post_count == 0:
+            # A weekend/after-close discovery has no post-event trading session
+            # yet. Absence of a reaction is not evidence that the event is unpriced.
+            state, reason = "AWAITING_POST_EVENT_SESSION", "no_post_event_trading_session_observed"
+        elif not np.isfinite(post1):
+            state, reason = "UNKNOWN", "post_event_return_unavailable"
+        elif np.isfinite(post3) and post3 <= -0.03 and post1 > 0:
             state, reason = "POST_EVENT_FADE", "initial_positive_reaction_reversed"
-        elif (
-            np.isfinite(pre20) and pre20 >= 0.08
-            and (not np.isfinite(post1) or post1 < 0.01)
-        ):
+        elif pre20 >= 0.08 and post1 < 0.01:
             state, reason = "FULLY_PRICED", "large_pre_discovery_excess_runup_without_new_repricing"
-        elif np.isfinite(post1) and post1 >= 0.02 and np.isfinite(share_ratio) and share_ratio >= 1.2:
+        elif post1 >= 0.02 and np.isfinite(share_ratio) and share_ratio >= 1.2:
             state, reason = "PRICING_IN", "positive_post_event_excess_with_turnover_share_expansion"
-        elif np.isfinite(pre5) and pre5 >= 0.03 and (not np.isfinite(post1) or post1 > 0):
+        elif np.isfinite(pre5) and pre5 >= 0.03 and post1 > 0:
             state, reason = "PARTIALLY_PRICED", "pre_discovery_runup_with_nonnegative_follow_through"
-        elif post_count == 0 or (np.isfinite(post1) and post1 < 0.01):
+        elif post1 < 0.01:
             state, reason = "UNPRICED", "limited_pre_discovery_runup_and_no_material_positive_reaction"
         else:
             state, reason = "PARTIALLY_PRICED", "early_or_mixed_post_event_reaction"
