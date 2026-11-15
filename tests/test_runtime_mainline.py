@@ -159,10 +159,14 @@ def test_industry_panel_keeps_ninety_percent_when_two_providers_fail(monkeypatch
             raise RuntimeError("temporary provider timeout")
         return pd.DataFrame({
             "trade_date": dates, "industry_code": code,
+            "close": [100.0 + i for i in range(len(dates))],
             "return_3": [0.02] * len(dates), "return_5": [0.03] * len(dates),
             "amount": [1_000_000.0] * len(dates),
         })
 
+    monkeypatch.setattr(
+        runtime_mainline, "fetch_sw_industry_index_history_native", fetch_history
+    )
     monkeypatch.setattr(
         runtime_mainline, "fetch_sw_api_industry_index_history", fetch_history
     )
@@ -208,6 +212,9 @@ def test_industry_panel_aborts_remaining_batches_after_initial_transport_outage(
         raise requests.exceptions.ReadTimeout("SW endpoint unavailable")
 
     monkeypatch.setattr(
+        runtime_mainline, "fetch_sw_industry_index_history_native", unavailable
+    )
+    monkeypatch.setattr(
         runtime_mainline, "fetch_sw_api_industry_index_history", unavailable
     )
     try:
@@ -216,10 +223,10 @@ def test_industry_panel_aborts_remaining_batches_after_initial_transport_outage(
             archive_root=tmp_path,
         )
     except RuntimeError as exc:
-        assert "aborted remaining industry requests early" in str(exc)
+        assert "unavailable from alternate/live/cache providers" in str(exc)
     else:
         raise AssertionError("an unavailable first batch should abort early")
-    assert len(calls) == 4
+    assert len(calls) == 8
 
 
 def test_cached_market_emotion_uses_completed_exchange_sessions_only(monkeypatch, tmp_path):
