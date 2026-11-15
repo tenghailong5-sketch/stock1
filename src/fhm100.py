@@ -1560,9 +1560,16 @@ def main():
     # opportunities that missed the initial broad history pass. This aligns
     # OHLC enrichment with the actual mainline shortlist instead of relying
     # only on a pre-ranking momentum proxy.
-    topup_limit = max(0, min(
-        40, int(os.getenv("FHM_HISTORY_CANDIDATE_TOPUP_MAX_SYMBOLS", "20"))
-    ))
+    try:
+        configured_topup_limit = int(
+            os.getenv("FHM_HISTORY_CANDIDATE_TOPUP_MAX_SYMBOLS", "20")
+        )
+    except (TypeError, ValueError):
+        configured_topup_limit = 20
+    topup_limit = (
+        max(0, min(40, configured_topup_limit))
+        if history_pool_audit.get("history_enabled", False) else 0
+    )
     topup_symbols = select_candidate_history_topup_symbols(
         research_opportunities, max_symbols=topup_limit
     )
