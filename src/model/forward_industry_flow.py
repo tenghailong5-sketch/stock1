@@ -88,7 +88,12 @@ def attach_forward_industry_flow_changes(
         snapshot["historical_pit_eligible"] = False
         history = pd.concat([history, snapshot], ignore_index=True)
         history["trade_date"] = pd.to_datetime(history["trade_date"], errors="coerce").dt.normalize().dt.strftime("%Y-%m-%d")
-        history["captured_at"] = pd.to_datetime(history["captured_at"], errors="coerce", utc=True)
+        # Archive rows may contain both legacy space-separated UTC strings
+        # and fresh ISO-8601 offsets. Pandas' strict single-format inference
+        # silently coerces mixed rows to NaT unless format="mixed" is explicit.
+        history["captured_at"] = pd.to_datetime(
+            history["captured_at"].astype(str), errors="coerce", utc=True, format="mixed"
+        )
         history = history.dropna(subset=["trade_date", "captured_at"])
         history = history.sort_values("captured_at").drop_duplicates(
             ["trade_date", "industry_name"], keep="last"
