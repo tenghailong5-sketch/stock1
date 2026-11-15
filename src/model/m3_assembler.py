@@ -46,7 +46,7 @@ def assemble_m3_history(
     min_breadth_coverage: float = 0.90,
     min_session_coverage: float = 0.90,
 ) -> dict:
-    """Return READY only when 60 consecutive fully observed market sessions exist."""
+    """Return READY with the required feature window and configured recent-session coverage."""
     cutoff = _utc(decision_time, "decision_time")
     if not 0 < min_breadth_coverage <= 1:
         raise ValueError("min_breadth_coverage must be in (0, 1]")
