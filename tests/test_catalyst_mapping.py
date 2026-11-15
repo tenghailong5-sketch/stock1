@@ -44,3 +44,9 @@ def test_maps_english_global_headlines_to_current_sw_industries():
     ]
     assert audit["mapped_candidates"] == 3
     assert all(row["impact_direction"] == "unclear" for row in rows)
+    # "export" must never match the transport keyword "port".
+    export_only, export_audit = map_candidate_sectors(
+        [{"title": "New export controls announced"}], ["交通运输"]
+    )
+    assert export_only == []
+    assert export_audit["unmapped_candidates"] == 1
