@@ -50,6 +50,11 @@ def attach_forward_industry_flow_changes(
         "industry_name": out["industry_name"].astype(str).str.strip(),
         "turnover_share": shares,
     }).dropna(subset=["turnover_share"])
+    # Archive only the latest completed session, never relabel older history
+    # with today's retrieval timestamp.
+    snapshot = snapshot.loc[
+        snapshot["trade_date"].eq(trade_date.strftime("%Y-%m-%d"))
+    ].copy()
     snapshot = snapshot.loc[
         snapshot["industry_name"].ne("")
         & snapshot["turnover_share"].between(0, 1, inclusive="both")
