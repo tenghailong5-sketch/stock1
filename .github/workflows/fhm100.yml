@@ -30,6 +30,7 @@ jobs:
           AI_API_BASE_URL: ${{ secrets.AI_API_BASE_URL }}
           AI_MODEL: ${{ secrets.AI_MODEL }}
           FHM_HISTORY_SCAN_MAX_SYMBOLS: "500"
+          FHM_RISK_CONTEXT_JSON: ${{ secrets.FHM_RISK_CONTEXT_JSON }}
         run: python -m src.fhm100
       - name: Commit forward-only stock history archive
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
