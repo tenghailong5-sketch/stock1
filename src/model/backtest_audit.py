@@ -27,6 +27,7 @@ _CANDIDATE_REQUIRED = {
     "symbol", "decision_time", "available_time", "historical_pit_eligible",
     "source_revision", "strategy", "score", "eligible", "corporate_actions_resolved",
     "universe_complete", "delisted_included", "ruleset_version",
+    "available_risk_budget", "market_risk_scale",
 }
 _BAR_REQUIRED = {
     "symbol", "trade_date", "available_time", "historical_pit_eligible",
@@ -121,6 +122,13 @@ def audit_backtest_dataset(candidates: pd.DataFrame, bars: pd.DataFrame) -> Back
 
     if candidates["ruleset_version"].isna().any() or candidates["ruleset_version"].astype(str).str.strip().eq("").any():
         errors.append("candidate_missing_ruleset_version")
+
+    risk_budget = pd.to_numeric(candidates["available_risk_budget"], errors="coerce")
+    risk_scale = pd.to_numeric(candidates["market_risk_scale"], errors="coerce")
+    if risk_budget.isna().any() or (~risk_budget.map(lambda x: pd.notna(x) and x > 0)).any():
+        errors.append("candidate_invalid_available_risk_budget")
+    if risk_scale.isna().any() or ((risk_scale < 0) | (risk_scale > 1)).any():
+        errors.append("candidate_invalid_market_risk_scale")
 
     return BacktestAudit(not errors, len(candidates), len(bars), tuple(errors))
 
