@@ -294,6 +294,7 @@ def build_live_decision_gate_audit(
             "entry_price", "stop_price", "quantity", "planned_risk",
             "reward_risk", "minimum_reward_risk", "existing_portfolio_risk",
             "existing_position_count", "available_risk_budget",
+            "same_industry_or_corr_gt_06",
         )
         risk_context_complete = (
             all(field in risk for field in required_risk_fields)
@@ -304,6 +305,7 @@ def build_live_decision_gate_audit(
             ))
             and isinstance(risk.get("quantity"), int)
             and not isinstance(risk.get("quantity"), bool)
+            and isinstance(risk.get("same_industry_or_corr_gt_06"), bool)
         )
         args = {
             "market_state": market_state or "UNKNOWN",
@@ -328,7 +330,7 @@ def build_live_decision_gate_audit(
             "existing_portfolio_risk": risk.get("existing_portfolio_risk", np.nan),
             "existing_position_count": risk.get("existing_position_count", -1),
             "available_risk_budget": risk.get("available_risk_budget", np.nan),
-            "same_industry_or_corr_gt_06": risk.get("same_industry_or_corr_gt_06", False),
+            "same_industry_or_corr_gt_06": risk.get("same_industry_or_corr_gt_06"),
         }
         for strategy in ("A", "B", "C"):
             candidate = m5_lookup.get((symbol, strategy), {})
