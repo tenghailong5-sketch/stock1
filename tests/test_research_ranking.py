@@ -251,3 +251,32 @@ def test_gated_mainline_phase_and_policy_catalyst_adjust_research_score():
     assert by_symbol.loc["000001", "research_opportunity_score"] > by_symbol.loc["000002", "research_opportunity_score"]
     assert audit["factor_weights"]["mainline_lifecycle"] == 0.10
     assert audit["factor_weights"]["policy_catalyst"] == 0.05
+
+
+def test_market_emotion_limits_research_watchlist_by_regime():
+    rows = []
+    for state in ["ICE", "RECOVERY", "TRANSITION", "HEAT", "EXHAUSTION", "UNKNOWN"]:
+        for i in range(30):
+            rows.append({
+                "symbol": f"{len(rows)+1:06d}",
+                "最新价": 10.0,
+                "涨跌幅%": 3.0,
+                "当日成交额": 200_000_000,
+                "research_opportunity_score": 100.0 - len(rows) * 0.01,
+                "current_industry_level1": f"行业{state}-{i}",
+                "market_cycle_state": state,
+            })
+    ranked = pd.DataFrame(rows)
+    expected = {
+        "ICE": 10, "RECOVERY": 30, "TRANSITION": 20,
+        "HEAT": 15, "EXHAUSTION": 5, "UNKNOWN": 30,
+    }
+    for state, count in expected.items():
+        part = ranked[ranked["market_cycle_state"].eq(state)].copy()
+        shortlist, _, audit = build_final_candidate_shortlist(
+            part, max_candidates=30, max_per_industry=3,
+        )
+        assert len(shortlist) == count
+        assert audit["market_cycle_state"] == state
+        assert audit["market_regime_candidate_cap"] == count
+        assert not shortlist["buy_authorization"].any()
