@@ -505,7 +505,7 @@ def build_m4_pit_factor_snapshot(
         })
 
     gate_fields = (
-        "industry_top_30pct", "stock_residual_top_20pct",
+        "industry_top_30pct", "stock_residual_top_20pct", "amount_ma20_ge_100m",
         "breakout_or_confirmed_retest",
         "no_high_volume_stall_or_repeated_rejection",
         "pre_pullback_residual_positive", "pullback_between_0_5_and_4pct",
@@ -515,6 +515,16 @@ def build_m4_pit_factor_snapshot(
     )
     for field in gate_fields:
         base[field] = pd.NA
+    # A's explicit 20-session average traded-value floor is directly
+    # derivable from the PIT OHLCV archive; unknown rolling windows stay NA.
+    amount_ma20 = pd.to_numeric(base.get("amount_ma20"), errors="coerce")
+    base["amount_ma20_ge_100m"] = pd.Series(
+        pd.NA, index=base.index, dtype="boolean"
+    )
+    valid_amount = amount_ma20.notna() & np.isfinite(amount_ma20)
+    base.loc[valid_amount, "amount_ma20_ge_100m"] = (
+        amount_ma20.loc[valid_amount] >= 100_000_000
+    )
     if hard_gate_snapshot is not None:
         required_gate = {"symbol", "available_time", "source_id", "source_revision", *gate_fields}
         missing = required_gate - set(hard_gate_snapshot.columns)
