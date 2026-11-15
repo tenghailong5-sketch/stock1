@@ -251,11 +251,10 @@ def build_live_decision_gate_audit(
         # industry panel at this run's cutoff. It does not publish per-row
         # lineage columns, so use its actual readiness/phase instead of
         # demanding a second synthetic metadata envelope.
-        industry_live = (
-            membership_live
-            and bool(industry)
-            and str(phase) in {"IGNITION", "PEAK", "DECAY"}
-        )
+        # Snapshot readiness and M3 phase authorization are separate gates.
+        # Keep a valid live snapshot eligible here so an unconfirmed/unknown
+        # phase is rejected by industry_permission with the correct M3 reason.
+        industry_live = membership_live and bool(industry)
         concentration_status = str(industry.get("stock_turnover_pit_status", "not_ready"))
         live_concentration_status = str(industry.get("stock_turnover_live_status", "not_ready"))
         minute = minute_results.get(symbol, {
