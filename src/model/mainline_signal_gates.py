@@ -281,6 +281,21 @@ def gate_ignition_labels(frame: pd.DataFrame) -> pd.DataFrame:
     confirmed_transition = candidate & confirmed & (base_transition | delayed_confirmation)
     gated_transition.loc[confirmed_transition] = True
     out["phase_transition_gated"] = gated_transition.astype(bool)
+    # A live M3 persistence signal is emitted only when the two-session
+    # ignition state is confirmed and both 3-session industry leadership
+    # and turnover-share concentration remain positive. Missing flow history
+    # is explicitly not ready; no synthetic persistence flag is inferred.
+    if {"turnover_share_change_3d", "relative_strength_change_3d"}.issubset(out.columns):
+        turnover_change = pd.to_numeric(out["turnover_share_change_3d"], errors="coerce")
+        relative_change = pd.to_numeric(out["relative_strength_change_3d"], errors="coerce")
+        out["persistence_ready"] = (
+            out["mainline_phase_gated"].eq("IGNITION")
+            & confirmed
+            & turnover_change.gt(0)
+            & relative_change.gt(0)
+        ).astype(bool)
+    else:
+        out["persistence_ready"] = False
     out["phase_gate_reason"] = "not_ignition_candidate"
     out.loc[candidate & ~confirmed, "phase_gate_reason"] = "ignition_evidence_not_confirmed"
     out.loc[candidate & negative_policy, "phase_gate_reason"] = "negative_policy_event_veto"

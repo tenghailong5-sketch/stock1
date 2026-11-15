@@ -14,7 +14,7 @@ def _inputs():
     market = {"status": "READY", "market_state": "RISK_ON", "position_scale": 1.0}
     mainline = pd.DataFrame([{
         "industry_code": "801010", "trade_date": "2026-11-13",
-        "mainline_phase": "IGNITION", "persistence_ready": False,
+        "mainline_phase": "IGNITION", "persistence_ready": True,
         "historical_pit_eligible": False, "stock_turnover_pit_status": "not_ready",
         "stock_turnover_live_status": "ready",
         "available_time": "2026-11-14T00:30:00Z",
