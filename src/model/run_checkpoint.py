@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterator, Mapping
 
 
 class CheckpointConflictError(ValueError):
@@ -19,7 +20,7 @@ class SQLiteCheckpointStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA synchronous=FULL")
             db.executescript(
@@ -53,6 +54,16 @@ class SQLiteCheckpointStore:
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys=ON")
         return db
+
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        """Commit on success and always close the SQLite connection."""
+        db = self._connect()
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     @staticmethod
     def _json(value: Any) -> str:
