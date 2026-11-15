@@ -277,7 +277,7 @@ def assemble_m3_history(
 
 def assemble_market_emotion_history(
     archive_root: str | Path, *, decision_time,
-    min_breadth_coverage: float = 0.95, min_sessions: int = 60,
+    min_breadth_coverage: float = 0.95, min_sessions: int = 20,
 ) -> dict:
     """Assemble raw daily breadth/limit-pool history without M3's MA60 warm-up.
 
