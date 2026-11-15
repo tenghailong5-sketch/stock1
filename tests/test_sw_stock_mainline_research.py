@@ -218,3 +218,32 @@ def test_spot_industry_strength_fallback_rejects_future_quote_snapshot():
         assert "newer than decision_time" in str(exc)
     else:
         raise AssertionError("future stock quote snapshots must be rejected")
+
+
+
+def test_forward_mapper_carries_live_m3_persistence_readiness_to_each_stock():
+    from src.model.sw_stock_mainline_research import build_forward_stock_mainline_research
+
+    membership = pd.DataFrame([
+        {"symbol": "600000", "industry_level1": "银行", "observed_at": "2026-11-14T13:00:00Z",
+         "availability_basis": "retrieval_time_only", "historical_pit_eligible": False,
+         "source_id": "snapshot", "source_revision": "rev-a",
+         "snapshot_scope": "current_membership_observation_only"},
+        {"symbol": "000001", "industry_level1": "房地产", "observed_at": "2026-11-14T13:00:00Z",
+         "availability_basis": "retrieval_time_only", "historical_pit_eligible": False,
+         "source_id": "snapshot", "source_revision": "rev-b",
+         "snapshot_scope": "current_membership_observation_only"},
+    ])
+    mainline = pd.DataFrame([
+        {"industry_code": "801780", "industry_name": "银行", "trade_date": "2026-11-13",
+         "mainline_phase": "IGNITION", "mainline_phase_gated": "IGNITION",
+         "strength_percentile": 0.9, "persistence_ready": True},
+        {"industry_code": "801180", "industry_name": "房地产", "trade_date": "2026-11-13",
+         "mainline_phase": "IGNITION", "mainline_phase_gated": "IGNITION",
+         "strength_percentile": 0.8, "persistence_ready": False},
+    ])
+    result, _ = build_forward_stock_mainline_research(
+        membership, mainline, decision_time="2026-11-15T10:00:00Z"
+    )
+    readiness = result.set_index("symbol")["persistence_ready"].to_dict()
+    assert readiness == {"000001": False, "600000": True}
