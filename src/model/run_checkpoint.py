@@ -76,7 +76,7 @@ class SQLiteCheckpointStore:
         if not all(str(value).strip() for value in (run_id, stage, input_fingerprint)):
             raise ValueError("run_id, stage and input_fingerprint are required")
         metadata_json = self._json(dict(metadata or {}))
-        with self._connect() as db:
+        with self._connection() as db:
             row = db.execute(
                 "SELECT input_fingerprint FROM checkpoint_runs WHERE run_id=? AND stage=?",
                 (run_id, stage),
@@ -97,7 +97,7 @@ class SQLiteCheckpointStore:
         self, run_id: str, stage: str, batches: Mapping[str, str],
     ) -> None:
         """Register batch_id -> input fingerprint without resetting completed work."""
-        with self._connect() as db:
+        with self._connection() as db:
             for batch_id, fingerprint in batches.items():
                 if not str(batch_id).strip() or not str(fingerprint).strip():
                     raise ValueError("batch_id and batch fingerprint are required")
@@ -120,7 +120,7 @@ class SQLiteCheckpointStore:
 
     def pending_batches(self, run_id: str, stage: str) -> list[str]:
         """Return pending, failed, or interrupted-running batches in stable order."""
-        with self._connect() as db:
+        with self._connection() as db:
             rows = db.execute(
                 """SELECT batch_id FROM checkpoint_batches
                    WHERE run_id=? AND stage=? AND status!='completed'
@@ -130,7 +130,7 @@ class SQLiteCheckpointStore:
         return [row["batch_id"] for row in rows]
 
     def mark_started(self, run_id: str, stage: str, batch_id: str) -> None:
-        with self._connect() as db:
+        with self._connection() as db:
             cur = db.execute(
                 """UPDATE checkpoint_batches
                    SET status='running', error=NULL, updated_at=CURRENT_TIMESTAMP
@@ -144,7 +144,7 @@ class SQLiteCheckpointStore:
         self, run_id: str, stage: str, batch_id: str, result: Any,
     ) -> None:
         result_json = self._json(result)
-        with self._connect() as db:
+        with self._connection() as db:
             cur = db.execute(
                 """UPDATE checkpoint_batches
                    SET status='completed', result_json=?, error=NULL,
@@ -158,7 +158,7 @@ class SQLiteCheckpointStore:
     def mark_failed(
         self, run_id: str, stage: str, batch_id: str, error: str,
     ) -> None:
-        with self._connect() as db:
+        with self._connection() as db:
             cur = db.execute(
                 """UPDATE checkpoint_batches
                    SET status='failed', error=?, updated_at=CURRENT_TIMESTAMP
@@ -169,7 +169,7 @@ class SQLiteCheckpointStore:
                 raise KeyError(f"unknown batch: {batch_id}")
 
     def load_result(self, run_id: str, stage: str, batch_id: str) -> Any:
-        with self._connect() as db:
+        with self._connection() as db:
             row = db.execute(
                 """SELECT status, result_json FROM checkpoint_batches
                    WHERE run_id=? AND stage=? AND batch_id=?""",
@@ -182,7 +182,7 @@ class SQLiteCheckpointStore:
         return json.loads(row["result_json"])
 
     def summary(self, run_id: str, stage: str) -> dict[str, int]:
-        with self._connect() as db:
+        with self._connection() as db:
             rows = db.execute(
                 """SELECT status, COUNT(*) AS count FROM checkpoint_batches
                    WHERE run_id=? AND stage=? GROUP BY status""",
