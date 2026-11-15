@@ -1,6 +1,9 @@
 name: FHM-100 Daily Research
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - fix/live-forward-industry-readiness
 
 permissions:
   contents: write
