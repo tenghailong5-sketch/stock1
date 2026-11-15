@@ -1,5 +1,5 @@
 from datetime import date
-\nfrom src.model.portfolio_backtest_runner import run_checkpointed_portfolio_backtest
+from src.model.portfolio_backtest_runner import run_checkpointed_portfolio_backtest
 
 import pandas as pd
 import pytest
