@@ -261,6 +261,38 @@ def select_research_history_universe(
         result = pd.concat([result, fill], ignore_index=True)
     return result.drop_duplicates("code").head(max_symbols).reset_index(drop=True)
 
+def select_candidate_history_topup_symbols(research_opportunities, *, max_symbols=20):
+    """Choose highest-ranked quote-only research opportunities for history enrichment."""
+    if max_symbols < 0:
+        raise ValueError("max_symbols cannot be negative")
+    if max_symbols == 0 or research_opportunities is None or research_opportunities.empty:
+        return []
+    required = {"symbol", "history_data_available", "research_opportunity_rank"}
+    if not required.issubset(research_opportunities.columns):
+        return []
+    frame = research_opportunities.copy()
+    frame["symbol"] = frame["symbol"].astype(str).str.strip().str.zfill(6)
+    def _history_available(value):
+        if pd.isna(value):
+            return False
+        if isinstance(value, (bool, np.bool_)):
+            return bool(value)
+        if isinstance(value, (int, float, np.integer, np.floating)):
+            return bool(value)
+        return str(value).strip().lower() in {"true", "1", "yes", "y", "available"}
+
+    # CSV/connector inputs may encode booleans as strings; bool("False") is
+    # True in Python, so normalize explicitly before filtering missing history.
+    available = frame["history_data_available"].map(_history_available)
+    frame = frame.loc[~available & frame["symbol"].str.fullmatch(r"\d{6}", na=False)]
+    frame["research_opportunity_rank"] = pd.to_numeric(
+        frame["research_opportunity_rank"], errors="coerce"
+    )
+    frame = frame.dropna(subset=["research_opportunity_rank"])
+    frame = frame.sort_values(["research_opportunity_rank", "symbol"])
+    return frame["symbol"].drop_duplicates().head(max_symbols).tolist()
+
+
 def select_history_universe_with_supplement(
     snapshot, *, max_symbols=600, max_supplement_symbols=200,
     min_candidate_amount=MIN_AMOUNT,
@@ -1551,6 +1583,127 @@ def main():
     research_opportunities.to_csv(
         OUT/"research_opportunity_rank.csv", index=False, encoding="utf-8-sig"
     )
+    # Top up the retrieval pool with the highest-ranked current research
+    # opportunities that missed the initial broad history pass. This aligns
+    # OHLC enrichment with the actual mainline shortlist instead of relying
+    # only on a pre-ranking momentum proxy.
+    try:
+        configured_topup_limit = int(
+            os.getenv("FHM_HISTORY_CANDIDATE_TOPUP_MAX_SYMBOLS", "20")
+        )
+    except (TypeError, ValueError):
+        configured_topup_limit = 20
+    topup_limit = (
+        max(0, min(40, configured_topup_limit))
+        if history_pool_audit.get("history_enabled", False) else 0
+    )
+    topup_symbols = select_candidate_history_topup_symbols(
+        research_opportunities, max_symbols=topup_limit
+    )
+    topup_universe = u.loc[u["code"].astype(str).str.zfill(6).isin(topup_symbols)].copy()
+    topup_history_ok = 0
+    topup_errors = pd.DataFrame()
+    if not topup_universe.empty:
+        try:
+            topup_watchlist, topup_errors = scan(
+                topup_universe, history_sink=kronos_histories
+            )
+        except Exception as topup_exc:
+            topup_watchlist = pd.DataFrame()
+            topup_errors = pd.DataFrame([{
+                "reason": f"{type(topup_exc).__name__}: {str(topup_exc)[:220]}"
+            }])
+        topup_watchlist = ensure_watchlist_schema(topup_watchlist)
+        if not topup_watchlist.empty:
+            try:
+                topup_watchlist, topup_observation_audit = rank_price_observations(
+                    topup_watchlist,
+                    expected_universe_size=len(topup_universe),
+                    scope_id=f"candidate_history_topup_{len(topup_universe)}",
+                )
+            except Exception as topup_rank_exc:
+                topup_watchlist = pd.DataFrame()
+                topup_errors = pd.concat([
+                    topup_errors,
+                    pd.DataFrame([{
+                        "reason": f"topup_observation_rank:{type(topup_rank_exc).__name__}: {str(topup_rank_exc)[:180]}"
+                    }]),
+                ], ignore_index=True)
+        history_universe = pd.concat(
+            [history_universe, topup_universe], ignore_index=True
+        ).drop_duplicates("code").reset_index(drop=True)
+        existing_history_count = int(
+            w.get("history_data_available", pd.Series(False, index=w.index))
+            .fillna(False).astype(bool).sum()
+        )
+        topup_history_ok = int(len(topup_watchlist))
+        history_success_count = existing_history_count + topup_history_ok
+        history_pool_audit["candidate_topup_selected"] = int(len(topup_universe))
+        history_pool_audit["candidate_topup_history_ok"] = topup_history_ok
+        history_pool_audit["candidate_topup_error_count"] = int(len(topup_errors))
+        history_pool_audit["history_scan_symbols"] = int(len(history_universe))
+        history_pool_audit["candidate_topup_is_formal_signal"] = False
+        (OUT/"history_pool_audit.json").write_text(
+            json.dumps(history_pool_audit, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        if not topup_watchlist.empty:
+            topup_watchlist["history_data_available"] = True
+            existing_history = w.loc[
+                w.get("history_data_available", pd.Series(False, index=w.index)).fillna(False).astype(bool)
+            ].copy()
+            combined_history = pd.concat(
+                [existing_history, topup_watchlist], ignore_index=True, sort=False
+            )
+            combined_history["代码"] = (
+                combined_history["代码"].astype(str).str.strip().str[-6:].str.zfill(6)
+            )
+            combined_history = combined_history.drop_duplicates("代码", keep="last")
+            w = merge_current_quotes_with_history(
+                u, combined_history, observed_at=spot_snapshot_observed_at
+            )
+            if not forward_stock_mainline.empty and {
+                "symbol", "industry_code"
+            }.issubset(forward_stock_mainline.columns):
+                current_codes = forward_stock_mainline[["symbol", "industry_code"]].copy()
+                current_codes["symbol"] = current_codes["symbol"].astype(str).str.zfill(6)
+                current_codes = current_codes.rename(
+                    columns={"industry_code": "current_forward_industry_code"}
+                )
+                w = w.merge(current_codes, on="symbol", how="left", validate="one_to_one")
+                w["sw_history_industry_code"] = w["current_forward_industry_code"]
+            history_success_count = int(len(combined_history))
+            # Rebuild diagnostics/ranking with the newly enriched candidates.
+            try:
+                m5_input = build_m5_diagnostic_input(
+                    w, m3, mainline_mapping_panel,
+                    pit_factor_snapshot=m4_pit_factor_snapshot,
+                    decision_time=now,
+                )
+                m5_input_audit = {"status": "READY_AFTER_CANDIDATE_HISTORY_TOPUP"}
+            except Exception as m5_topup_exc:
+                m5_input = pd.DataFrame({"symbol": w.get("symbol", pd.Series(dtype=str))})
+                m5_input_audit = {
+                    "status": "OPTIONAL_DIAGNOSTIC_SKIPPED",
+                    "reason": f"{type(m5_topup_exc).__name__}: {str(m5_topup_exc)[:220]}",
+                }
+            research_opportunities, research_opportunity_audit = build_research_opportunity_ranking(
+                w, m5_input, min_observed_factors=2,
+                industry_context=forward_stock_mainline,
+                allow_quote_only_fallback=True,
+            )
+            research_opportunities["market_cycle_state"] = market_cycle_state
+            research_opportunities["market_cycle_trade_date"] = market_cycle_date
+            research_opportunities["market_cycle_status"] = str(market_emotion_audit.get("status", "UNKNOWN"))
+            research_opportunities.to_csv(
+                OUT/"research_opportunity_rank.csv", index=False, encoding="utf-8-sig"
+            )
+            research_opportunity_audit["candidate_history_topup"] = {
+                "selected": int(len(topup_universe)),
+                "history_ok": topup_history_ok,
+                "history_scan_total": int(len(history_universe)),
+                "formal_stock_score_eligible": False,
+            }
     try:
         final_candidates, momentum_event_watch, final_candidate_audit = build_final_candidate_shortlist(
             research_opportunities, max_candidates=30, max_per_industry=3,
