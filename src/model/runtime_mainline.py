@@ -212,12 +212,34 @@ def scan_runtime_mainlines(
         emotion, emotion_audit = _assemble_emotion(
             decision_time=cutoff, archive_root=root
         )
-        if not policy_path.exists():
-            raise RuntimeError("official policy catalyst archive is missing")
-        policy = pd.read_json(policy_path, lines=True)
-        visible, policy_audit = visible_policy_events(policy, decision_time=cutoff)
-        # The local seed archive is explicitly incomplete. A missing event is
-        # therefore UNKNOWN, never evidence that no catalyst exists.
+        # Policy evidence is an optional overlay, not a prerequisite for
+        # industry/emotion discovery. Missing or malformed archives remain
+        # UNKNOWN and never mean "no catalyst"; they must not erase the scan.
+        policy_columns = [
+            "event_id", "published_at", "available_at", "source_url", "source_id",
+            "title", "catalyst_type", "industry_codes", "impact_direction",
+            "confidence", "confidence_basis", "availability_basis",
+        ]
+        if policy_path.exists():
+            try:
+                policy = pd.read_json(policy_path, lines=True)
+                visible, policy_audit = visible_policy_events(policy, decision_time=cutoff)
+            except Exception as policy_exc:
+                visible = pd.DataFrame(columns=policy_columns)
+                policy_audit = {
+                    "status": "ARCHIVE_UNAVAILABLE_UNKNOWN",
+                    "reason": f"{type(policy_exc).__name__}: {str(policy_exc)[:200]}",
+                    "input_rows": 0, "visible_rows": 0,
+                    "historical_pit_eligible": False,
+                }
+        else:
+            visible = pd.DataFrame(columns=policy_columns)
+            policy_audit = {
+                "status": "ARCHIVE_MISSING_UNKNOWN",
+                "reason": "policy archive absent; no negative-catalyst inference",
+                "input_rows": 0, "visible_rows": 0,
+                "historical_pit_eligible": False,
+            }
         evidence = attach_startup_evidence(
             phases, emotion, visible, policy_archive_complete=False
         )
