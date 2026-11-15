@@ -252,7 +252,7 @@ def run_portfolio_backtest(
                 position["last_close"] = float(bar["close"])
                 # Today's low is known only after the opening execution window.
                 # Queue a stop for the next session, never today's open.
-                if position["entry_date"] < day and float(bar["low"]) <= position["stop_price"]:
+                if float(bar["low"]) <= position["stop_price"]:
                     position["stop_triggered"] = True
             market_value += position["shares"] * position["last_close"]
         daily_equity.append({
