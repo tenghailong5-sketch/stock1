@@ -159,9 +159,10 @@ def test_weighted_quote_only_score_and_final_shortlist_are_diversified():
     )
     assert audit["score_method"] == "weighted_observed_percentiles_renormalized_per_row"
     assert audit["factor_weights"] == {
-        "industry_strength": 0.35,
-        "current_momentum": 0.45,
-        "current_liquidity": 0.20,
+        "industry_strength": 0.30,
+        "current_momentum": 0.40,
+        "current_liquidity": 0.15,
+        "industry_flow_concentration": 0.15,
     }
     assert len(shortlist) == 4
     assert shortlist["shortlist_industry"].value_counts().max() <= 2
