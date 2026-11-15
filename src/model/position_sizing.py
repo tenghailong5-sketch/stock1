@@ -28,9 +28,8 @@ class SizingResult:
 def size_long_position(
     *, entry_price: float, stop_price: float, available_cash: float,
     open_position_count: int, open_portfolio_risk: float,
-    per_trade_risk_limit: float = 2000.0,
-    portfolio_risk_limit: float = 3000.0,
-    max_positions: int = 2, lot_size: int = 100,
+    available_risk_budget: float, market_risk_scale: float,
+    lot_size: int = 100,
     estimated_round_trip_cost_bps: float = 30.0,
     estimated_round_trip_fixed_cost: float = 10.0,
     estimated_buy_commission_bps: float = 2.5,
@@ -45,8 +44,8 @@ def size_long_position(
     values = {
         "entry_price": entry_price, "stop_price": stop_price,
         "available_cash": available_cash, "open_portfolio_risk": open_portfolio_risk,
-        "per_trade_risk_limit": per_trade_risk_limit,
-        "portfolio_risk_limit": portfolio_risk_limit,
+        "available_risk_budget": available_risk_budget,
+        "market_risk_scale": market_risk_scale,
         "estimated_round_trip_cost_bps": estimated_round_trip_cost_bps,
         "estimated_round_trip_fixed_cost": estimated_round_trip_fixed_cost,
         "estimated_buy_commission_bps": estimated_buy_commission_bps,
@@ -65,8 +64,6 @@ def size_long_position(
             reasons.append(f"invalid:{name}")
     if isinstance(open_position_count, bool) or not isinstance(open_position_count, int) or open_position_count < 0:
         reasons.append("invalid:open_position_count")
-    if isinstance(max_positions, bool) or not isinstance(max_positions, int) or max_positions < 1:
-        reasons.append("invalid:max_positions")
     if isinstance(lot_size, bool) or not isinstance(lot_size, int) or lot_size < 1:
         reasons.append("invalid:lot_size")
     if reasons:
@@ -74,7 +71,6 @@ def size_long_position(
 
     entry, stop, cash = float(entry_price), float(stop_price), float(available_cash)
     existing_risk = float(open_portfolio_risk)
-    trade_limit, portfolio_limit = float(per_trade_risk_limit), float(portfolio_risk_limit)
     cost_bps = float(estimated_round_trip_cost_bps)
     fixed_cost = float(estimated_round_trip_fixed_cost)
     buy_commission_bps = float(estimated_buy_commission_bps)
@@ -82,17 +78,18 @@ def size_long_position(
     buy_transfer_bps = float(estimated_buy_transfer_fee_bps)
     if entry <= 0 or stop <= 0 or stop >= entry:
         reasons.append("invalid_long_entry_or_stop")
-    if cash < 0 or existing_risk < 0 or trade_limit <= 0 or portfolio_limit <= 0 or cost_bps < 0 or fixed_cost < 0 or buy_commission_bps < 0 or buy_minimum_commission < 0 or buy_transfer_bps < 0:
+    risk_budget = float(available_risk_budget)
+    risk_scale = float(market_risk_scale)
+    if (cash < 0 or existing_risk < 0 or risk_budget <= 0
+            or not 0 <= risk_scale <= 1 or cost_bps < 0 or fixed_cost < 0
+            or buy_commission_bps < 0 or buy_minimum_commission < 0 or buy_transfer_bps < 0):
         reasons.append("negative_or_nonpositive_risk_input")
-    if open_position_count >= max_positions:
-        reasons.append("maximum_open_positions_reached")
-    remaining = portfolio_limit - existing_risk
-    if remaining <= 0:
-        reasons.append("portfolio_risk_budget_exhausted")
     if reasons:
         return SizingResult(False, 0, entry, stop, 0.0, 0.0, 0.0, tuple(reasons))
 
-    budget = min(trade_limit, remaining)
+    # M8's available_risk_budget is already net of current portfolio exposure.
+    # Do not subtract open_portfolio_risk a second time.
+    budget = risk_budget * risk_scale
     cost_per_share = entry * cost_bps / 10000.0
     loss_per_share = (entry - stop) + cost_per_share
     risk_after_fixed = max(0.0, budget - fixed_cost)
