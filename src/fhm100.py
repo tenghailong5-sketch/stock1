@@ -8,6 +8,7 @@ import akshare as ak
 import numpy as np
 import pandas as pd
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from src.model.m4_factors import price_structure
 from src.model.m4_observation import rank_price_observations
 from src.model.pipeline import evaluate_candidates, factor_readiness_audit
@@ -356,71 +357,97 @@ def history(code,start,archive_root=Path("data/forward_archive")):
         raise ValueError("daily history lineage could not be attached to every bar")
     return h
 
-def scan(u,archive_root=Path("data/forward_archive"),history_sink=None):
-    rows=[]; errors=[]; start=(datetime.now()-pd.Timedelta(days=160)).strftime("%Y%m%d")
-    for _,s in u.iterrows():
-        try:
-            h=history(s.code,start,archive_root=archive_root)
-            if h is None: raise ValueError("insufficient history or schema mismatch")
-            if history_sink is not None:
-                history_sink[str(s.code).zfill(6)] = h.copy()
-            # M4 price primitives use the raw bars captured in this run.
-            # Retrieval timestamps do not certify historical PIT availability.
-            decision_at = datetime.now(timezone.utc)
-            m4_bars = h.rename(columns={"date": "trade_date"}).copy()
-            m4_bars["symbol"] = s.code
-            m4 = price_structure(m4_bars, decision_time=decision_at.isoformat()).iloc[-1]
-            # Fast exploratory indicators: raw, unadjusted history only.
-            # These are deliberately labelled provisional and never enter formal M5.
-            raw_close = pd.to_numeric(h["close"], errors="coerce").dropna()
-            raw_amount = pd.to_numeric(h["amount"], errors="coerce")
-            raw_volume = pd.to_numeric(h["volume"], errors="coerce")
-            quick_r5 = raw_close.pct_change(5).iloc[-1] if len(raw_close) > 5 else np.nan
-            quick_r20 = raw_close.pct_change(20).iloc[-1] if len(raw_close) > 20 else np.nan
-            quick_amount_ma20 = raw_amount.tail(20).mean()
-            quick_volume_ratio = (
-                raw_volume.iloc[-1] / raw_volume.tail(20).mean()
-                if len(raw_volume) >= 20 and raw_volume.tail(20).mean() > 0 else np.nan
-            )
-            available_at = pd.Timestamp(m4.available_time).to_pydatetime()
-            liq=pd.notna(m4.amount_ma20) and m4.amount_ma20>=MIN_AMOUNT
-            trend=(pd.notna(m4.return_5) and pd.notna(m4.return_20)
-                   and m4.return_5>0 and m4.return_20>0)
-            structure=pd.notna(m4.CLV) and m4.CLV>=.60
-            pullback=pd.notna(m4.Pullback) and m4.Pullback>-.12
-            flags=[]
-            if not liq: flags.append("20日平均成交额不足1亿元/缺失")
-            if m4.cross_session_price_status != "READY":
-                flags.append("缺少经公司行为账本验证的点时总收益价格序列；跨日趋势/突破/回撤禁用")
-            if not trend: flags.append("5日及20日趋势未同时确认")
-            if not structure: flags.append("CLV收盘结构未确认")
-            if not pullback: flags.append("回撤过深/缺失")
-            rows.append({"symbol":s.code,"trade_date":m4.trade_date.strftime("%Y-%m-%d"),
-              "available_time":available_at.isoformat(),
-              "BodyStrength":m4.BodyStrength,"return_5":m4.return_5,"return_10":m4.return_10,
-              "return_20":m4.return_20,"breakout20":m4.breakout20,
-              "upper_shadow_ratio":m4.upper_shadow_ratio,
-              "代码":s.code,"名称":s["name"],"最新价":s.price,"涨跌幅%":s.pct_chg,
-              "当日成交额":s.amount,"20日平均成交额":m4.amount_ma20,
-              "5日收益%":m4.return_5*100 if pd.notna(m4.return_5) else np.nan,
-              "20日收益%":m4.return_20*100 if pd.notna(m4.return_20) else np.nan,
-              "CLV":m4.CLV,"20日高点回撤%":m4.Pullback*100 if pd.notna(m4.Pullback) else np.nan,
-              "M4突破20日高点%":m4.breakout20*100 if pd.notna(m4.breakout20) else np.nan,
-              "M4量比5日/20日":m4.volume_ma5_to_ma20,
-              "M4距20日高点交易日":m4.pullback_duration,
-              "M4高量滞涨":bool(m4.high_volume_stall) if pd.notna(m4.high_volume_stall) else None,
-              "M4缩量回撤":bool(m4.low_volume_pullback) if pd.notna(m4.low_volume_pullback) else None,
-              "快速5日收益%":quick_r5 * 100 if pd.notna(quick_r5) else np.nan,
-              "快速20日收益%":quick_r20 * 100 if pd.notna(quick_r20) else np.nan,
-              "快速量比20日":quick_volume_ratio,
-              "快速20日平均成交额":quick_amount_ma20,
-              "M4数据口径":"原始OHLC仅用于当日K线结构；跨日特征仅接受经公司行为账本验证的点时总收益序列；本次抓取时间戳不具备历史PIT资格",
-              "M4跨日价格状态":m4.cross_session_price_status,
-              "流动性观察通过":bool(liq),"技术观察通过":bool(trend and structure and pullback),
-              "未通过项":"；".join(flags) if flags else "基础观察条件通过",
-              "公司行为口径":"无VERIFIED点时总收益序列时，跨日收益/突破/回撤留空；原始价格不替代总收益"})
-        except Exception as e: errors.append({"代码":s.code,"原因":str(e)[:220]})
-    return pd.DataFrame(rows),pd.DataFrame(errors)
+def _scan_one_symbol(s, start, archive_root, history_sink=None):
+    try:
+        h = history(s.code, start, archive_root=archive_root)
+        if h is None:
+            raise ValueError("insufficient history or schema mismatch")
+        if history_sink is not None:
+            history_sink[str(s.code).zfill(6)] = h.copy()
+        decision_at = datetime.now(timezone.utc)
+        m4_bars = h.rename(columns={"date": "trade_date"}).copy()
+        m4_bars["symbol"] = s.code
+        m4 = price_structure(m4_bars, decision_time=decision_at.isoformat()).iloc[-1]
+        raw_close = pd.to_numeric(h["close"], errors="coerce").dropna()
+        raw_amount = pd.to_numeric(h["amount"], errors="coerce")
+        raw_volume = pd.to_numeric(h["volume"], errors="coerce")
+        quick_r5 = raw_close.pct_change(5).iloc[-1] if len(raw_close) > 5 else np.nan
+        quick_r20 = raw_close.pct_change(20).iloc[-1] if len(raw_close) > 20 else np.nan
+        quick_amount_ma20 = raw_amount.tail(20).mean()
+        quick_volume_ratio = (
+            raw_volume.iloc[-1] / raw_volume.tail(20).mean()
+            if len(raw_volume) >= 20 and raw_volume.tail(20).mean() > 0 else np.nan
+        )
+        available_at = pd.Timestamp(m4.available_time).to_pydatetime()
+        liq = pd.notna(m4.amount_ma20) and m4.amount_ma20 >= MIN_AMOUNT
+        trend = (
+            pd.notna(m4.return_5) and pd.notna(m4.return_20)
+            and m4.return_5 > 0 and m4.return_20 > 0
+        )
+        structure = pd.notna(m4.CLV) and m4.CLV >= .60
+        pullback = pd.notna(m4.Pullback) and m4.Pullback > -.12
+        flags = []
+        if not liq:
+            flags.append("20日平均成交额不足1亿元/缺失")
+        if m4.cross_session_price_status != "READY":
+            flags.append("缺少经公司行为账本验证的点时总收益价格序列；跨日趋势/突破/回撤禁用")
+        if not trend:
+            flags.append("5日及20日趋势未同时确认")
+        if not structure:
+            flags.append("CLV收盘结构未确认")
+        if not pullback:
+            flags.append("回撤过深/缺失")
+        row = {
+            "symbol": s.code, "trade_date": m4.trade_date.strftime("%Y-%m-%d"),
+            "available_time": available_at.isoformat(),
+            "BodyStrength": m4.BodyStrength, "return_5": m4.return_5,
+            "return_10": m4.return_10, "return_20": m4.return_20,
+            "breakout20": m4.breakout20, "upper_shadow_ratio": m4.upper_shadow_ratio,
+            "代码": s.code, "名称": s["name"], "最新价": s.price, "涨跌幅%": s.pct_chg,
+            "当日成交额": s.amount, "20日平均成交额": m4.amount_ma20,
+            "5日收益%": m4.return_5 * 100 if pd.notna(m4.return_5) else np.nan,
+            "20日收益%": m4.return_20 * 100 if pd.notna(m4.return_20) else np.nan,
+            "CLV": m4.CLV, "20日高点回撤%": m4.Pullback * 100 if pd.notna(m4.Pullback) else np.nan,
+            "M4突破20日高点%": m4.breakout20 * 100 if pd.notna(m4.breakout20) else np.nan,
+            "M4量比5日/20日": m4.volume_ma5_to_ma20,
+            "M4距20日高点交易日": m4.pullback_duration,
+            "M4高量滞涨": bool(m4.high_volume_stall) if pd.notna(m4.high_volume_stall) else None,
+            "M4缩量回撤": bool(m4.low_volume_pullback) if pd.notna(m4.low_volume_pullback) else None,
+            "快速5日收益%": quick_r5 * 100 if pd.notna(quick_r5) else np.nan,
+            "快速20日收益%": quick_r20 * 100 if pd.notna(quick_r20) else np.nan,
+            "快速量比20日": quick_volume_ratio,
+            "快速20日平均成交额": quick_amount_ma20,
+            "M4数据口径": "原始OHLC仅用于当日K线结构；跨日特征仅接受经公司行为账本验证的点时总收益序列；本次抓取时间戳不具备历史PIT资格",
+            "M4跨日价格状态": m4.cross_session_price_status,
+            "流动性观察通过": bool(liq),
+            "技术观察通过": bool(trend and structure and pullback),
+            "未通过项": "；".join(flags) if flags else "基础观察条件通过",
+            "公司行为口径": "无VERIFIED点时总收益序列时，跨日收益/突破/回撤留空；原始价格不替代总收益",
+        }
+        return row, None
+    except Exception as exc:
+        return None, {"代码": s.code, "原因": str(exc)[:220]}
+
+
+def scan(u, archive_root=Path("data/forward_archive"), history_sink=None, max_workers=None):
+    """Fetch per-symbol history concurrently with a bounded, configurable worker pool."""
+    start = (datetime.now() - pd.Timedelta(days=160)).strftime("%Y%m%d")
+    if max_workers is None:
+        max_workers = int(os.getenv("FHM_HISTORY_SCAN_WORKERS", "4"))
+    max_workers = max(1, min(int(max_workers), 8))
+    symbols = [row for _, row in u.iterrows()]
+    rows, errors = [], []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = executor.map(
+            lambda stock: _scan_one_symbol(stock, start, archive_root, history_sink),
+            symbols,
+        )
+        for row, error in results:
+            if row is not None:
+                rows.append(row)
+            if error is not None:
+                errors.append(error)
+    return pd.DataFrame(rows), pd.DataFrame(errors)
 
 def ai_review(text):
     key=os.getenv("AI_API_KEY")
