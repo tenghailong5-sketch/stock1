@@ -558,7 +558,7 @@ def audit_forward_industry_membership(archive_root, expected_symbols, *, decisio
     return selected, audit
 
 
-def build_m5_diagnostic_input(watchlist, market_context, mainline=None):
+def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_factor_snapshot=None, decision_time=None):
     """Map only observed live factors into M5; leave unverified factors/gates missing.
 
     Industry strength comes from the current effective-date SW research overlay
@@ -577,6 +577,51 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None):
     if symbol_col not in base:
         raise ValueError("watchlist requires symbol or 代码")
     base["symbol"] = base[symbol_col].astype(str).str.strip().str.zfill(6)
+
+    # Optional formal M4->M5 bridge. It accepts only a precomputed, audited
+    # PIT snapshot; current runtime overlays remain descriptive diagnostics.
+    pit_by_symbol = {}
+    pit_snapshot_status = "not_supplied"
+    if pit_factor_snapshot is not None:
+        required_pit = {
+            "symbol", "trade_date", "available_time", "source_id",
+            "source_revision", "availability_basis", "historical_pit_eligible",
+        }
+        missing_pit = required_pit - set(pit_factor_snapshot.columns)
+        if missing_pit:
+            raise ValueError("PIT factor snapshot missing: " + ",".join(sorted(missing_pit)))
+        if decision_time is None:
+            raise ValueError("decision_time is required for PIT factor mapping")
+        cutoff = pd.Timestamp(decision_time)
+        if cutoff.tzinfo is None:
+            raise ValueError("decision_time must be timezone-aware")
+        pit = pit_factor_snapshot.copy()
+        pit["symbol"] = pit["symbol"].astype(str).str.strip().str.zfill(6)
+        pit["trade_date"] = pd.to_datetime(pit["trade_date"], errors="coerce")
+        available = pd.to_datetime(pit["available_time"], errors="coerce")
+        if available.isna().any() or available.dt.tz is None:
+            raise ValueError("PIT factor available_time must be timezone-aware")
+        pit["available_time"] = available.dt.tz_convert("UTC")
+        cutoff_utc = cutoff.tz_convert("UTC")
+        decision_date = cutoff.tz_convert("Asia/Shanghai").date()
+        eligible = (
+            pit["historical_pit_eligible"].map(lambda value: isinstance(value, (bool, np.bool_)) and bool(value))
+            & pit["availability_basis"].astype(str).str.strip().eq("derived_from_certified_pit_inputs")
+            & pit["trade_date"].notna()
+            & (pit["trade_date"].dt.date <= decision_date)
+            & (pit["available_time"] <= cutoff_utc)
+            & pit["source_id"].notna()
+            & pit["source_id"].astype(str).str.strip().ne("")
+            & pit["source_revision"].notna()
+            & pit["source_revision"].astype(str).str.strip().ne("")
+        )
+        pit = pit.loc[eligible].copy()
+        # Duplicate rows are ambiguous; exclude that symbol rather than choosing
+        # an arbitrary provider/revision row.
+        duplicate_symbols = set(pit.loc[pit["symbol"].duplicated(keep=False), "symbol"])
+        pit = pit.loc[~pit["symbol"].isin(duplicate_symbols)]
+        pit_by_symbol = pit.set_index("symbol").to_dict(orient="index")
+        pit_snapshot_status = "validated" if pit_by_symbol else "no_eligible_rows"
 
     def _cross_section_percentile(column):
         if column not in base:
@@ -663,8 +708,26 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None):
         errors="coerce",
     )
     rows = []
+    factor_map = {
+        "industry_relative_strength": "industry_relative_strength_pct",
+        "stock_residual_strength": "stock_residual_strength_pct",
+        "price_structure": "price_structure_pct",
+        "trade_quality": "trade_quality_pct",
+        "pre_pullback_strength": "pre_pullback_strength_pct",
+        "pullback_reversal_structure": "pullback_reversal_structure_pct",
+    }
+    gate_map = (
+        "industry_top_30pct", "stock_residual_top_20pct", "amount_ma20_ge_100m",
+        "breakout_or_confirmed_retest",
+        "no_high_volume_stall_or_repeated_rejection",
+        "pre_pullback_residual_positive", "pullback_between_0_5_and_4pct",
+        "pullback_volume_le_80pct_prior5d", "stop_or_reversal_confirmed",
+        "industry_not_weak", "no_material_negative_event",
+        "liquidity_and_risk_pass",
+    )
     for idx, stock in base.iterrows():
         industry_value = industry_strength.loc[idx]
+        pit_row = pit_by_symbol.get(stock["symbol"], {})
         row = {
             "symbol": stock["symbol"],
             "market_state": state,
@@ -700,6 +763,36 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None):
                 else "missing_or_ambiguous_industry_mapping"
             ),
         }
+        if pit_row:
+            # Percentiles are already ranked within their declared PIT peer set.
+            # Never synthesize a score from a raw return or a forward-only overlay.
+            for output_key, source_key in factor_map.items():
+                value = pit_row.get(source_key)
+                try:
+                    number = float(value)
+                    if np.isfinite(number) and 0.0 <= number <= 100.0:
+                        row[output_key] = number
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            if "industry_relative_strength" in row:
+                row["industry_strength"] = row["industry_relative_strength"]
+            for gate in gate_map:
+                value = pit_row.get(gate)
+                row[gate] = bool(value) if isinstance(value, (bool, np.bool_)) else None
+            row["stock_residual_top_20pct"] = (
+                bool(pit_row["stock_residual_top_20pct"])
+                if isinstance(pit_row.get("stock_residual_top_20pct"), (bool, np.bool_))
+                else None
+            )
+            # PIT-derived liquidity gate overrides the live watchlist observation.
+            amount_gate = pit_row.get("amount_ma20_ge_100m")
+            row["amount_ma20_ge_100m"] = (
+                bool(amount_gate) if isinstance(amount_gate, (bool, np.bool_)) else None
+            )
+            row["m5_pit_factor_provenance"] = "verified_pit_snapshot"
+        else:
+            row["m5_pit_factor_provenance"] = "missing_or_ineligible_pit_snapshot"
+        row["m5_pit_snapshot_status"] = pit_snapshot_status
         if environment is not None:
             try:
                 score = float(environment)
@@ -1002,9 +1095,26 @@ def main():
         w["快速初筛通过"] = False
     w=w.sort_values(["快速初筛通过","快速初筛分","技术观察通过","流动性观察通过","当日成交额"],
                     ascending=[False,False,False,False,False])
-    # M5 remains diagnostic-only. A/C receive the defined M3 market factor
-    # only when M3 is independently READY; all other factors and gates remain fail-closed.
-    m5_input = build_m5_diagnostic_input(w, m3, runtime_mainline)
+    # Current archives do not jointly provide certified PIT stock,
+    # industry and market returns. Never promote retrieval-time history to PIT.
+    m4_pit_factor_snapshot = pd.DataFrame(columns=["symbol","trade_date","available_time","source_id","source_revision","availability_basis","historical_pit_eligible","industry_relative_strength_pct","stock_residual_strength_pct","price_structure_pct","trade_quality_pct","pre_pullback_strength_pct","pullback_reversal_structure_pct","industry_top_30pct","stock_residual_top_20pct","amount_ma20_ge_100m","breakout_or_confirmed_retest","no_high_volume_stall_or_repeated_rejection","pre_pullback_residual_positive","pullback_between_0_5_and_4pct","pullback_volume_le_80pct_prior5d","stop_or_reversal_confirmed","industry_not_weak","no_material_negative_event","liquidity_and_risk_pass"])
+    m4_pit_snapshot_audit = {
+        "status": "NOT_BUILT_NO_CERTIFIED_PIT_INPUTS",
+        "archive_readiness": archive_readiness.get("status"),
+        "reason": "Certified stock bars/returns with valid historical industry mapping, industry returns and market returns are not jointly available.",
+        "builder_invoked": False,
+        "historical_pit_eligible": False,
+        "expected_inputs": ["stock_bars", "stock_returns_with_valid_industry_code", "industry_returns", "market_returns"],
+    }
+    (OUT/"m4_pit_snapshot_audit.json").write_text(
+        json.dumps(m4_pit_snapshot_audit, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    m5_input = build_m5_diagnostic_input(
+        w, m3, runtime_mainline,
+        pit_factor_snapshot=m4_pit_factor_snapshot,
+        decision_time=now,
+    )
     m5 = evaluate_candidates(m5_input, stage="close") if not m5_input.empty else pd.DataFrame(
         columns=["symbol","strategy","stage","score","eligible","candidate_band","minimum_score","reasons"])
     m5.to_csv(OUT/"m5_diagnostics.csv",index=False,encoding="utf-8-sig")
@@ -1120,6 +1230,7 @@ def main():
       f"- 快速初筛通过：{int(w['快速初筛通过'].sum()) if '快速初筛通过' in w else 0}只（临时探索排名，不是正式FHM分数）",
       f"- M4价格/流动性观察因子已计算：{len(w)}",
       f"- M4观察分位审计记录：{len(observation_audit)}条",
+      f"- M4 PIT→M5桥接：{m4_pit_snapshot_audit.get('status')}；本次未伪造PIT输入",
       f"- 个股行情最新可用时间：{latest_stock_available or '无'}；统一决策时点：{now.isoformat()}",
       f"- 历史PIT档案审计：{archive_readiness.get('status')}；档案文件={archive_readiness.get('file_count', 0)}；明细见archive_readiness.json",
       f"- 运行时行业主线扫描：{runtime_mainline_audit.get('status')}；最新交易日={runtime_mainline_audit.get('latest_trade_date', '无')}；最新行业数={runtime_mainline_audit.get('latest_industry_rows', 0)}；启动证据确认={runtime_mainline_audit.get('confirmed_startups', 0)}（诊断用途，不接入正式评分）",
@@ -1165,6 +1276,7 @@ def main():
       "history_scan_universe":len(history_universe),"history_pool_audit":history_pool_audit,
       "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
       "archive_readiness":archive_readiness,
+      "m4_pit_snapshot_audit":m4_pit_snapshot_audit,
       "runtime_mainline_audit":runtime_mainline_audit,
       "sw_industry_history_research_audit":sw_history_audit,
       "sw_stock_mainline_research_audit":sw_stock_mainline_audit,

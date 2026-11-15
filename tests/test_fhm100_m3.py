@@ -347,3 +347,90 @@ def test_m5_negative_policy_risk_blocks_only_explicitly_affected_industry():
 
     assert result["no_material_negative_event"].tolist() == [False, None]
 
+
+
+def test_m5_maps_only_lineage_valid_pit_factor_snapshot():
+    watchlist = pd.DataFrame([{"代码": "000001", "CLV": 0.8, "20日平均成交额": 150_000_000}])
+    snapshot = pd.DataFrame([{
+        "symbol": "000001", "trade_date": "2026-11-13",
+        "available_time": "2026-11-13T08:00:00Z",
+        "source_id": "pit.factor_builder", "source_revision": "sha256:abc",
+        "historical_pit_eligible": True,
+        "industry_relative_strength_pct": 91.0,
+        "stock_residual_strength_pct": 88.0,
+        "price_structure_pct": 82.0, "trade_quality_pct": 76.0,
+        "pre_pullback_strength_pct": 85.0,
+        "pullback_reversal_structure_pct": 79.0,
+        "industry_top_30pct": True, "stock_residual_top_20pct": True,
+        "breakout_or_confirmed_retest": True,
+        "no_high_volume_stall_or_repeated_rejection": True,
+        "pre_pullback_residual_positive": True,
+        "pullback_between_0_5_and_4pct": True,
+        "pullback_volume_le_80pct_prior5d": True,
+        "stop_or_reversal_confirmed": True, "industry_not_weak": True,
+        "no_material_negative_event": True, "liquidity_and_risk_pass": True,
+    }])
+    frame = fhm100.build_m5_diagnostic_input(
+        watchlist, {"market_state": "RISK_ON", "market_environment_score": 90.0},
+        pit_factor_snapshot=snapshot,
+        decision_time="2026-11-14T09:00:00+08:00",
+    )
+    row = frame.iloc[0]
+    assert row["industry_relative_strength"] == 91.0
+    assert row["stock_residual_strength"] == 88.0
+    assert row["price_structure"] == 82.0
+    assert bool(row["stock_residual_top_20pct"])
+    assert row["m5_pit_factor_provenance"] == "verified_pit_snapshot"
+
+
+def test_m5_rejects_future_or_retrieval_only_pit_factor_rows():
+    watchlist = pd.DataFrame([{"代码": "000001"}])
+    snapshot = pd.DataFrame([{
+        "symbol": "000001", "trade_date": "2026-11-13",
+        "available_time": "2026-11-15T00:00:00Z",
+        "source_id": "pit.factor_builder", "source_revision": "rev1",
+        "historical_pit_eligible": True,
+        "industry_relative_strength_pct": 99.0,
+    }])
+    frame = fhm100.build_m5_diagnostic_input(
+        watchlist, {"market_state": "RISK_ON"},
+        pit_factor_snapshot=snapshot,
+        decision_time="2026-11-14T09:00:00+08:00",
+    )
+    assert pd.isna(frame.loc[0, "industry_relative_strength"])
+    assert frame.loc[0, "m5_pit_factor_provenance"] == "missing_or_ineligible_pit_snapshot"
+
+
+
+def test_m5_pit_liquidity_gate_overrides_live_watchlist_amount():
+    watchlist = pd.DataFrame([{"代码": "000001", "20日平均成交额": 250_000_000}])
+    snapshot = pd.DataFrame([{
+        "symbol": "000001", "trade_date": "2026-11-13",
+        "available_time": "2026-11-13T08:00:00Z",
+        "source_id": "pit.factor_builder", "source_revision": "sha256:def",
+        "availability_basis": "derived_from_certified_pit_inputs",
+        "historical_pit_eligible": True, "amount_ma20_ge_100m": False,
+    }])
+    frame = fhm100.build_m5_diagnostic_input(
+        watchlist, {"market_state": "RISK_ON"}, pit_factor_snapshot=snapshot,
+        decision_time="2026-11-14T09:00:00+08:00",
+    )
+    assert frame.loc[0, "amount_ma20_ge_100m"] is False
+    assert frame.loc[0, "m5_pit_factor_provenance"] == "verified_pit_snapshot"
+
+
+def test_m5_rejects_retrieval_time_only_factor_snapshot_even_if_flagged_eligible():
+    watchlist = pd.DataFrame([{"代码": "000001"}])
+    snapshot = pd.DataFrame([{
+        "symbol": "000001", "trade_date": "2026-11-13",
+        "available_time": "2026-11-13T08:00:00Z",
+        "source_id": "pit.factor_builder", "source_revision": "rev1",
+        "availability_basis": "retrieval_time_only", "historical_pit_eligible": True,
+        "industry_relative_strength_pct": 99.0,
+    }])
+    frame = fhm100.build_m5_diagnostic_input(
+        watchlist, {"market_state": "RISK_ON"}, pit_factor_snapshot=snapshot,
+        decision_time="2026-11-14T09:00:00+08:00",
+    )
+    assert pd.isna(frame.loc[0, "industry_relative_strength"])
+    assert frame.loc[0, "m5_pit_factor_provenance"] == "missing_or_ineligible_pit_snapshot"
