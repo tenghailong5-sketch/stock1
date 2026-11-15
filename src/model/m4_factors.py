@@ -374,6 +374,32 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
     return pd.concat(output, ignore_index=True) if output else x.assign(residual_return_5=np.nan)
 
 
+def _require_historical_pit_eligible(frame: pd.DataFrame, name: str) -> None:
+    """Reject retrieval-time backfills masquerading as historical PIT observations."""
+    required = {"historical_pit_eligible", "availability_basis", "available_time",
+                "source_id", "source_revision"}
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(f"{name} missing PIT eligibility fields: " + ",".join(sorted(missing)))
+    if frame.empty:
+        raise ValueError(f"{name} has no observations")
+    eligible = frame["historical_pit_eligible"].map(
+        lambda value: value is True or isinstance(value, np.bool_) and bool(value)
+    )
+    if not eligible.all():
+        raise ValueError(f"{name} contains observations not certified historical PIT eligible")
+    basis = frame["availability_basis"].astype(str).str.strip()
+    if basis.eq("").any() or basis.eq("retrieval_time_only").any():
+        raise ValueError(f"{name} has retrieval-time-only availability")
+    for col in ("source_id", "source_revision"):
+        values = frame[col]
+        if values.isna().any() or values.astype(str).str.strip().eq("").any():
+            raise ValueError(f"{name} has invalid {col}")
+    available = pd.to_datetime(frame["available_time"], errors="coerce", utc=True)
+    if available.isna().any():
+        raise ValueError(f"{name}.available_time contains invalid timestamps")
+
+
 def build_m4_pit_factor_snapshot(
     stock_bars: pd.DataFrame,
     stock_returns: pd.DataFrame,
@@ -400,6 +426,16 @@ def build_m4_pit_factor_snapshot(
     cutoff = pd.Timestamp(decision_time)
     if cutoff.tzinfo is None:
         raise ValueError("decision_time must be timezone-aware")
+
+    # All four factor inputs must carry original, auditable point-in-time
+    # availability. Retrieval-time downloads of old history are not PIT data.
+    for frame, name in (
+        (stock_bars, "stock_bars"),
+        (stock_returns, "stock_returns"),
+        (industry_returns, "industry_returns"),
+        (market_returns, "market_returns"),
+    ):
+        _require_historical_pit_eligible(frame, name)
 
     price = price_structure(stock_bars, decision_time=cutoff)
     price = price.sort_values("trade_date").groupby("symbol", as_index=False).tail(1).copy()
