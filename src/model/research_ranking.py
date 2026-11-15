@@ -143,8 +143,13 @@ def build_research_opportunity_ranking(
         ascending=[False, False, True], na_position="last",
     ).reset_index(drop=True)
     audit = {
-        "status": "READY_RESEARCH_ONLY" if out["research_opportunity_score"].notna().any()
-                  else "INSUFFICIENT_RESEARCH_FACTOR_COVERAGE",
+        "status": (
+            "READY_RESEARCH_ONLY"
+            if out["research_opportunity_score"].notna().any()
+            else "MAINLINE_CONTEXT_UNAVAILABLE"
+            if not mainline_anchor_ready.any()
+            else "INSUFFICIENT_RESEARCH_FACTOR_COVERAGE"
+        ),
         "row_count": int(len(out)),
         "ranked_count": int(out["research_opportunity_score"].notna().sum()),
         "unranked_count": int(out["research_opportunity_score"].isna().sum()),
