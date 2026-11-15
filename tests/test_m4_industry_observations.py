@@ -157,3 +157,14 @@ def test_default_five_day_freshness_includes_friday_snapshot_on_monday():
     )
     assert len(selected) == 3
     assert audit["status"] == "ready_forward_only"
+
+
+
+def test_default_ten_day_freshness_covers_long_market_holidays():
+    selected, audit = select_latest_observed_industry_snapshot(
+        rows(captured="2026-11-09T08:30:00Z"),
+        ["000001", "600000"],
+        decision_time="2026-11-16T09:00:00Z",
+    )
+    assert len(selected) == 3
+    assert audit["status"] == "ready_forward_only"
