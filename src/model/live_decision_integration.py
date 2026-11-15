@@ -97,15 +97,27 @@ def build_live_decision_gate_audit(
     if len(symbols) != len(set(symbols)):
         raise ValueError("watchlist contains duplicate symbols")
 
-    # Select a bounded minute-confirmation set by the existing exploratory rank.
+    # M5 eligibility is the prerequisite for an expensive 15-minute check.
+    # Keep all candidate rows for diagnostics, but only scan symbols with at
+    # least one eligible A/B/C strategy. This changes request ordering, not
+    # candidate coverage or the decision rules.
+    m5_lookup = {}
+    if m5 is not None and not m5.empty:
+        for row in m5.to_dict("records"):
+            m5_lookup[(str(row.get("symbol", "")).zfill(6), str(row.get("strategy", "")))] = row
+    m5_eligible_symbols = {
+        symbol for (symbol, strategy), candidate in m5_lookup.items()
+        if strategy in {"A", "B", "C"} and _truth(candidate.get("eligible"))
+    }
+    # Preserve the existing exploratory rank among M5-qualified symbols.
     rank_col = "快速初筛分" if "快速初筛分" in watchlist else "当日成交额"
     ranked = watchlist.copy()
     if rank_col in ranked:
         ranked[rank_col] = pd.to_numeric(ranked[rank_col], errors="coerce")
         ranked = ranked.sort_values(rank_col, ascending=False, na_position="last")
-    # Preserve rank order for deterministic bounded scans and bind every
-    # 15-minute observation to the runner's single frozen decision cutoff.
+    # Bind every 15-minute observation to the runner's single frozen cutoff.
     minute_ranked_symbols = ranked["代码"].astype(str).str.zfill(6)
+    minute_ranked_symbols = minute_ranked_symbols[minute_ranked_symbols.isin(m5_eligible_symbols)]
     minute_symbols = (
         minute_ranked_symbols.tolist() if minute_scan_limit is None
         else minute_ranked_symbols.head(minute_scan_limit).tolist()
@@ -149,11 +161,6 @@ def build_live_decision_gate_audit(
         for code, group in panel.groupby("industry_code"):
             if len(group):
                 latest_mainline[str(code)] = group.iloc[-1].to_dict()
-
-    m5_lookup = {}
-    if m5 is not None and not m5.empty:
-        for row in m5.to_dict("records"):
-            m5_lookup[(str(row.get("symbol", "")).zfill(6), str(row.get("strategy", "")))] = row
 
     market_ready = market_context.get("status") == "READY"
     market_state = market_context.get("market_state")
@@ -200,7 +207,8 @@ def build_live_decision_gate_audit(
         concentration_status = str(industry.get("stock_turnover_pit_status", "not_ready"))
         minute = minute_results.get(symbol, {
             "status": "NOT_SCANNED_15M", "entry_ready": False,
-            "reason": "outside_configured_15m_scan_pool", "historical_pit_eligible": False,
+            "reason": ("outside_configured_15m_scan_pool" if symbol in m5_eligible_symbols
+                       else "m5_strategy_not_eligible"), "historical_pit_eligible": False,
         })
         risk = risk_context_by_symbol.get(symbol, {})
         # A market quote is not an approved execution plan. M8 requires an
@@ -272,6 +280,7 @@ def build_live_decision_gate_audit(
         "status": "EXECUTED_FAIL_CLOSED",
         "candidate_count": int(len(result)),
         "unique_stock_count": int(len(symbols)),
+        "m5_eligible_symbol_count": int(len(m5_eligible_symbols)),
         "minute_scanned_count": int(len(minute_symbols)),
         "minute_scan_limit": "ALL" if minute_scan_limit is None else int(minute_scan_limit),
         "allowed_count": allowed,
