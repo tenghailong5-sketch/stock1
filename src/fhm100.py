@@ -996,16 +996,23 @@ def summarize_m5_blockers(frame):
 
 
 def main():
-    # Run PIT archive readiness audit at every model invocation. It is
-    # diagnostic only and never upgrades retrieval-time history to PIT.
-    try:
-        archive_readiness = audit_forward_archive(Path("data/forward_archive"))
-    except Exception as exc:
+    current_snapshot_mode = os.getenv("FHM_CURRENT_SNAPSHOT_MODE", "1").strip().lower() in {"1", "true", "yes", "on"}
+    # Historical PIT inventory is optional and skipped in the fast current-data path.
+    if current_snapshot_mode:
         archive_readiness = {
-            "status": "AUDIT_UNAVAILABLE",
-            "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
+            "status": "SKIPPED_CURRENT_SNAPSHOT_MODE",
+            "reason": "historical PIT archive audit is not a daily-run prerequisite",
             "file_count": 0, "datasets": [], "files": [],
         }
+    else:
+        try:
+            archive_readiness = audit_forward_archive(Path("data/forward_archive"))
+        except Exception as exc:
+            archive_readiness = {
+                "status": "AUDIT_UNAVAILABLE",
+                "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
+                "file_count": 0, "datasets": [], "files": [],
+            }
     (OUT / "archive_readiness.json").write_text(
         json.dumps(archive_readiness, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
@@ -1108,7 +1115,6 @@ def main():
     # M3 and every captured stock bar are therefore evaluated against the same
     # cutoff; no provider response fetched after the cutoff can leak into the run.
     now=datetime.now(timezone.utc)
-    current_snapshot_mode = os.getenv("FHM_CURRENT_SNAPSHOT_MODE", "1").strip().lower() in {"1", "true", "yes", "on"}
     # The daily path uses current quotes and the latest observed membership snapshot.
     # Historical lifecycle/emotion reconstruction is an optional research lane.
     if current_snapshot_mode:
@@ -1706,7 +1712,7 @@ def main():
       "## 正式模型阻塞项",
       *[f"- {reason}" for reason in formal_blockers],
       "## 运行时行业主线观察（非正式选股信号）",
-      (runtime_mainline.head(15).to_string(index=False) if not runtime_mainline.empty else "本次主线扫描不可用：" + str(runtime_mainline_audit.get('reason', runtime_mainline_audit.get('status')))),
+      (runtime_mainline.head(15).to_string(index=False) if not runtime_mainline.empty else ("当前快照模式已跳过历史主线生命周期扫描；行业强度由当前成分股行情计算，生命周期阶段保持UNKNOWN。" if current_snapshot_mode else "本次主线扫描不可用：" + str(runtime_mainline_audit.get('reason', runtime_mainline_audit.get('status'))))),
       "## 四层决策门阻塞项",
       (gate_blockers.head(20).to_string(index=False) if len(gate_blockers) else "无四层决策记录。"),
       "## M5主要阻塞项",
@@ -1736,7 +1742,7 @@ def main():
         push_error = exc
     (OUT/"run_status.json").write_text(json.dumps({"time":now.isoformat(),"universe":len(u),
       "history_scan_universe":len(history_universe),"history_pool_audit":history_pool_audit,
-      "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
+      "history_ok":history_success_count,"current_quote_rows":len(w),"errors":len(e),"watchlist":len(c),"push":status,
       "archive_readiness":archive_readiness,
       "m4_pit_snapshot_audit":m4_pit_snapshot_audit,
       "research_opportunity_audit":research_opportunity_audit,
