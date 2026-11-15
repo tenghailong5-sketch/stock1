@@ -83,10 +83,38 @@ def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path)
     # Avoid serially waiting on every SW industry endpoint. Keep concurrency
     # bounded to reduce provider pressure and preserve per-industry failures.
     workers = max(1, min(int(os.getenv("FHM_MAINLINE_HISTORY_WORKERS", "4")), 8))
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        results = list(executor.map(fetch_one, groups.itertuples(index=False)))
-    frames = [frame for frame, error in results if frame is not None]
-    failures = [error for frame, error in results if error is not None]
+    results = []
+    frames = []
+    failures = []
+    # Query in bounded batches. If the first batch is entirely unavailable due
+    # to transport failures, stop instead of waiting through every industry
+    # endpoint's retry window. The caller can still use the spot-sector fallback.
+    for offset in range(0, len(groups), workers):
+        batch = groups.iloc[offset:offset + workers]
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            batch_results = list(executor.map(
+                fetch_one, batch.itertuples(index=False)
+            ))
+        results.extend(batch_results)
+        frames.extend(frame for frame, error in batch_results if frame is not None)
+        failures.extend(error for frame, error in batch_results if error is not None)
+        transport_errors = (
+            "ReadTimeout", "ConnectTimeout", "ConnectionError", "SSLError"
+        )
+        if (
+            offset == 0
+            and not frames
+            and len(batch_results) == len(batch)
+            and all(
+                error is not None and any(kind in error for kind in transport_errors)
+                for _, error in batch_results
+            )
+        ):
+            raise RuntimeError(
+                "SW industry history transport unavailable in first batch; "
+                "aborted remaining industry requests early: "
+                + " | ".join(failures[:8])
+            )
     # One provider timeout must not discard every available industry.
     # Keep the cross-section when at least 90% of the current SW universe is
     # present on a date; the observed turnover denominator scales all shares
