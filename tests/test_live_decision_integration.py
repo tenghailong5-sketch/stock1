@@ -93,6 +93,24 @@ def test_forward_only_membership_snapshot_can_authorize_live_but_never_pit():
     assert audit["decision_mode"] == "live_forward"
 
 
+def test_unconfirmed_m3_ignition_is_not_live_entry_eligible():
+    watchlist, m5, market, mainline, membership, risk = _inputs()
+    mainline["mainline_phase_gated"] = "IGNITION_UNCONFIRMED"
+    rows, _ = build_live_decision_gate_audit(
+        watchlist, m5, market, mainline, membership,
+        decision_time="2026-11-14T09:00:00+08:00",
+        risk_context_by_symbol=risk,
+        minute_confirmation_fetcher=lambda symbol, captured_at=None: {
+            "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
+            "reason": "all_15m_checks_passed",
+        },
+    )
+    assert not rows["allowed"].any()
+    assert rows["reasons"].map(
+        lambda reasons: "mainline_phase_unknown_or_transition" in reasons
+    ).all()
+
+
 def test_stale_or_future_live_industry_snapshots_are_rejected():
     for available_time in ("2026-11-01T00:00:00Z", "2026-11-14T02:00:01Z"):
         watchlist, m5, market, mainline, membership, risk = _inputs()
