@@ -312,6 +312,9 @@ def residual_strength(stock_returns: pd.DataFrame, market_returns: pd.DataFrame,
     if decision_time is None:
         raise ValueError("decision_time is required for PIT residual strength")
     stocks = _pit_frame(stock_returns, decision_time, "stock returns", ("symbol", "industry_code"))
+    if stocks.empty:
+        stocks["residual_return_5"] = pd.Series(dtype=float)
+        return stocks
     cutoff = pd.Timestamp(decision_time)
     if cutoff.tzinfo is None:
         raise ValueError("decision_time must be timezone-aware")
