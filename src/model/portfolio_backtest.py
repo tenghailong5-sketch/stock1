@@ -53,9 +53,6 @@ def run_portfolio_backtest(
     bars: pd.DataFrame,
     *,
     initial_cash: float = 100000.0,
-    per_trade_risk_limit: float = 2000.0,
-    portfolio_risk_limit: float = 3000.0,
-    max_positions: int = 2,
     max_participation: float = 0.05,
     costs: ExecutionCosts = ExecutionCosts(),
 ) -> dict[str, Any]:
@@ -176,8 +173,8 @@ def run_portfolio_backtest(
             sizing = size_long_position(
                 entry_price=expected_entry, stop_price=float(stop), available_cash=cash,
                 open_position_count=len(positions), open_portfolio_risk=portfolio_risk,
-                per_trade_risk_limit=per_trade_risk_limit,
-                portfolio_risk_limit=portfolio_risk_limit, max_positions=max_positions,
+                available_risk_budget=float(candidate["available_risk_budget"]),
+                market_risk_scale=float(candidate["market_risk_scale"]),
                 estimated_round_trip_cost_bps=(2 * costs.slippage_bps + 2 * costs.commission_bps
                                                 + costs.sell_stamp_duty_bps + 2 * costs.transfer_fee_bps),
                 estimated_round_trip_fixed_cost=2 * costs.minimum_commission,
