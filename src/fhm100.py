@@ -1711,7 +1711,7 @@ def main():
       f"- M4价格/流动性观察因子历史增强样本：{history_success_count}",
       f"- M4观察分位审计记录：{len(observation_audit)}条",
       f"- M4 PIT→M5桥接：{m4_pit_snapshot_audit.get('status')}；本次未伪造PIT输入",
-      f"- 个股行情最新可用时间：{latest_stock_available or '无'}；统一决策时点：{now.isoformat()}",
+      f"- 行情快照采集时间：{latest_stock_available or '无'}；行情源未提供独立报价时间戳，不能将采集时间当作最新成交时间；统一决策时点：{now.isoformat()}",
       f"- 历史PIT档案审计：{archive_readiness.get('status')}；档案文件={archive_readiness.get('file_count', 0)}；明细见archive_readiness.json",
       f"- 运行时行业主线扫描：{runtime_mainline_audit.get('status')}；最新交易日={runtime_mainline_audit.get('latest_trade_date', '无')}；最新行业数={runtime_mainline_audit.get('latest_industry_rows', 0)}；启动证据确认={runtime_mainline_audit.get('confirmed_startups', 0)}（诊断用途，不接入正式评分）",
       f"- 市场情绪证据：{runtime_mainline_audit.get('emotion', {}).get('sessions', 0)}个历史会话；政策归档完整性={runtime_mainline_audit.get('policy', {}).get('archive_complete', False)}（缺失政策不判定为无催化）",
