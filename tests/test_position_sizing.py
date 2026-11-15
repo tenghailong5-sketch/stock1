@@ -21,20 +21,23 @@ def test_remaining_portfolio_risk_caps_second_position():
 
 def test_rejects_invalid_stop():
     r = size_long_position(entry_price=20, stop_price=20, available_cash=100000,
-                           open_position_count=0, open_portfolio_risk=0)
+                           open_position_count=0, open_portfolio_risk=0,
+                           available_risk_budget=2000, market_risk_scale=1.0)
     assert not r.approved and "invalid_long_entry_or_stop" in r.reasons
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), True, None])
 def test_rejects_invalid_numeric_inputs(bad):
     r = size_long_position(entry_price=bad, stop_price=19, available_cash=100000,
-                           open_position_count=0, open_portfolio_risk=0)
+                           open_position_count=0, open_portfolio_risk=0,
+                           available_risk_budget=2000, market_risk_scale=1.0)
     assert not r.approved and r.shares == 0
 
 
 def test_cash_limit_is_applied_after_risk_limit():
     r = size_long_position(entry_price=10, stop_price=9, available_cash=1500,
-                           open_position_count=0, open_portfolio_risk=0)
+                           open_position_count=0, open_portfolio_risk=0,
+                           available_risk_budget=2000, market_risk_scale=1.0)
     assert r.approved and r.shares == 100
     assert r.cash_required == 1000
 
