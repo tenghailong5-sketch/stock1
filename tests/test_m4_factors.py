@@ -123,6 +123,7 @@ def test_build_m4_snapshot_ranks_only_complete_declared_universe():
                 "high": close + 0.1, "low": close - 0.1, "close": close,
                 "volume": 1000.0 + i, "amount": 2e8 + i * 1e6,
                 "available_time": available, "source_id": "bars", "source_revision": "v1",
+                "availability_basis": "original_publication_time", "historical_pit_eligible": True,
                 "pit_total_return_close": close, "pit_total_return_high": close + 0.1,
                 "pit_total_return_available_time": available, "corporate_action_status": "VERIFIED",
             })
@@ -132,17 +133,20 @@ def test_build_m4_snapshot_ranks_only_complete_declared_universe():
                 "pit_total_return_daily_return": 0.001 + offset / 10,
                 "pit_total_return_available_time": available, "corporate_action_status": "VERIFIED",
                 "available_time": available, "source_id": "stock", "source_revision": "v1",
+                "availability_basis": "original_publication_time", "historical_pit_eligible": True,
             })
     market = pd.DataFrame({
         "trade_date": dates, "market_return": np.linspace(-0.001, 0.001, len(dates)),
         "market_return_5": [0.01] * len(dates), "market_return_20": [0.02] * len(dates),
         "available_time": available, "source_id": "market", "source_revision": "v1",
+        "availability_basis": "original_publication_time", "historical_pit_eligible": True,
     })
     industry = pd.DataFrame([
         {"trade_date": date, "industry_code": code, "industry_return": 0.002 + j * 0.001,
          "industry_return_5": 0.02 + j * 0.01, "return_5": 0.02 + j * 0.01,
          "return_20": 0.04 + j * 0.01, "available_time": available,
-         "source_id": "industry", "source_revision": "v1"}
+         "source_id": "industry", "source_revision": "v1",
+         "availability_basis": "original_publication_time", "historical_pit_eligible": True}
         for date in dates for j, code in enumerate(["I1", "I2"])
     ])
     # The residual regression needs independently identifiable benchmark series.
