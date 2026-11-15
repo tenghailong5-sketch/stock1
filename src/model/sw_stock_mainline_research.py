@@ -137,6 +137,12 @@ def build_forward_stock_mainline_research(
     }
     if not isinstance(membership, pd.DataFrame) or not isinstance(mainline, pd.DataFrame):
         raise ValueError("membership and mainline must be DataFrames")
+    if membership.empty or mainline.empty:
+        return pd.DataFrame(), {
+            "status": "NO_CURRENT_MAPPING_INPUTS", "matched_symbols": 0,
+            "active_membership_symbols": 0, "historical_pit_eligible": False,
+            "trading_authorization": False, "research_only": True,
+        }
     missing = required_membership - set(membership.columns)
     if missing:
         raise ValueError("forward membership missing: " + ",".join(sorted(missing)))
