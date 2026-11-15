@@ -44,11 +44,14 @@ def assemble_m3_history(
     index_symbol: str = "000001",
     decision_time,
     min_breadth_coverage: float = 0.95,
+    min_session_coverage: float = 0.90,
 ) -> dict:
     """Return READY only when 60 consecutive fully observed market sessions exist."""
     cutoff = _utc(decision_time, "decision_time")
     if not 0 < min_breadth_coverage <= 1:
         raise ValueError("min_breadth_coverage must be in (0, 1]")
+    if not 0 < min_session_coverage <= 1:
+        raise ValueError("min_session_coverage must be in (0, 1]")
     root = Path(archive_root)
 
     index_rows = _read_jsonl(root / "index_daily" / f"{str(index_symbol).zfill(6)}.jsonl")
@@ -193,9 +196,10 @@ def assemble_m3_history(
     ]).copy()
     complete = complete.sort_values("trade_date").reset_index(drop=True)
 
-    # Sixty percentile observations each need an MA60/volatility feature row.
-    # Without index warm-up predating the archive, that means 119 consecutive
-    # aligned daily market snapshots. Never skip a missing session in the window.
+    # Keep the 60-session percentile and MA60 feature windows, but do not
+    # invalidate the whole live regime because one or two older breadth
+    # snapshots are absent. Require >=90% coverage across the 119-session
+    # warm-up window and a complete latest session; missing rows stay missing.
     last_index_days = idx.trade_date.tail(119).tolist()
     snapshot_complete = merged.dropna(subset=[
         "breadth", "amount", "limit_up_cnt", "limit_down_cnt",
@@ -203,12 +207,27 @@ def assemble_m3_history(
     ])
     snapshot_complete_days = set(snapshot_complete.trade_date.tolist())
     missing_days = [day for day in last_index_days if day not in snapshot_complete_days]
-    if len(idx) < 119 or missing_days:
+    session_coverage = (
+        float((len(last_index_days) - len(missing_days)) / len(last_index_days))
+        if last_index_days else 0.0
+    )
+    latest_snapshot_missing = bool(
+        last_index_days and last_index_days[-1] not in snapshot_complete_days
+    )
+    insufficiency_reason = (
+        "fewer_than_119_index_sessions" if len(idx) < 119
+        else "latest_market_snapshot_missing" if latest_snapshot_missing
+        else "recent_market_snapshot_coverage_below_minimum"
+        if session_coverage < min_session_coverage else None
+    )
+    if insufficiency_reason:
         return {
             "status": "INSUFFICIENT_DATA",
-            "reason": "fewer_than_119_complete_consecutive_sessions",
+            "reason": insufficiency_reason,
             "valid_sessions": int(len(complete)),
-            "required_sessions": 119,
+            "required_index_sessions": 119,
+            "minimum_session_coverage": float(min_session_coverage),
+            "session_coverage": session_coverage,
             "missing_recent_dates": missing_days[-10:],
             "quality_warnings": reasons[-10:],
             "history": complete,
@@ -238,6 +257,10 @@ def assemble_m3_history(
         "status": "READY" if ready else "STATE_CONFIRMATION_PENDING",
         "reason": None if ready else "two_consecutive_sessions_not_yet_confirmed",
         "valid_sessions": int(len(complete)),
+        "required_index_sessions": 119,
+        "minimum_session_coverage": float(min_session_coverage),
+        "session_coverage": session_coverage,
+        "missing_recent_dates": missing_days[-10:],
         "latest_trade_date": str(latest.trade_date.date()),
         "market_state": state,
         "state_score": None if pd.isna(latest.StateScore) else float(latest.StateScore),
