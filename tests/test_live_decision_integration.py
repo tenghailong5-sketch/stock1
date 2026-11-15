@@ -252,3 +252,23 @@ def test_missing_m8_plan_does_not_substitute_latest_quote_as_entry_price():
     assert audit["m8_risk_context_complete_symbol_count"] == 0
     assert audit["m8_risk_context_missing_symbol_count"] == 1
 
+
+
+def test_operator_risk_context_file_loads_explicit_per_symbol_plan(tmp_path):
+    import json
+    from src.model.live_decision_integration import load_risk_context_file
+
+    path = tmp_path / "risk.json"
+    path.write_text(json.dumps({
+        "600000": {
+            "entry_price": 20.0, "stop_price": 19.0, "quantity": 100,
+            "planned_risk": 120.0, "reward_risk": 2.0,
+            "minimum_reward_risk": 1.5, "existing_portfolio_risk": 0.0,
+            "existing_position_count": 0, "available_risk_budget": 500.0,
+        }
+    }), encoding="utf-8")
+    plans, audit = load_risk_context_file(str(path))
+    assert "600000" in plans
+    assert plans["600000"]["available_risk_budget"] == 500.0
+    assert audit["status"] == "LOADED"
+    assert load_risk_context_file(None)[1]["status"] == "NOT_CONFIGURED"
