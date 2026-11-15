@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from datetime import datetime, timezone
 
 # Explicit, reviewable vocabulary. Broad words such as "technology" are omitted.
 KEYWORD_TO_INDUSTRY = {
@@ -72,14 +73,54 @@ KEYWORD_TO_INDUSTRY = {
     "commercial aerospace": ("国防军工",),
 }
 
-def map_candidate_sectors(candidates, available_industries):
-    """Return mapped candidate copies and coverage audit; direction stays unclear."""
+def _parse_aware_time(value):
+    if hasattr(value, "to_pydatetime"):
+        value = value.to_pydatetime()
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc) if value.tzinfo is not None else None
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.strptime(raw, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return parsed.astimezone(timezone.utc) if parsed.tzinfo is not None else None
+
+
+def map_candidate_sectors(candidates, available_industries, *, decision_time=None, max_age_days=30):
+    """Map fresh candidates to current SW1 names; direction stays unclear."""
+    cutoff = _parse_aware_time(decision_time) if decision_time is not None else None
+    if decision_time is not None and cutoff is None:
+        raise ValueError("decision_time must be timezone-aware")
+    if isinstance(max_age_days, bool) or not isinstance(max_age_days, (int, float)) or max_age_days <= 0:
+        raise ValueError("max_age_days must be positive")
     names = {str(name).strip() for name in available_industries if str(name).strip()}
     mapped = []
     unmapped = 0
+    stale = 0
+    duplicate_headlines = 0
+    seen_headlines = set()
     for candidate in candidates or []:
         if not isinstance(candidate, dict):
             continue
+        if cutoff is not None:
+            # GDELT seendate is an index-observation clock, not publisher time.
+            # Official policy uses its publication clock, then first_seen_at.
+            raw_time = (
+                candidate.get("gdelt_seen_at")
+                if "gdelt_seen_at" in candidate
+                else candidate.get("published_at") or candidate.get("first_seen_at")
+            )
+            observed = _parse_aware_time(raw_time)
+            if observed is None or observed > cutoff or (cutoff - observed).total_seconds() > max_age_days * 86400:
+                stale += 1
+                continue
+        headline = re.sub(r"[\W_]+", "", str(candidate.get("title") or "").lower(), flags=re.UNICODE)
+        identity = headline or str(candidate.get("candidate_id") or candidate.get("event_id") or "")
         text = " ".join(str(candidate.get(key) or "") for key in (
             "title", "summary", "catalog", "issuing_agency",
             "discovery_keyword", "theme",
@@ -93,6 +134,11 @@ def map_candidate_sectors(candidates, available_industries):
         if not hits:
             unmapped += 1
             continue
+        if identity and identity in seen_headlines:
+            duplicate_headlines += 1
+            continue
+        if identity:
+            seen_headlines.add(identity)
         row = dict(candidate)
         row["mapped_industries"] = hits
         row["mapping_status"] = "KEYWORD_MATCH_PENDING_REVIEW"
@@ -106,6 +152,9 @@ def map_candidate_sectors(candidates, available_industries):
         "input_candidates": len(candidates or []),
         "mapped_candidates": len(mapped),
         "unmapped_candidates": unmapped,
+        "stale_candidates_excluded": stale,
+        "freshness_window_days": float(max_age_days),
+        "duplicate_headlines_suppressed": duplicate_headlines,
         "industry_candidate_counts": dict(counts),
         "mapping_is_review_only": True,
         "impact_direction_inferred": False,
