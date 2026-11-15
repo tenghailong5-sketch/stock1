@@ -90,7 +90,10 @@ def test_loader_reads_industry_and_explicit_benchmark_with_data_root():
     assert calls[0][1]["data_root"] == "/tmp/cnequity"
     assert calls[1][1]["symbols"] == ["000001.SH"]
     assert audit["provider"] == "CNEquity"
-    assert len(panel) == 20
+    # Both 3-session and 5-session returns are required; with six sessions,
+    # the aligned benchmark/industry panel correctly contains one date.
+    assert audit["trade_date_count"] == 1
+    assert len(panel) == 10
 
 def test_excludes_low_priced_member_coverage_without_hiding_the_count():
     industry, market = _frames()
