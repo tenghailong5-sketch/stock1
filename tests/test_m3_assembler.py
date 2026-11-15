@@ -60,15 +60,15 @@ def test_m3_assembler_builds_state_only_after_60_complete_sessions(tmp_path):
     assert result["valid_sessions"] == 81  # first 59 days warm up MA60/volatility
 
 
-def test_m3_assembler_fails_closed_when_one_recent_daily_snapshot_is_missing(tmp_path):
+def test_m3_assembler_tolerates_one_missing_nonlatest_snapshot_with_coverage_audit(tmp_path):
     dates = pd.bdate_range("2026-01-05", periods=140)
     missing_day = dates[-10].strftime("%Y-%m-%d")
     make_archive(tmp_path, omit_breadth_day=missing_day)
     result = assemble_m3_history(
         tmp_path, index_symbol="000001", decision_time="2026-11-01T12:00:00Z"
     )
-    assert result["status"] == "INSUFFICIENT_DATA"
-    assert result["reason"] == "fewer_than_119_complete_consecutive_sessions"
+    assert result["status"] == "READY"
+    assert result["session_coverage"] >= 0.99
     assert missing_day in result["missing_recent_dates"]
 
 
@@ -100,7 +100,7 @@ def test_m3_assembler_requires_119_aligned_days_for_60_scored_observations(tmp_p
         tmp_path, index_symbol="000001", decision_time="2026-11-01T12:00:00Z"
     )
     assert result["status"] == "INSUFFICIENT_DATA"
-    assert result["reason"] == "fewer_than_119_complete_consecutive_sessions"
+    assert result["reason"] == "fewer_than_119_index_sessions"
     assert result["required_sessions"] == 119
 
 
@@ -158,3 +158,15 @@ def test_m3_prefers_retrieved_historical_aggregate_and_checks_availability(tmp_p
     )
     assert result["status"] == "READY"
     assert result["historical_backtest_eligible"] is False
+
+
+
+def test_m3_assembler_still_requires_latest_session_snapshot(tmp_path):
+    dates = pd.bdate_range("2026-01-05", periods=140)
+    missing_day = dates[-1].strftime("%Y-%m-%d")
+    make_archive(tmp_path, omit_breadth_day=missing_day)
+    result = assemble_m3_history(
+        tmp_path, index_symbol="000001", decision_time="2026-11-01T12:00:00Z"
+    )
+    assert result["status"] == "INSUFFICIENT_DATA"
+    assert result["reason"] == "latest_market_snapshot_missing"
