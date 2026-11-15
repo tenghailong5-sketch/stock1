@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import akshare as ak
+import numpy as np
 import pandas as pd
 import requests
 
