@@ -87,7 +87,9 @@ def test_m5_empty_pit_snapshot_keeps_live_research_diagnostics():
 
     assert len(result) == 1
     assert result.loc[0, "market_state"] == "RISK_ON"
-    assert pd.isna(result.loc[0, "stock_residual_strength"])
+    assert result.loc[0, "m5_pit_factor_provenance"] == "missing_or_ineligible_pit_snapshot"
+    assert result.loc[0, "m5_pit_snapshot_status"] == "empty_snapshot"
+    assert "stock_residual_strength" not in result.columns
 
 
 def test_m5_nonempty_malformed_pit_snapshot_still_fails_closed():
