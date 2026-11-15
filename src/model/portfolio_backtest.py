@@ -94,6 +94,18 @@ def run_portfolio_backtest(
             continue
         candidates_by_entry_day.setdefault(dates[next_index], []).append(row)
 
+    # Signals entering on the same session share one conservative risk pool.
+    # Historical M8 budgets predate these same-session entries; otherwise each
+    # candidate could spend the full snapshot independently.
+    entry_day_risk_budget: dict[date, float] = {}
+    for entry_day, rows in candidates_by_entry_day.items():
+        effective_budgets = [
+            float(row["available_risk_budget"]) * float(row["market_risk_scale"])
+            for row in rows
+        ]
+        if effective_budgets:
+            entry_day_risk_budget[entry_day] = min(effective_budgets)
+
     cash = float(initial_cash)
     positions: dict[str, dict[str, Any]] = {}
     fills: list[dict[str, Any]] = []
@@ -173,11 +185,12 @@ def run_portfolio_backtest(
                 skipped.append({"symbol": symbol, "date": day.isoformat(), "reason": "stop_not_below_entry"})
                 continue
             portfolio_risk = sum(_risk(p, costs) for p in positions.values())
+            remaining_risk_budget = entry_day_risk_budget.get(day, 0.0)
             sizing = size_long_position(
                 entry_price=expected_entry, stop_price=float(stop), available_cash=cash,
                 open_position_count=len(positions), open_portfolio_risk=portfolio_risk,
-                available_risk_budget=float(candidate["available_risk_budget"]),
-                market_risk_scale=float(candidate["market_risk_scale"]),
+                available_risk_budget=remaining_risk_budget,
+                market_risk_scale=1.0,
                 estimated_round_trip_cost_bps=(2 * costs.slippage_bps + 2 * costs.commission_bps
                                                 + costs.sell_stamp_duty_bps + 2 * costs.transfer_fee_bps),
                 estimated_round_trip_fixed_cost=2 * costs.minimum_commission,
@@ -209,6 +222,11 @@ def run_portfolio_backtest(
                 "entry_date": day, "stop_price": float(stop),
                 "buy_cost": result.total_cost, "last_close": float(bar["close"]),
             }
+            # Consume risk for shares actually filled; the M3 multiplier was
+            # applied once when initializing the shared daily budget.
+            entry_day_risk_budget[day] = max(
+                0.0, remaining_risk_budget - _risk(positions[symbol], costs)
+            )
 
         # 3) Mark remaining positions to the latest available close.
         market_value = 0.0
