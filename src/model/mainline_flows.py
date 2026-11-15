@@ -16,6 +16,7 @@ def classify_mainlines(
     frame: pd.DataFrame, *,
     ignition_strength_min: float = DEFAULT_IGNITION_STRENGTH_MIN,
     ignition_turnover_min: float = 0.50,
+    min_industry_coverage: float = 0.90,
 ) -> pd.DataFrame:
     """Rank relative strength, turnover share expansion and breadth by date.
 
@@ -27,6 +28,8 @@ def classify_mainlines(
         raise ValueError("ignition_strength_min must be within [0,1]")
     if not 0 <= ignition_turnover_min <= 1:
         raise ValueError("ignition_turnover_min must be within [0,1]")
+    if not 0 < min_industry_coverage <= 1:
+        raise ValueError("min_industry_coverage must be within (0,1]")
     missing = REQUIRED - set(frame.columns)
     if missing:
         raise ValueError("missing mainline fields: " + ",".join(sorted(missing)))
@@ -51,10 +54,14 @@ def classify_mainlines(
         raise ValueError("duplicate industry/date rows are not allowed")
     observed_counts = out.groupby("trade_date")["industry_code"].nunique()
     expected_counts = out.groupby("trade_date")["expected_industry_count"].nunique()
-    if expected_counts.ne(1).any() or (
-        observed_counts != out.groupby("trade_date")["expected_industry_count"].first()
-    ).any():
-        raise ValueError("incomplete or inconsistent industry peer universe")
+    if expected_counts.ne(1).any():
+        raise ValueError("inconsistent expected industry peer universe")
+    expected_by_date = out.groupby("trade_date")["expected_industry_count"].first()
+    minimum_by_date = (expected_by_date * min_industry_coverage).apply(
+        lambda value: max(1, int(value + 0.999999))
+    )
+    if (observed_counts < minimum_by_date).any():
+        raise ValueError("industry peer coverage below configured minimum")
     if out.groupby("trade_date")["market_turnover"].nunique().ne(1).any():
         raise ValueError("market_turnover denominator must be consistent within each date")
     if (out.market_turnover <= 0).any():
