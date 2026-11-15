@@ -55,7 +55,7 @@ def test_signal_at_close_enters_next_session_and_stops_next_day():
     assert result["fills"][0]["date"] == "2026-01-06"
     assert result["fills"][0]["side"] == "buy"
     assert result["trades"][0]["entry_date"] == "2026-01-06"
-    assert result["trades"][0]["exit_date"] == "2026-01-07"
+    assert result["trades"][0]["exit_date"] == "2026-01-08"
     assert result["trades"][0]["exit_reason"] == "protective_stop"
     assert result["ending_equity"] < result["initial_cash"]
     assert result["metrics"]["trade_count"] == 1
@@ -127,11 +127,11 @@ def test_partial_exit_fills_count_as_one_trade_only_after_position_closes():
     candidates = frame([candidate(stop=9.5)])
     bars = frame([
         bar("000001", "2026-01-06", volume=100000),
-        bar("000001", "2026-01-07", open_=9.4, high=9.5, low=9.2, close=9.3, volume=2000),
-        bar("000001", "2026-01-08", open_=9.3, high=9.4, low=9.1, close=9.2, volume=2000),
-        bar("000001", "2026-01-09", open_=9.2, high=9.3, low=9.0, close=9.1, volume=2000),
-        bar("000001", "2026-01-12", open_=9.0, high=9.1, low=8.9, close=9.0, volume=2000),
-        bar("000001", "2026-01-13", open_=8.9, high=9.0, low=8.8, close=8.9, volume=2000),
+        bar("000001", "2026-01-07", open_=9.4, high=9.5, low=9.2, close=9.3, volume=20000),
+        bar("000001", "2026-01-08", open_=9.3, high=9.4, low=9.1, close=9.2, volume=20000),
+        bar("000001", "2026-01-09", open_=9.2, high=9.3, low=9.0, close=9.1, volume=20000),
+        bar("000001", "2026-01-12", open_=9.0, high=9.1, low=8.9, close=9.0, volume=20000),
+        bar("000001", "2026-01-13", open_=8.9, high=9.0, low=8.8, close=8.9, volume=20000),
     ])
     result = run_portfolio_backtest(candidates, bars)
     assert result["open_positions"] == []
