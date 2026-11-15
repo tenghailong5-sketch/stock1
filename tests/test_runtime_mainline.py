@@ -219,3 +219,49 @@ def test_industry_panel_aborts_remaining_batches_after_initial_transport_outage(
     else:
         raise AssertionError("an unavailable first batch should abort early")
     assert len(calls) == 4
+
+
+def test_cached_market_emotion_uses_archive_only_and_returns_latest_cycle(monkeypatch, tmp_path):
+    dates = pd.bdate_range("2026-01-05", periods=4)
+    history = pd.DataFrame({
+        "trade_date": dates,
+        "breadth": [0.20, 0.25, 0.35, 0.62],
+        "limit_up_count": [8, 9, 12, 22],
+        "limit_down_count": [25, 20, 18, 6],
+    })
+    calls = []
+    def cached_history(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"status": "READY", "valid_sessions": 4, "history": history.copy()}
+    monkeypatch.setattr(
+        runtime_mainline, "assemble_market_emotion_history", cached_history
+    )
+    latest, audit = runtime_mainline.scan_cached_market_emotion(
+        decision_time=pd.Timestamp("2026-01-20T08:00:00Z"),
+        archive_root=tmp_path, min_sessions=4,
+    )
+    assert len(calls) == 1
+    assert audit["status"] == "READY_CACHED_RESEARCH_ONLY"
+    assert audit["market_cycle"] == "RECOVERY"
+    assert latest.iloc[0]["market_cycle"] == "RECOVERY"
+    assert audit["cache_only"] is True
+    assert audit["historical_pit_eligible"] is False
+    assert audit["trading_authorization"] is False
+
+
+def test_cached_market_emotion_missing_archive_degrades_to_unknown(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        runtime_mainline, "assemble_market_emotion_history",
+        lambda *args, **kwargs: {
+            "status": "INSUFFICIENT_DATA", "valid_sessions": 2,
+            "history": pd.DataFrame(),
+        },
+    )
+    latest, audit = runtime_mainline.scan_cached_market_emotion(
+        decision_time=pd.Timestamp("2026-01-20T08:00:00Z"),
+        archive_root=tmp_path, min_sessions=4,
+    )
+    assert latest.empty
+    assert audit["status"] == "UNKNOWN_NO_CACHED_EMOTION"
+    assert audit["market_cycle"] == "UNKNOWN"
+    assert not audit["trading_authorization"]
