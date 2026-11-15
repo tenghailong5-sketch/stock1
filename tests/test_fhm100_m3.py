@@ -75,6 +75,35 @@ def test_universe_provider_failure_creates_explicit_empty_scan():
     assert "temporary provider rate limit" in errors.iloc[0]["原因"]
 
 
+
+def test_m5_empty_pit_snapshot_keeps_live_research_diagnostics():
+    watchlist = pd.DataFrame({"代码": ["000001"], "CLV": [0.8], "20日平均成交额": [200_000_000]})
+    context = {"market_state": "RISK_ON", "market_environment_score": 80.0}
+
+    result = fhm100.build_m5_diagnostic_input(
+        watchlist, context, pit_factor_snapshot=pd.DataFrame(),
+        decision_time=pd.Timestamp("2026-11-13T07:00:00Z"),
+    )
+
+    assert len(result) == 1
+    assert result.loc[0, "market_state"] == "RISK_ON"
+    assert pd.isna(result.loc[0, "stock_residual_strength"])
+
+
+def test_m5_nonempty_malformed_pit_snapshot_still_fails_closed():
+    watchlist = pd.DataFrame({"代码": ["000001"]})
+
+    try:
+        fhm100.build_m5_diagnostic_input(
+            watchlist, {"market_state": "RISK_ON"},
+            pit_factor_snapshot=pd.DataFrame({"symbol": ["000001"]}),
+            decision_time=pd.Timestamp("2026-11-13T07:00:00Z"),
+        )
+    except ValueError as exc:
+        assert "PIT factor snapshot missing" in str(exc)
+    else:
+        raise AssertionError("malformed non-empty PIT snapshot must fail closed")
+
 def test_m5_blocker_summary_counts_reasons_by_strategy():
     frame = pd.DataFrame([
         {"strategy": "A", "reasons": ["missing_factor:x", "missing_gate:y"]},
