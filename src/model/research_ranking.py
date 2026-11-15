@@ -80,12 +80,15 @@ def build_research_opportunity_ranking(
             "startup_evidence_status": "live_startup_evidence_status",
         })
         out = out.merge(context, on="symbol", how="left", validate="one_to_one")
+        live_strength = pd.to_numeric(
+            out["live_industry_strength_percentile"], errors="coerce"
+        ) * 100.0
         if "industry_relative_strength" not in out.columns:
-            out["industry_relative_strength"] = out["live_industry_strength_percentile"]
+            out["industry_relative_strength"] = live_strength
         else:
             out["industry_relative_strength"] = pd.to_numeric(
                 out["industry_relative_strength"], errors="coerce"
-            ).combine_first(pd.to_numeric(out["live_industry_strength_percentile"], errors="coerce"))
+            ).combine_first(live_strength)
 
     ranked_columns = []
     available_factors = []
