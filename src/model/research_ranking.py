@@ -279,7 +279,22 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
         shortlist["candidate_status"] = "RESEARCH_WATCH"
         shortlist["entry_confirmation_status"] = "PENDING_15M_CONFIRMATION"
         shortlist["buy_authorization"] = False
-        shortlist["risk_note"] = np.select([shortlist["pct_chg"].ge(7.5), shortlist["pct_chg"].le(-3.0)], ["高涨幅，严禁按排名追价", "当日偏弱，等待结构转强"], default="等待15分钟结构与风险确认")
+        shortlist["risk_note"] = np.select(
+            [shortlist["pct_chg"].ge(7.5), shortlist["pct_chg"].le(-3.0)],
+            ["高涨幅，严禁按排名追价", "当日偏弱，等待结构转强"],
+            default="等待15分钟结构与风险确认",
+        )
+        if "market_cycle_state" in shortlist.columns:
+            market_risk = shortlist["market_cycle_state"].astype(str).map({
+                "ICE": "市场情绪冰点，等待修复确认",
+                "HEAT": "市场情绪高潮，避免追高",
+                "EXHAUSTION": "市场情绪退潮，暂停新增进攻信号",
+            })
+            has_market_risk = market_risk.notna()
+            shortlist.loc[has_market_risk, "risk_note"] = (
+                shortlist.loc[has_market_risk, "risk_note"].astype(str)
+                + "；" + market_risk.loc[has_market_risk]
+            )
     if not event_watch.empty:
         event_watch = event_watch.sort_values(["research_opportunity_score", "amount"], ascending=[False, False]).reset_index(drop=True)
         event_watch.insert(0, "event_watch_rank", np.arange(1, len(event_watch) + 1))
