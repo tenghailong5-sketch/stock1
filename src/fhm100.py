@@ -24,6 +24,7 @@ from src.model.live_decision_integration import (
     build_live_decision_gate_audit, summarize_gate_blockers,
 )
 from src.model.mainline_flows import attach_pit_stock_turnover_concentration
+from src.model.archive_readiness import audit_forward_archive
 
 OUT=Path("output"); OUT.mkdir(exist_ok=True)
 MIN_AMOUNT=100_000_000
@@ -768,6 +769,13 @@ def summarize_m5_blockers(frame):
 
 
 def main():
+    # Run PIT archive readiness audit at every model invocation. It is
+    # diagnostic only and never upgrades retrieval-time history to PIT.
+    archive_readiness = audit_forward_archive(Path("data/forward_archive"))
+    (OUT / "archive_readiness.json").write_text(
+        json.dumps(archive_readiness, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
     try:
         # Fetch and retain the complete live A-share quote universe. Only the
         # deeper per-symbol history requests use a 600-symbol liquidity pool plus a bounded quote prefilter.
@@ -1032,6 +1040,8 @@ def main():
     # Keep data blockers separate from unfinished model integration so an empty
     # universe can never be misreported as "no stocks passed the strategy".
     formal_blockers = []
+    if archive_readiness.get("status") != "PIT_READY":
+        formal_blockers.append("HISTORICAL_PIT_ARCHIVE_NOT_READY")
     if len(u) == 0:
         formal_blockers.append("LIVE_UNIVERSE_UNAVAILABLE")
     if len(w) == 0:
@@ -1079,6 +1089,7 @@ def main():
       f"- 个股行情最新可用时间：{latest_stock_available or '无'}；统一决策时点：{now.isoformat()}",
       f"- 运行时行业主线扫描：{runtime_mainline_audit.get('status')}；最新交易日={runtime_mainline_audit.get('latest_trade_date', '无')}；最新行业数={runtime_mainline_audit.get('latest_industry_rows', 0)}；启动证据确认={runtime_mainline_audit.get('confirmed_startups', 0)}（诊断用途，不接入正式评分）",
       f"- 市场情绪证据：{runtime_mainline_audit.get('emotion', {}).get('sessions', 0)}个历史会话；政策归档完整性={runtime_mainline_audit.get('policy', {}).get('archive_complete', False)}（缺失政策不判定为无催化）",
+      f"- 历史PIT档案审计：{archive_readiness.get('status')}；档案文件={archive_readiness.get('file_count', 0)}；明细见archive_readiness.json",
       f"- M3市场状态：{m3['status']}；状态={m3['market_state'] or '未确认'}；有效会话={m3['valid_sessions']}；最新日期={m3['latest_trade_date'] or '无'}",
       f"- M3仓位系数：{m3['position_scale'] if m3['position_scale'] is not None else '不可用'}；原因={m3['reason'] or '无'}",
       f"- 前瞻行业快照：{industry_audit.get('status')}；覆盖={industry_audit.get('selected_symbol_count', 0)}/{industry_audit.get('expected_universe_size', 0)}；仅作当日观察审计，不具备历史PIT资格",
@@ -1118,6 +1129,7 @@ def main():
     (OUT/"run_status.json").write_text(json.dumps({"time":now.isoformat(),"universe":len(u),
       "history_scan_universe":len(history_universe),"history_pool_audit":history_pool_audit,
       "history_ok":len(w),"errors":len(e),"watchlist":len(c),"push":status,
+      "archive_readiness":archive_readiness,
       "runtime_mainline_audit":runtime_mainline_audit,
       "sw_industry_history_research_audit":sw_history_audit,
       "sw_stock_mainline_research_audit":sw_stock_mainline_audit,
