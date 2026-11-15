@@ -685,8 +685,9 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
                 context_columns = [
                     "mainline_phase", "phase_reason", "strength_percentile",
                     "turnover_share", "turnover_share_change_3d",
-                    "startup_evidence_status", "policy_evidence_status",
-                    "negative_policy_event_component", "historical_pit_eligible",
+                    "startup_evidence_status", "policy_catalyst_component",
+                    "negative_policy_event_component", "emotion_reversal_component",
+                    "capital_concentration_component", "historical_pit_eligible",
                 ]
                 for record in unique_latest.to_dict(orient="records"):
                     code = str(record.get("industry_code", "")).strip()
@@ -773,9 +774,15 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
             "mainline_turnover_share": industry_context.get("turnover_share"),
             "mainline_turnover_share_change_3d": industry_context.get("turnover_share_change_3d"),
             "mainline_startup_evidence_status": industry_context.get("startup_evidence_status", "UNKNOWN"),
-            "mainline_policy_evidence_status": industry_context.get("policy_evidence_status", "UNKNOWN"),
+            "mainline_policy_catalyst_component": industry_context.get("policy_catalyst_component"),
+            "mainline_emotion_reversal_component": industry_context.get("emotion_reversal_component"),
+            "mainline_capital_concentration_component": industry_context.get("capital_concentration_component"),
             "mainline_negative_policy_component": industry_context.get("negative_policy_event_component"),
-            "mainline_historical_pit_eligible": bool(industry_context.get("historical_pit_eligible", False)),
+            "mainline_historical_pit_eligible": (
+                bool(industry_context.get("historical_pit_eligible"))
+                if isinstance(industry_context.get("historical_pit_eligible"), (bool, np.bool_))
+                else False
+            ),
             "market_state": state,
             # A/C factors that have an explicit live observation and a declared
             # bounded-universe ranking basis.
