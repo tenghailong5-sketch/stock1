@@ -116,9 +116,22 @@ def build_cnequity_mainline_inputs(
         raise ValueError("industry member/priced/excluded counts are inconsistent")
     industries["member_coverage"] = industries["n_priced"] / industries["n_members"]
     low_coverage_rows = int(industries["member_coverage"].lt(min_priced_coverage).sum())
+    all_industry_dates = set(industries["trade_date"].unique())
     industries = industries.loc[industries["member_coverage"] >= min_priced_coverage].copy()
     if industries.empty:
         raise ValueError("all SW level-1 industry rows are below priced-member coverage")
+    # Rolling phase transitions assume consecutive market sessions. Remove an
+    # entire industry's series if any session is missing; never bridge a gap.
+    dates_per_industry = industries.groupby("industry_code")["trade_date"].nunique()
+    complete_codes = set(dates_per_industry[dates_per_industry.eq(len(all_industry_dates))].index)
+    incomplete_industries_excluded = int(industries["industry_code"].nunique() - len(complete_codes))
+    industries = industries.loc[industries["industry_code"].isin(complete_codes)].copy()
+    minimum_complete_industries = int(np.ceil(expected_industry_count * 0.90))
+    if len(complete_codes) < minimum_complete_industries:
+        raise ValueError(
+            "complete industry histories below 90% peer coverage: "
+            f"{len(complete_codes)} < {minimum_complete_industries}"
+        )
     industries["fetched_at"] = _aware_utc(industries["fetched_at"], "industry_index.fetched_at")
     if industries["source"].isna().any() or industries["data_version"].isna().any():
         raise ValueError("industry_index source and data_version are required")
@@ -145,6 +158,9 @@ def build_cnequity_mainline_inputs(
     if market.duplicated(["trade_date"]).any():
         raise ValueError("duplicate market benchmark/date rows")
     market = market.sort_values("trade_date").copy()
+    missing_market_dates = set(industries["trade_date"].unique()) - set(market["trade_date"].unique())
+    if missing_market_dates:
+        raise ValueError("market benchmark missing industry trading dates")
     market["market_return_1d"] = market["close"].pct_change()
 
     industries = industries.sort_values(["industry_code", "trade_date"]).copy()
@@ -202,6 +218,7 @@ def build_cnequity_mainline_inputs(
         "trading_authorization": False,
         "min_priced_coverage": float(min_priced_coverage),
         "low_coverage_rows_excluded": low_coverage_rows,
+        "incomplete_industries_excluded": incomplete_industries_excluded,
         "note": "Historical reconstruction supports lifecycle research only; it is not PIT trading evidence.",
     }
     return panel, audit
