@@ -670,6 +670,17 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
     # PIT snapshot; current runtime overlays remain descriptive diagnostics.
     pit_by_symbol = {}
     pit_snapshot_status = "not_supplied"
+    if pit_factor_snapshot is not None and not pit_factor_snapshot.empty:
+        required_pit_schema = {
+            "symbol", "trade_date", "available_time", "source_id",
+            "source_revision", "availability_basis", "historical_pit_eligible",
+        }
+        if not required_pit_schema.issubset(pit_factor_snapshot.columns):
+            # A malformed/absent certified PIT archive is an optional live-data
+            # limitation. Preserve current research diagnostics, but never treat
+            # those rows as historical PIT or formal M5 evidence.
+            pit_snapshot_status = "invalid_snapshot_schema_skipped"
+            pit_factor_snapshot = None
     if pit_factor_snapshot is not None:
         # An empty snapshot is a valid "no PIT observations" state. Preserve
         # live-forward research diagnostics instead of aborting the whole scan.
