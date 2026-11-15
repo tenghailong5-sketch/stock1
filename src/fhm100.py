@@ -1013,6 +1013,11 @@ def main():
         "status": "UNAVAILABLE", "symbols_checked": 0,
         "rows_appended": 0, "historical_pit_eligible": False,
     }
+    # Initialize before provider calls so a quote-provider failure cannot
+    # trigger a second failure in the optional-history fallback path.
+    spot_snapshot_observed_at = datetime.now(timezone.utc)
+    u = pd.DataFrame()
+    history_universe = pd.DataFrame()
     try:
         # Fetch and retain the complete live A-share quote universe. Only the
         # deeper per-symbol history requests use the bounded research pool (500 by default).
@@ -1077,9 +1082,11 @@ def main():
             encoding="utf-8",
         )
     except Exception as exc:
-        # Provider outages/rate limits must produce an auditable report, not a false clean scan.
-        u=pd.DataFrame()
-        history_universe=pd.DataFrame()
+        # History-pool failures must not erase an already captured live quote universe.
+        if not isinstance(u, pd.DataFrame):
+            u = pd.DataFrame()
+        if not isinstance(history_universe, pd.DataFrame):
+            history_universe = pd.DataFrame()
         history_pool_audit = {
             "status": "UNAVAILABLE",
             "reason": str(exc)[:300],
@@ -1123,9 +1130,19 @@ def main():
         )
     m3 = load_m3_market_context(decision_time=now)
     expected_symbols = u["code"].astype(str).str.zfill(6).tolist() if "code" in u else []
-    industry_membership, industry_audit = audit_forward_industry_membership(
-        Path("data/forward_archive"), expected_symbols, decision_time=now
-    )
+    try:
+        industry_membership, industry_audit = audit_forward_industry_membership(
+            Path("data/forward_archive"), expected_symbols, decision_time=now
+        )
+    except Exception as membership_exc:
+        industry_membership = pd.DataFrame()
+        industry_audit = {
+            "status": "OPTIONAL_MEMBERSHIP_AUDIT_SKIPPED",
+            "reason": f"{type(membership_exc).__name__}: {str(membership_exc)[:220]}",
+            "expected_universe_size": len(expected_symbols),
+            "selected_symbol_count": 0, "membership_coverage": 0.0,
+            "historical_pit_eligible": False,
+        }
     industry_membership.to_csv(
         OUT/"industry_membership_forward_audit.csv", index=False, encoding="utf-8-sig"
     )
@@ -1284,9 +1301,16 @@ def main():
                 "historical_pit_eligible": False,
             }
     if not runtime_mainline.empty:
-        runtime_mainline = attach_pit_stock_turnover_concentration(
-            runtime_mainline, pit_stock_turnover
-        )
+        try:
+            runtime_mainline = attach_pit_stock_turnover_concentration(
+                runtime_mainline, pit_stock_turnover
+            )
+        except Exception as concentration_exc:
+            stock_turnover_audit = {
+                "status": "OPTIONAL_CONCENTRATION_SKIPPED",
+                "reason": f"{type(concentration_exc).__name__}: {str(concentration_exc)[:220]}",
+                "historical_pit_eligible": False,
+            }
     runtime_mainline.to_csv(
         OUT/"runtime_mainline_with_stock_concentration.csv",
         index=False, encoding="utf-8-sig",
