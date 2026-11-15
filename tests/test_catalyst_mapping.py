@@ -64,3 +64,33 @@ def test_suppresses_syndicated_duplicate_headlines_before_industry_counts():
     assert len(rows) == 2
     assert audit["duplicate_headlines_suppressed"] == 1
     assert audit["industry_candidate_counts"] == {"电子": 1, "计算机": 1}
+
+
+def test_freshness_filter_uses_gdelt_seen_clock_and_policy_publication_clock():
+    rows, audit = map_candidate_sectors(
+        [
+            {
+                "candidate_id": "stale-global",
+                "title": "Semiconductor export controls",
+                "gdelt_seen_at": "20260827T123000Z",
+                "first_seen_at": "2026-11-15T14:00:00+00:00",
+            },
+            {
+                "candidate_id": "fresh-global",
+                "title": "Semiconductor export controls update",
+                "gdelt_seen_at": "20261110T123000Z",
+                "first_seen_at": "2026-11-15T14:00:00+00:00",
+            },
+            {
+                "candidate_id": "fresh-policy",
+                "title": "人工智能算力政策",
+                "published_at": "2026-11-12T08:00:00+08:00",
+                "first_seen_at": "2026-11-15T14:00:00+00:00",
+            },
+        ],
+        ["电子", "计算机"],
+        decision_time="2026-11-15T15:00:00Z",
+    )
+    assert [row["candidate_id"] for row in rows] == ["fresh-global", "fresh-policy"]
+    assert audit["stale_candidates_excluded"] == 1
+    assert audit["freshness_window_days"] == 30.0
