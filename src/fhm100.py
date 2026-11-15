@@ -22,6 +22,7 @@ from src.model.sw_industry_research import select_sw_industry_research_snapshot
 from src.model.sw_stock_mainline_research import (
     build_sw_stock_mainline_research,
     build_forward_stock_mainline_research,
+    build_spot_industry_strength_panel,
 )
 from src.providers.sw_industry_history import fetch_sw_industry_history
 from src.providers.akshare_corporate_actions import archive_shortlist_corporate_actions
@@ -949,6 +950,7 @@ def main():
         # Fetch and retain the complete live A-share quote universe. Only the
         # deeper per-symbol history requests use the bounded research pool (500 by default).
         u=universe()
+        spot_snapshot_observed_at = datetime.now(timezone.utc)
         OUT.mkdir(exist_ok=True)
         u.to_csv(OUT/"market_snapshot.csv", index=False, encoding="utf-8-sig")
         # Bounded first-pass research pool; set FHM_HISTORY_SCAN_MAX_SYMBOLS=all
@@ -1052,9 +1054,35 @@ def main():
     (OUT/"industry_membership_forward_audit.json").write_text(
         json.dumps(industry_audit, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
+    mainline_mapping_panel = runtime_mainline
+    spot_sector_fallback_audit = {"status": "NOT_NEEDED"}
+    if runtime_mainline.empty and not industry_membership.empty and not u.empty and not w.empty:
+        try:
+            latest_stock_trade_date = pd.to_datetime(
+                w["trade_date"], errors="coerce"
+            ).dropna().max()
+            if pd.notna(latest_stock_trade_date):
+                spot_sector_panel, spot_sector_fallback_audit = build_spot_industry_strength_panel(
+                    industry_membership,
+                    u,
+                    trade_date=latest_stock_trade_date,
+                    decision_time=now,
+                    snapshot_observed_at=spot_snapshot_observed_at,
+                )
+                if not spot_sector_panel.empty:
+                    mainline_mapping_panel = spot_sector_panel
+        except Exception as spot_fallback_exc:
+            spot_sector_fallback_audit = {
+                "status": "UNAVAILABLE",
+                "reason": f"{type(spot_fallback_exc).__name__}: {str(spot_fallback_exc)[:200]}",
+                "mainline_phase_available": False,
+                "historical_pit_eligible": False,
+                "trading_authorization": False,
+            }
     forward_stock_mainline, forward_stock_mainline_audit = build_forward_stock_mainline_research(
-        industry_membership, runtime_mainline, decision_time=now,
+        industry_membership, mainline_mapping_panel, decision_time=now,
     )
+    forward_stock_mainline_audit["spot_sector_fallback"] = spot_sector_fallback_audit
     forward_stock_mainline.to_csv(
         OUT/"forward_stock_mainline_research.csv", index=False, encoding="utf-8-sig"
     )
