@@ -23,7 +23,7 @@ from src.providers.sw_industry_history import fetch_sw_industry_history
 from src.providers.akshare_corporate_actions import archive_shortlist_corporate_actions
 from src.model.live_decision_integration import (
     aggregate_archived_stock_turnover,
-    build_live_decision_gate_audit, summarize_gate_blockers,
+    build_live_decision_gate_audit, load_risk_context_file, summarize_gate_blockers,
 )
 from src.model.mainline_flows import attach_pit_stock_turnover_concentration
 from src.model.archive_readiness import audit_forward_archive
@@ -1300,9 +1300,18 @@ def main():
         None if minute_limit_raw in {"all", "full", "unlimited", "0"}
         else int(minute_limit_raw)
     )
+    risk_context_by_symbol, risk_context_audit = load_risk_context_file(
+        os.getenv("FHM_RISK_CONTEXT_FILE", "").strip() or None
+    )
     decision_gates, decision_gate_audit = build_live_decision_gate_audit(
         w, m5, m3, runtime_mainline, industry_membership,
         decision_time=now, minute_scan_limit=minute_scan_limit,
+        risk_context_by_symbol=risk_context_by_symbol,
+    )
+    decision_gate_audit["risk_context_source"] = risk_context_audit
+    (OUT/"m8_risk_context_audit.json").write_text(
+        json.dumps(risk_context_audit, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
     decision_gates.to_csv(
         OUT/"four_layer_decision_gates.csv", index=False, encoding="utf-8-sig"
