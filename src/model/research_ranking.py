@@ -82,6 +82,7 @@ def build_research_opportunity_ranking(
             "startup_evidence_status", "startup_policy_status",
             "peak_evidence", "decay_evidence", "phase_gate_reason",
             "membership_observed_at", "mainline_trade_date",
+            "live_catalyst_candidate_count",
         ) if c in context.columns]
         context = context[keep].rename(columns={
             "industry_code": "live_industry_code",
@@ -264,6 +265,18 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
     event_watch = valid[valid["pct_chg"].ge(max_pct_change)].copy()
     event_watch["event_watch_reason"] = "涨幅过大，单列强势事件观察，不进入普通候选池"
     ordinary = valid[valid["pct_chg"].ge(min_pct_change) & valid["pct_chg"].lt(max_pct_change)].copy()
+    phase_column = next((
+        column for column in ("live_mainline_phase_gated", "mainline_phase_gated")
+        if column in ordinary.columns
+    ), None)
+    phase_filtered_count = 0
+    if phase_column:
+        phase_values = ordinary[phase_column].fillna("UNKNOWN").astype(str).str.upper()
+        phase_eligible = phase_values.isin({
+            "IGNITION", "IGNITION_UNCONFIRMED", "TRANSITION"
+        })
+        phase_filtered_count = int((~phase_eligible).sum())
+        ordinary = ordinary.loc[phase_eligible].copy()
     ordinary = ordinary.sort_values(["research_opportunity_score", "amount", "symbol"], ascending=[False, False, True])
     # Market emotion controls the breadth of the research watchlist, not the
     # relative stock score. Unknown emotion preserves discovery but is explicit.
@@ -318,5 +331,5 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
         event_watch = event_watch.sort_values(["research_opportunity_score", "amount"], ascending=[False, False]).reset_index(drop=True)
         event_watch.insert(0, "event_watch_rank", np.arange(1, len(event_watch) + 1))
         event_watch["buy_authorization"] = False
-    audit = {"status": "READY_RESEARCH_WATCH" if not shortlist.empty else "NO_ORDINARY_CANDIDATES", "ranked_input_count": int(len(data)), "liquid_valid_count": int(len(valid)), "candidate_count": int(len(shortlist)), "event_watch_count": int(len(event_watch)), "market_cycle_state": regime_state, "market_regime_candidate_cap": effective_candidate_cap, "market_regime_policy": "ICE<=10; RECOVERY<=max; TRANSITION<=20; HEAT<=15; EXHAUSTION<=5; UNKNOWN<=max_with_warning", "industry_cap": int(max_per_industry), "minimum_amount": float(min_amount), "ordinary_pct_change_range": [float(min_pct_change), float(max_pct_change)], "entry_confirmation": "PENDING_15M_CONFIRMATION", "buy_authorization": False}
+    audit = {"status": "READY_RESEARCH_WATCH" if not shortlist.empty else "NO_ORDINARY_CANDIDATES", "ranked_input_count": int(len(data)), "liquid_valid_count": int(len(valid)), "mainline_phase_filtered_count": phase_filtered_count, "mainline_phase_filter": "IGNITION/IGNITION_UNCONFIRMED/TRANSITION only when lifecycle context is present", "candidate_count": int(len(shortlist)), "event_watch_count": int(len(event_watch)), "market_cycle_state": regime_state, "market_regime_candidate_cap": effective_candidate_cap, "market_regime_policy": "ICE<=10; RECOVERY<=max; TRANSITION<=20; HEAT<=15; EXHAUSTION<=5; UNKNOWN<=max_with_warning", "industry_cap": int(max_per_industry), "minimum_amount": float(min_amount), "ordinary_pct_change_range": [float(min_pct_change), float(max_pct_change)], "entry_confirmation": "PENDING_15M_CONFIRMATION", "buy_authorization": False}
     return shortlist, event_watch, audit

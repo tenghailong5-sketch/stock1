@@ -24,8 +24,12 @@ from src.model.mainline_signal_gates import (
 from src.model.market_cycle import classify_market_cycle
 from src.model.m3_assembler import assemble_market_emotion_history
 from src.model.policy_catalysts import visible_policy_events
+from src.model.catalyst_mapping import map_candidate_sectors
 from src.providers.eastmoney_market_emotion import fetch_market_emotion_pool_history
 from src.providers.gov_policy import discover_gov_policy_candidates, append_policy_candidates
+from src.providers.global_news import (
+    discover_global_news_candidates, append_global_news_candidates,
+)
 from src.providers.sw_api_industry import (
     fetch_sw_api_first_level_index_list,
     fetch_sw_api_industry_index_history,
@@ -238,6 +242,40 @@ def scan_cached_market_emotion(
                 "historical_pit_eligible": False,
                 "trading_authorization": False,
             }
+        # Align sentiment snapshots to completed exchange sessions. Some
+        # quote providers stamp a weekend retrieval with the calendar date;
+        # that is not a new trading session and must not advance the market cycle.
+        calendar = _read_index_archive(
+            Path(archive_root) / "index_daily" / "000001.jsonl",
+            decision_time=cutoff,
+        )
+        if calendar.empty:
+            return pd.DataFrame(), {
+                "status": "UNKNOWN_NO_COMPLETED_MARKET_SESSION",
+                "valid_sessions": 0,
+                "required_sessions": min_sessions,
+                "market_cycle": "UNKNOWN",
+                "historical_pit_eligible": False,
+                "trading_authorization": False,
+                "cache_only": True,
+            }
+        calendar_dates = set(pd.to_datetime(calendar["trade_date"]).dt.normalize())
+        history = history.copy()
+        history["trade_date"] = pd.to_datetime(
+            history["trade_date"], errors="coerce"
+        ).dt.normalize()
+        history = history.loc[history["trade_date"].isin(calendar_dates)].copy()
+        if history["trade_date"].nunique() < min_sessions:
+            return pd.DataFrame(), {
+                "status": "UNKNOWN_INSUFFICIENT_COMPLETED_SESSIONS",
+                "valid_sessions": int(history["trade_date"].nunique()),
+                "required_sessions": min_sessions,
+                "market_calendar_latest_trade_date": calendar["trade_date"].max().date().isoformat(),
+                "market_cycle": "UNKNOWN",
+                "historical_pit_eligible": False,
+                "trading_authorization": False,
+                "cache_only": True,
+            }
         cycles = classify_market_cycle(history)
         latest = cycles.sort_values("trade_date").tail(1).copy()
         state = str(latest.iloc[0].get("market_cycle", "UNKNOWN"))
@@ -248,6 +286,7 @@ def scan_cached_market_emotion(
             "market_cycle": state,
             "cycle_reason": str(latest.iloc[0].get("cycle_reason", "unknown")),
             "latest_trade_date": trade_date,
+            "market_calendar_latest_trade_date": calendar["trade_date"].max().date().isoformat(),
             "valid_sessions": int(len(cycles)),
             "required_sessions": min_sessions,
             "market_cycle_data_basis": str(latest.iloc[0].get("market_cycle_data_basis", "unknown")),
@@ -273,6 +312,7 @@ def scan_runtime_mainlines(
     *, decision_time, archive_root: str | Path = Path("data/forward_archive"),
     policy_path: str | Path = Path("data/policy_catalysts/official_policy_events.jsonl"),
     policy_candidate_path: str | Path = Path("data/policy_catalysts/discovered_candidates.jsonl"),
+    global_news_candidate_path: str | Path = Path("data/global_news/discovered_candidates.jsonl"),
 ) -> tuple[pd.DataFrame, dict]:
     """Run the mainline/emotion/policy evidence chain as part of model execution."""
     cutoff = pd.Timestamp(decision_time)
@@ -280,15 +320,30 @@ def scan_runtime_mainlines(
         raise ValueError("decision_time must be timezone-aware")
     root = Path(archive_root)
     discovery_audit = {"status": "UNAVAILABLE", "reason": "not attempted"}
+    policy_candidates = []
     try:
-        candidates, discovery_audit = discover_gov_policy_candidates()
+        policy_candidates, discovery_audit = discover_gov_policy_candidates()
         discovery_audit["new_candidates_archived"] = append_policy_candidates(
-            policy_candidate_path, candidates
+            policy_candidate_path, policy_candidates
         )
     except Exception as exc:
         discovery_audit = {
             "status": "UNAVAILABLE",
             "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
+            "candidate_only": True,
+            "formal_stock_score_eligible": False,
+        }
+    global_news_audit = {"status": "UNAVAILABLE", "reason": "not attempted"}
+    news_candidates = []
+    try:
+        news_candidates, global_news_audit = discover_global_news_candidates()
+        global_news_audit["new_candidates_archived"] = append_global_news_candidates(
+            global_news_candidate_path, news_candidates
+        )
+    except Exception as news_exc:
+        global_news_audit = {
+            "status": "UNAVAILABLE",
+            "reason": f"{type(news_exc).__name__}: {str(news_exc)[:240]}",
             "candidate_only": True,
             "formal_stock_score_eligible": False,
         }
@@ -355,6 +410,10 @@ def scan_runtime_mainlines(
         evidence = gate_ignition_labels(evidence)
         latest = evidence.trade_date.max()
         latest_rows = evidence.loc[evidence.trade_date.eq(latest)].copy()
+        sector_candidates, sector_mapping_audit = map_candidate_sectors(
+            [*policy_candidates, *news_candidates],
+            latest_rows.get("industry_name", pd.Series(dtype=str)).dropna().astype(str).unique(),
+        )
         audit = {
             "status": "READY_DIAGNOSTIC_ONLY",
             "industry": industry_audit,
@@ -365,6 +424,17 @@ def scan_runtime_mainlines(
                 "archive_complete": False,
                 "visible_events": int(len(visible)),
                 "absence_means_no_catalyst": False,
+            },
+            "international_news": {
+                **global_news_audit,
+                "archive_path": str(global_news_candidate_path),
+                "candidate_only": True,
+                "no_unreviewed_news_changes_stock_scores": True,
+            },
+            "catalyst_sector_candidates": {
+                **sector_mapping_audit,
+                "candidates": sector_candidates,
+                "policy_and_global_news_are_review_only": True,
             },
             "latest_trade_date": latest.strftime("%Y-%m-%d"),
             "latest_industry_rows": int(len(latest_rows)),
