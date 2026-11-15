@@ -101,6 +101,7 @@ def test_changed_candidate_input_is_rejected_for_existing_run_id(tmp_path):
     runner.run_checkpointed_portfolio_backtest(candidates, bars, **kwargs)
 
     changed = candidates.copy()
+    changed["score"] = changed["score"].astype(object)
     changed.loc[0, "score"] = "90.0"
     with pytest.raises(CheckpointConflictError, match="run input fingerprint changed"):
         runner.run_checkpointed_portfolio_backtest(changed, bars, **kwargs)
