@@ -119,6 +119,30 @@ def test_forward_current_membership_maps_stock_to_mainline_without_pit_authority
     assert not result["trading_authorization"].any()
 
 
+def test_forward_mapper_preserves_membership_industry_code_without_collision():
+    from src.model.sw_stock_mainline_research import build_forward_stock_mainline_research
+
+    membership = pd.DataFrame([{
+        "symbol": "600000", "industry_code": "SWL1:银行",
+        "industry_name": "银行", "industry_level1": "银行",
+        "observed_at": "2026-11-14T13:00:00Z",
+        "availability_basis": "retrieval_time_only", "historical_pit_eligible": False,
+        "source_id": "snapshot", "source_revision": "rev-1",
+        "snapshot_scope": "current_membership_observation_only",
+    }])
+    mainline = pd.DataFrame([{
+        "industry_code": "SWL1:银行", "industry_name": "银行",
+        "trade_date": "2026-11-13", "mainline_phase": "UNKNOWN",
+        "mainline_phase_gated": "UNKNOWN", "strength_percentile": 0.8,
+    }])
+    result, audit = build_forward_stock_mainline_research(
+        membership, mainline, decision_time="2026-11-15T10:00:00Z"
+    )
+    assert result.loc[0, "industry_code"] == "SWL1:银行"
+    assert result.loc[0, "membership_industry_code"] == "SWL1:银行"
+    assert audit["mapped_industry_count"] == 1
+
+
 def test_forward_mapper_rejects_future_membership_snapshot():
     from src.model.sw_stock_mainline_research import build_forward_stock_mainline_research
 
