@@ -1,4 +1,4 @@
-"""Fail-closed A-share long position sizing from explicit portfolio risk limits.
+"""Fail-closed A-share long position sizing from explicit M8 risk context.
 
 Research sizing only; this module never places orders. Estimated loss includes
 the supplied stop distance and estimated round-trip transaction costs.
@@ -38,8 +38,10 @@ def size_long_position(
 ) -> SizingResult:
     """Size the largest board-lot long position within cash and loss limits.
 
-    open_portfolio_risk is the sum of remaining stop risks of existing
-    positions, including estimated costs. Long positions require stop < entry.
+    available_risk_budget is M8's remaining budget after current exposure;
+    market_risk_scale is the continuous M3 multiplier. Existing portfolio risk
+    is retained as an independently validated audit input, not subtracted twice.
+    Long positions require stop < entry.
     """
     values = {
         "entry_price": entry_price, "stop_price": stop_price,
