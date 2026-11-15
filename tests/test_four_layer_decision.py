@@ -119,26 +119,26 @@ def test_planned_risk_cannot_understate_entry_to_stop_loss():
 
 def test_live_forward_mode_uses_separate_snapshot_and_turnover_qualification():
     live = industry_permission(
-        "IGNITION", persistence_ready=True, historical_pit_eligible=False,
+        "IGNITION", persistence_ready=False, historical_pit_eligible=False,
         stock_turnover_pit_status="not_ready", decision_mode="live_forward",
         industry_live_data_eligible=True, stock_turnover_live_status="ready",
     )
     assert live.allow_new_entries
     assert not industry_permission(
-        "IGNITION", persistence_ready=True, historical_pit_eligible=False,
+        "IGNITION", persistence_ready=False, historical_pit_eligible=False,
         stock_turnover_pit_status="not_ready", decision_mode="live_forward",
         industry_live_data_eligible=False, stock_turnover_live_status="ready",
     ).allow_new_entries
     # Missing stock-level turnover concentration is diagnostic in live mode,
     # not an additional hard gate once the industry snapshot is valid.
     assert industry_permission(
-        "IGNITION", persistence_ready=True, historical_pit_eligible=False,
+        "IGNITION", persistence_ready=False, historical_pit_eligible=False,
         stock_turnover_pit_status="not_ready", decision_mode="live_forward",
         industry_live_data_eligible=True, stock_turnover_live_status="not_ready",
     ).allow_new_entries
     # Retrieval-time live evidence must never satisfy the historical path.
     assert not industry_permission(
-        "IGNITION", persistence_ready=True, historical_pit_eligible=False,
+        "IGNITION", persistence_ready=False, historical_pit_eligible=False,
         stock_turnover_pit_status="ready", decision_mode="historical_pit",
         industry_live_data_eligible=True, stock_turnover_live_status="ready",
     ).allow_new_entries
