@@ -311,3 +311,18 @@ def test_scan_uses_bounded_configurable_worker_pool(monkeypatch, tmp_path):
     assert calls["max_workers"] == 8
     assert watchlist["代码"].tolist() == ["000001", "000002"]
     assert errors.empty
+
+
+
+def test_history_accepts_twenty_one_sessions_for_new_listing_research(monkeypatch, tmp_path):
+    raw = _provider_history(rows=21)
+    monkeypatch.setattr(fhm100, "_download_history", lambda *args, **kwargs: raw)
+    monkeypatch.setattr(fhm100, "archive_stock_history_snapshot", lambda *args, **kwargs: {
+        "rows_appended": len(raw), "manifests_appended": 1,
+    })
+
+    result = fhm100.history("000001", "20260901", archive_root=tmp_path)
+
+    assert len(result) == 21
+    assert result["source_id"].notna().all()
+    assert result["source_revision"].notna().all()
