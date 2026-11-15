@@ -111,3 +111,23 @@ def test_research_ranking_does_not_rank_without_mainline_anchor():
     assert audit["missing_mainline_context_count"] == 2
     assert ranked.research_rank_status.eq("MISSING_MAINLINE_CONTEXT").all()
     assert ranked.research_opportunity_score.isna().all()
+
+
+
+def test_quote_only_current_snapshot_can_rank_with_live_industry_anchor():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002", "000003"],
+        "名称": ["A", "B", "C"],
+        "涨跌幅%": [5.0, 2.0, -1.0],
+        "当日成交额": [300_000_000, 200_000_000, 100_000_000],
+    })
+    m5_input = pd.DataFrame({
+        "symbol": ["000001", "000002", "000003"],
+        "industry_relative_strength": [95.0, 60.0, 20.0],
+    })
+    ranked, audit = build_research_opportunity_ranking(watchlist, m5_input)
+    assert audit["ranked_count"] == 3
+    assert ranked.iloc[0]["symbol"] == "000001"
+    assert ranked["research_rank_status"].eq("RANKED_RESEARCH_ONLY").all()
+    assert ranked["research_rank_formal_m5_score"].eq(False).all()
+    assert ranked["research_rank_buy_authorization"].eq(False).all()
