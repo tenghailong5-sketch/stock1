@@ -275,3 +275,39 @@ def test_tencent_history_symbol_uses_correct_exchange_prefix_for_all_a_share_boa
     assert fhm100._tencent_history_symbol("430047") == "bj430047"
     assert fhm100._tencent_history_symbol("830799") == "bj830799"
     assert fhm100._tencent_history_symbol("920002") == "bj920002"
+
+
+
+def test_scan_uses_bounded_configurable_worker_pool(monkeypatch, tmp_path):
+    calls = {}
+
+    class RecordingExecutor:
+        def __init__(self, max_workers):
+            calls["max_workers"] = max_workers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def map(self, fn, values):
+            return map(fn, values)
+
+    monkeypatch.setattr(fhm100, "ThreadPoolExecutor", RecordingExecutor)
+    monkeypatch.setattr(
+        fhm100, "_scan_one_symbol",
+        lambda stock, start, archive_root, history_sink: (
+            {"代码": stock.code}, None
+        ),
+    )
+    universe = pd.DataFrame([
+        {"code": "000001", "name": "A", "price": 10, "amount": 100, "pct_chg": 1},
+        {"code": "000002", "name": "B", "price": 10, "amount": 100, "pct_chg": 1},
+    ])
+
+    watchlist, errors = fhm100.scan(universe, archive_root=tmp_path, max_workers=99)
+
+    assert calls["max_workers"] == 8
+    assert watchlist["代码"].tolist() == ["000001", "000002"]
+    assert errors.empty
