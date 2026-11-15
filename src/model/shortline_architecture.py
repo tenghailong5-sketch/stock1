@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 from collections import Counter
 
+import numpy as np
 import pandas as pd
 
 
@@ -66,7 +67,7 @@ def _valid_factor(value) -> bool:
 
 
 def _valid_gate(value) -> bool:
-    return isinstance(value, (bool,))
+    return isinstance(value, (bool, np.bool_))
 
 
 def audit_shortline_architecture(frame: pd.DataFrame) -> tuple[dict, pd.DataFrame]:
