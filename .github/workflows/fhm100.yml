@@ -39,7 +39,7 @@ jobs:
       - name: Commit forward-only stock history archive
         if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
         run: |
-          for archive_path in data/forward_archive/stock_daily data/forward_archive/stock_daily_manifest data/forward_archive/industry_flow_daily.jsonl data/policy_catalysts/discovered_candidates.jsonl data/global_news/discovered_candidates.jsonl; do
+          for archive_path in data/forward_archive/stock_daily data/forward_archive/stock_daily_manifest data/forward_archive/industry_flow_daily.jsonl data/forward_archive/industry_index_history data/policy_catalysts/discovered_candidates.jsonl data/global_news/discovered_candidates.jsonl; do
             if [ -e "$archive_path" ]; then
               git add -A "$archive_path"
             fi
