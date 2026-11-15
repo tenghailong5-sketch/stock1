@@ -24,6 +24,7 @@ def build_research_opportunity_ranking(
     m5_input: pd.DataFrame,
     *,
     min_observed_factors: int = 3,
+    industry_context: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Rank current research opportunities with explicit per-row factor coverage.
 
@@ -58,6 +59,33 @@ def build_research_opportunity_ranking(
     if base["symbol"].duplicated().any() or m5["symbol"].duplicated().any():
         raise ValueError("duplicate symbol in research ranking inputs")
     out = base.merge(m5, on="symbol", how="left", suffixes=("", "_m5"), validate="one_to_one")
+    if industry_context is not None and not industry_context.empty:
+        if "symbol" not in industry_context:
+            raise ValueError("industry_context requires symbol")
+        context = industry_context.copy()
+        context["symbol"] = context["symbol"].astype(str).str.strip().str.zfill(6)
+        if context["symbol"].duplicated().any():
+            raise ValueError("duplicate symbol in forward industry context")
+        keep = [c for c in (
+            "symbol", "industry_code", "current_industry_level1", "mainline_phase",
+            "mainline_phase_gated", "strength_percentile", "startup_evidence_status",
+            "membership_observed_at", "mainline_trade_date",
+        ) if c in context.columns]
+        context = context[keep].rename(columns={
+            "industry_code": "live_industry_code",
+            "current_industry_level1": "live_industry_level1",
+            "mainline_phase": "live_mainline_phase",
+            "mainline_phase_gated": "live_mainline_phase_gated",
+            "strength_percentile": "live_industry_strength_percentile",
+            "startup_evidence_status": "live_startup_evidence_status",
+        })
+        out = out.merge(context, on="symbol", how="left", validate="one_to_one")
+        if "industry_relative_strength" not in out.columns:
+            out["industry_relative_strength"] = out["live_industry_strength_percentile"]
+        else:
+            out["industry_relative_strength"] = pd.to_numeric(
+                out["industry_relative_strength"], errors="coerce"
+            ).combine_first(pd.to_numeric(out["live_industry_strength_percentile"], errors="coerce"))
 
     ranked_columns = []
     available_factors = []
