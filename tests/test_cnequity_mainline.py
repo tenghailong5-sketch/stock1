@@ -53,6 +53,9 @@ def test_builds_amount_weighted_level1_mainline_panel_as_research_only():
         "historical_reconstruction_from_cnequity_lake"
     ).all()
     assert panel["market_turnover"].gt(0).all()
+    assert panel["member_coverage"].eq(0.95).all()
+    assert panel[["n_members", "n_priced", "n_excluded"]].notna().all().all()
+    assert audit["market_source"] == ["exchange"]
 
 
 def test_rejects_duplicate_industry_date_and_naive_provenance():
