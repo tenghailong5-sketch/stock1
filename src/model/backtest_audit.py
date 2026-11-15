@@ -31,7 +31,7 @@ _CANDIDATE_REQUIRED = {
 }
 _BAR_REQUIRED = {
     "symbol", "trade_date", "available_time", "historical_pit_eligible",
-    "source_revision", "open", "high", "low", "close", "volume",
+    "source_revision", "open", "high", "low", "close", "volume", "open_auction_volume", "open_auction_available_time",
     "suspended", "limit_up_locked", "limit_down_locked",
     "corporate_actions_resolved", "universe_complete", "delisted_included",
 }
@@ -92,9 +92,18 @@ def audit_backtest_dataset(candidates: pd.DataFrame, bars: pd.DataFrame) -> Back
         if (available > decisions).any():
             errors.append("candidate_lookahead_available_after_decision")
 
-    if pd.to_datetime(bars["trade_date"], errors="coerce").isna().any():
+    parsed_trade_dates = pd.to_datetime(bars["trade_date"], errors="coerce")
+    if parsed_trade_dates.isna().any():
         errors.append("bar_invalid_trade_date")
-    numeric_cols = ["open", "high", "low", "close", "volume"]
+    else:
+        auction_times = pd.to_datetime(bars["open_auction_available_time"], utc=True, errors="coerce")
+        if auction_times.isna().any():
+            errors.append("bar_invalid_open_auction_available_time")
+        else:
+            execution_times = (parsed_trade_dates.dt.normalize() + pd.Timedelta(hours=9, minutes=30)).dt.tz_localize("Asia/Shanghai").dt.tz_convert("UTC")
+            if (auction_times > execution_times).any():
+                errors.append("bar_open_auction_volume_not_available_at_execution")
+    numeric_cols = ["open", "high", "low", "close", "volume", "open_auction_volume"]
     numeric = bars[numeric_cols].apply(pd.to_numeric, errors="coerce")
     if numeric.isna().any().any():
         errors.append("bar_contains_missing_or_non_numeric_ohlcv")
