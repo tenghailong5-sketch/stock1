@@ -339,3 +339,21 @@ def test_event_price_in_diagnostics_are_carried_without_changing_rank_score():
     assert by_symbol.loc["000002", "live_event_price_in_state"] == "UNPRICED"
     assert by_symbol.loc["000001", "live_catalyst_candidate_count"] == 3
     assert by_symbol["research_opportunity_score"].equals(baseline_scores)
+
+
+def test_unknown_mainline_phase_remains_in_research_watchlist_without_buy_authorization():
+    ranked = pd.DataFrame({
+        "symbol": ["000001", "000002", "000003"],
+        "最新价": [10.0, 20.0, 30.0],
+        "涨跌幅%": [2.0, 3.0, 4.0],
+        "当日成交额": [300e6, 250e6, 200e6],
+        "research_opportunity_score": [95.0, 90.0, 85.0],
+        "live_industry_level1": ["电子", "计算机", "机械设备"],
+        "live_mainline_phase_gated": ["UNKNOWN", None, "UNKNOWN"],
+        "market_cycle_state": ["TRANSITION"] * 3,
+    })
+    shortlist, _, audit = build_final_candidate_shortlist(ranked, max_candidates=10)
+    assert shortlist["symbol"].tolist() == ["000001", "000002", "000003"]
+    assert shortlist["mainline_lifecycle_status"].eq("UNKNOWN_RESEARCH_ONLY").all()
+    assert not shortlist["buy_authorization"].any()
+    assert audit["mainline_phase_filtered_count"] == 0
