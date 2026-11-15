@@ -19,6 +19,7 @@ from src.model.runtime_mainline import scan_runtime_mainlines
 from src.model.sw_industry_research import select_sw_industry_research_snapshot
 from src.model.sw_stock_mainline_research import build_sw_stock_mainline_research
 from src.providers.sw_industry_history import fetch_sw_industry_history
+from src.providers.akshare_corporate_actions import archive_shortlist_corporate_actions
 from src.model.live_decision_integration import (
     aggregate_archived_stock_turnover,
     build_live_decision_gate_audit, summarize_gate_blockers,
@@ -768,6 +769,10 @@ def summarize_m5_blockers(frame):
 
 
 def main():
+    corporate_action_audit = {
+        "status": "UNAVAILABLE", "symbols_checked": 0,
+        "rows_appended": 0, "historical_pit_eligible": False,
+    }
     try:
         # Fetch and retain the complete live A-share quote universe. Only the
         # deeper per-symbol history requests use a 600-symbol liquidity pool plus a bounded quote prefilter.
@@ -801,6 +806,28 @@ def main():
             )
         else:
             observation_audit = pd.DataFrame()
+        # Capture corporate-action changes only for the bounded live shortlist.
+        # Each event becomes available at first observation, never at its old
+        # announcement date; CAPTURED records are not VERIFIED total returns.
+        corporate_action_audit = {
+            "status": "UNAVAILABLE", "symbols_checked": 0,
+            "rows_appended": 0, "historical_pit_eligible": False,
+        }
+        try:
+            corporate_action_audit = archive_shortlist_corporate_actions(
+                w, ak_module=ak, observed_at=lambda: datetime.now(timezone.utc),
+                archive_root=Path("data/forward_archive"), max_symbols=20,
+            )
+        except Exception as action_exc:
+            corporate_action_audit = {
+                "status": "UNAVAILABLE",
+                "reason": f"{type(action_exc).__name__}: {str(action_exc)[:240]}",
+                "historical_pit_eligible": False,
+            }
+        (OUT/"corporate_action_ledger_audit.json").write_text(
+            json.dumps(corporate_action_audit, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
     except Exception as exc:
         # Provider outages/rate limits must produce an auditable report, not a false clean scan.
         u=pd.DataFrame()
@@ -1084,6 +1111,7 @@ def main():
       f"- 前瞻行业快照：{industry_audit.get('status')}；覆盖={industry_audit.get('selected_symbol_count', 0)}/{industry_audit.get('expected_universe_size', 0)}；仅作当日观察审计，不具备历史PIT资格",
       f"- 申万有效日期行业映射：{sw_history_audit.get('status')}；覆盖={sw_history_audit.get('matched_symbols', 0)}/{sw_history_audit.get('expected_symbols', 0)}；仅作研究展示，不参与评分或交易授权",
       f"- 申万个股-行业主线研究映射：{sw_stock_mainline_audit.get('status')}；覆盖={sw_stock_mainline_audit.get('matched_symbols', 0)}/{sw_stock_mainline_audit.get('active_membership_symbols', 0)}；仅作研究展示，不具备历史PIT或交易授权",
+      f"- 公司行为前瞻账本：{corporate_action_audit.get('status')}；候选扫描={corporate_action_audit.get('symbols_checked', 0)}只；新增事件版本={corporate_action_audit.get('rows_appended', 0)}；仅首次观察之后可用，未验证总回报，不参与评分或交易授权",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
       f"- 四层决策门：{decision_gate_audit.get('status')}；检查记录={decision_gate_audit.get('candidate_count', 0)}；15分钟扫描={decision_gate_audit.get('minute_scanned_count', 0)}；准入={decision_gate_audit.get('allowed_count', 0)}；阻断={decision_gate_audit.get('blocked_count', 0)}",
       f"- 正式模型状态：{formal_status}",
@@ -1121,6 +1149,7 @@ def main():
       "runtime_mainline_audit":runtime_mainline_audit,
       "sw_industry_history_research_audit":sw_history_audit,
       "sw_stock_mainline_research_audit":sw_stock_mainline_audit,
+      "corporate_action_ledger_audit":corporate_action_audit,
       "formal_status":formal_status,"formal_blockers":formal_blockers},ensure_ascii=False,indent=2),encoding="utf-8")
     print(report); print(status)
     if push_error is not None:
