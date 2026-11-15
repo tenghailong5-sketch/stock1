@@ -32,6 +32,7 @@ from src.model.live_decision_integration import (
     build_live_decision_gate_audit, load_risk_context_file, summarize_gate_blockers,
 )
 from src.model.mainline_flows import attach_pit_stock_turnover_concentration
+from src.model.catalyst_mapping import map_candidate_sectors
 from src.model.archive_readiness import audit_forward_archive
 from src.model.shortline_architecture import audit_shortline_architecture
 from src.model.research_ranking import build_research_opportunity_ranking, build_final_candidate_shortlist
@@ -1332,6 +1333,34 @@ def main():
         runtime_mainline_audit.get("catalyst_sector_candidates", {}).get("candidates", [])
         if isinstance(runtime_mainline_audit, dict) else []
     )
+    catalyst_mapping_fallback_audit = {"status": "NOT_NEEDED"}
+    # If the live SW history endpoint times out, still map archived news/policy
+    # candidates against the current forward-only SW1 membership snapshot.
+    # This recovers sector context, never lifecycle or historical PIT eligibility.
+    if not catalyst_candidates and not forward_stock_mainline.empty:
+        archived_candidates = []
+        for archive_path in (
+            Path("data/policy_catalysts/discovered_candidates.jsonl"),
+            Path("data/global_news/discovered_candidates.jsonl"),
+        ):
+            if not archive_path.exists():
+                continue
+            try:
+                with archive_path.open("r", encoding="utf-8") as handle:
+                    archived_candidates.extend(
+                        item for line in handle if line.strip()
+                        for item in [json.loads(line)] if isinstance(item, dict)
+                    )
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+        current_industries = (
+            forward_stock_mainline["current_industry_level1"]
+            .dropna().astype(str).unique().tolist()
+            if "current_industry_level1" in forward_stock_mainline else []
+        )
+        catalyst_candidates, catalyst_mapping_fallback_audit = map_candidate_sectors(
+            archived_candidates, current_industries,
+        )
     catalyst_counts = {}
     for candidate in catalyst_candidates:
         for industry_name in candidate.get("mapped_industries", []):
@@ -1370,6 +1399,7 @@ def main():
     forward_stock_mainline_audit["price_in_industry_count"] = int(len(price_in_by_industry))
     forward_stock_mainline_audit["price_in_is_diagnostic_only"] = True
     forward_stock_mainline_audit["mapped_catalyst_industry_count"] = int(len(catalyst_counts))
+    forward_stock_mainline_audit["catalyst_mapping_fallback"] = catalyst_mapping_fallback_audit
     forward_stock_mainline_audit["catalyst_candidates_are_score_neutral"] = True
     # Carry reviewed-sector candidate counts down to the stock research rows.
     # This is context only: unmapped/unchecked headlines never alter scores.
