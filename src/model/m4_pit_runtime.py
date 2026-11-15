@@ -47,6 +47,18 @@ def build_runtime_m4_pit_snapshot(
             "reason": "FHM_M4_PIT_INPUT_DIR_not_configured",
         }
     root = Path(root_value).expanduser()
+    try:
+        floor = float(coverage_floor)
+    except (TypeError, ValueError, OverflowError):
+        floor = float("nan")
+    if not 0.0 < floor <= 1.0:
+        return pd.DataFrame(), pd.DataFrame(), {
+            "status": "INVALID_CONFIGURATION",
+            "builder_invoked": False,
+            "historical_pit_eligible": False,
+            "reason": "FHM_M4_PIT_COVERAGE_FLOOR_must_be_within_0_and_1",
+            "input_dir": str(root),
+        }
     expected = expected_universe_size
     if expected is None:
         raw_expected = os.getenv("FHM_M4_EXPECTED_UNIVERSE_SIZE", "").strip()
@@ -94,7 +106,7 @@ def build_runtime_m4_pit_snapshot(
             frames["industry_returns"], frames["market_returns"],
             decision_time=decision_time,
             expected_universe_size=expected,
-            coverage_floor=coverage_floor,
+            coverage_floor=floor,
             hard_gate_snapshot=hard_gate,
         )
         return snapshot, audit, {
@@ -106,7 +118,7 @@ def build_runtime_m4_pit_snapshot(
             ),
             "input_dir": str(root),
             "expected_universe_size": expected,
-            "coverage_floor": float(coverage_floor),
+            "coverage_floor": floor,
             "snapshot_rows": int(len(snapshot)),
             "factor_audit_rows": int(len(audit)),
             "hard_gate_snapshot_supplied": hard_gate is not None,
