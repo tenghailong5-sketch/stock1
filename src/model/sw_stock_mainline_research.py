@@ -1,6 +1,7 @@
 """Research-only link between effective-dated SW stocks and live industry mainlines."""
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 
