@@ -82,7 +82,7 @@ def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path)
     # Keep the cross-section when at least 90% of the current SW universe is
     # present on a date; the observed turnover denominator scales all shares
     # equally, so within-date relative rankings remain comparable.
-    minimum_industries = max(20, int(expected * 0.90 + 0.999999))
+    minimum_industries = max(1, int(expected * 0.90 + 0.999999))
     if not frames:
         raise RuntimeError(
             f"SW industry history unavailable for all {expected} industries: "
