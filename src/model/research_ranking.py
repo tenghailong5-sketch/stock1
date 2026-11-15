@@ -28,6 +28,7 @@ def build_research_opportunity_ranking(
     *,
     min_observed_factors: int = 3,
     industry_context: pd.DataFrame | None = None,
+    allow_quote_only_fallback: bool = False,
 ) -> tuple[pd.DataFrame, dict]:
     """Rank current research opportunities with explicit per-row factor coverage.
 
@@ -35,6 +36,8 @@ def build_research_opportunity_ranking(
     and cannot authorize an order. It excludes raw cross-session returns because
     corporate-action-adjusted PIT total-return history is not universally ready.
     """
+    if not isinstance(allow_quote_only_fallback, bool):
+        raise ValueError("allow_quote_only_fallback must be boolean")
     if isinstance(min_observed_factors, bool) or not isinstance(min_observed_factors, int):
         raise ValueError("min_observed_factors must be an integer")
     if not 1 <= min_observed_factors <= len(RESEARCH_FACTORS):
@@ -124,9 +127,10 @@ def build_research_opportunity_ranking(
         matrix.fillna(0).mul(weights, axis=1).sum(axis=1)
         / observed_weights.sum(axis=1).replace(0, np.nan)
     )
+    score_context_ready = mainline_anchor_ready | allow_quote_only_fallback
     out["research_opportunity_score"] = weighted_score.where(
         (out["research_factor_count"] >= min_observed_factors)
-        & mainline_anchor_ready
+        & score_context_ready
     )
     out["research_opportunity_rank"] = (
         out["research_opportunity_score"].rank(method="min", ascending=False).astype("Int64")
@@ -138,7 +142,7 @@ def build_research_opportunity_ranking(
         ],
         [
             "MISSING_MAINLINE_CONTEXT",
-            "RANKED_RESEARCH_ONLY",
+            np.where(mainline_anchor_ready, "RANKED_RESEARCH_ONLY", "RANKED_QUOTE_ONLY_NO_INDUSTRY"),
         ],
         default="INSUFFICIENT_OBSERVED_FACTORS",
     )
@@ -157,7 +161,7 @@ def build_research_opportunity_ranking(
             "READY_RESEARCH_ONLY"
             if out["research_opportunity_score"].notna().any()
             else "MAINLINE_CONTEXT_UNAVAILABLE"
-            if not mainline_anchor_ready.any()
+            if not mainline_anchor_ready.any() and not allow_quote_only_fallback
             else "INSUFFICIENT_RESEARCH_FACTOR_COVERAGE"
         ),
         "row_count": int(len(out)),
@@ -170,6 +174,7 @@ def build_research_opportunity_ranking(
         "factor_sources": {name: source for name, (source, _, _) in RESEARCH_FACTORS.items()},
         "factor_weights": {name: weight for name, (_, _, weight) in RESEARCH_FACTORS.items() if weight > 0},
         "score_method": "weighted_observed_percentiles_renormalized_per_row",
+        "allow_quote_only_fallback": allow_quote_only_fallback,
         "uses_raw_cross_session_returns": False,
         "historical_pit_eligible": False,
         "formal_m5_score": False,
@@ -203,6 +208,8 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
     selected = []; industry_counts = {}
     for _, row in ordinary.iterrows():
         industry = row["shortlist_industry"]
+        if industry in {"行业未知", "nan", "None", ""}:
+            industry = "UNKNOWN:" + str(row["symbol"])
         if industry_counts.get(industry, 0) >= max_per_industry: continue
         selected.append(row); industry_counts[industry] = industry_counts.get(industry, 0) + 1
         if len(selected) >= max_candidates: break
