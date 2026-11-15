@@ -88,8 +88,9 @@ def industry_permission(
     elif decision_mode == "live_forward":
         if industry_live_data_eligible is not True:
             return IndustryPermission("BLOCKED", False, "industry_live_snapshot_not_ready")
-        if stock_turnover_live_status != "ready":
-            return IndustryPermission("BLOCKED", False, "stock_turnover_live_not_ready")
+        # Stock-level turnover concentration remains a ranking/diagnostic input
+        # in live mode, not a second hard gate. The industry mainline itself
+        # must already pass the live snapshot and persistence checks above.
     else:
         return IndustryPermission("BLOCKED", False, "invalid_decision_mode")
     if mainline_phase == "IGNITION":
