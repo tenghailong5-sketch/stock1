@@ -556,7 +556,7 @@ def audit_forward_industry_membership(archive_root, expected_symbols, *, decisio
     return selected, audit
 
 
-def build_m5_diagnostic_input(watchlist, market_context, mainline=None):
+def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_factor_snapshot=None, decision_time=None):
     """Map only observed live factors into M5; leave unverified factors/gates missing.
 
     Industry strength comes from the current effective-date SW research overlay
@@ -575,6 +575,50 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None):
     if symbol_col not in base:
         raise ValueError("watchlist requires symbol or 代码")
     base["symbol"] = base[symbol_col].astype(str).str.strip().str.zfill(6)
+
+    # Optional formal M4->M5 bridge. It accepts only a precomputed, audited
+    # PIT snapshot; current runtime overlays remain descriptive diagnostics.
+    pit_by_symbol = {}
+    pit_snapshot_status = "not_supplied"
+    if pit_factor_snapshot is not None:
+        required_pit = {
+            "symbol", "trade_date", "available_time", "source_id",
+            "source_revision", "historical_pit_eligible",
+        }
+        missing_pit = required_pit - set(pit_factor_snapshot.columns)
+        if missing_pit:
+            raise ValueError("PIT factor snapshot missing: " + ",".join(sorted(missing_pit)))
+        if decision_time is None:
+            raise ValueError("decision_time is required for PIT factor mapping")
+        cutoff = pd.Timestamp(decision_time)
+        if cutoff.tzinfo is None:
+            raise ValueError("decision_time must be timezone-aware")
+        pit = pit_factor_snapshot.copy()
+        pit["symbol"] = pit["symbol"].astype(str).str.strip().str.zfill(6)
+        pit["trade_date"] = pd.to_datetime(pit["trade_date"], errors="coerce")
+        available = pd.to_datetime(pit["available_time"], errors="coerce")
+        if available.isna().any() or available.dt.tz is None:
+            raise ValueError("PIT factor available_time must be timezone-aware")
+        pit["available_time"] = available.dt.tz_convert("UTC")
+        cutoff_utc = cutoff.tz_convert("UTC")
+        decision_date = cutoff.tz_convert("Asia/Shanghai").date()
+        eligible = (
+            pit["historical_pit_eligible"].map(lambda value: isinstance(value, (bool, np.bool_)) and bool(value))
+            & pit["trade_date"].notna()
+            & (pit["trade_date"].dt.date <= decision_date)
+            & (pit["available_time"] <= cutoff_utc)
+            & pit["source_id"].notna()
+            & pit["source_id"].astype(str).str.strip().ne("")
+            & pit["source_revision"].notna()
+            & pit["source_revision"].astype(str).str.strip().ne("")
+        )
+        pit = pit.loc[eligible].copy()
+        # Duplicate rows are ambiguous; exclude that symbol rather than choosing
+        # an arbitrary provider/revision row.
+        duplicate_symbols = set(pit.loc[pit["symbol"].duplicated(keep=False), "symbol"])
+        pit = pit.loc[~pit["symbol"].isin(duplicate_symbols)]
+        pit_by_symbol = pit.set_index("symbol").to_dict(orient="index")
+        pit_snapshot_status = "validated" if pit_by_symbol else "no_eligible_rows"
 
     def _cross_section_percentile(column):
         if column not in base:
@@ -661,8 +705,26 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None):
         errors="coerce",
     )
     rows = []
+    factor_map = {
+        "industry_relative_strength": "industry_relative_strength_pct",
+        "stock_residual_strength": "stock_residual_strength_pct",
+        "price_structure": "price_structure_pct",
+        "trade_quality": "trade_quality_pct",
+        "pre_pullback_strength": "pre_pullback_strength_pct",
+        "pullback_reversal_structure": "pullback_reversal_structure_pct",
+    }
+    gate_map = (
+        "industry_top_30pct", "stock_residual_top_20pct",
+        "breakout_or_confirmed_retest",
+        "no_high_volume_stall_or_repeated_rejection",
+        "pre_pullback_residual_positive", "pullback_between_0_5_and_4pct",
+        "pullback_volume_le_80pct_prior5d", "stop_or_reversal_confirmed",
+        "industry_not_weak", "no_material_negative_event",
+        "liquidity_and_risk_pass",
+    )
     for idx, stock in base.iterrows():
         industry_value = industry_strength.loc[idx]
+        pit_row = pit_by_symbol.get(stock["symbol"], {})
         row = {
             "symbol": stock["symbol"],
             "market_state": state,
@@ -698,6 +760,31 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None):
                 else "missing_or_ambiguous_industry_mapping"
             ),
         }
+        if pit_row:
+            # Percentiles are already ranked within their declared PIT peer set.
+            # Never synthesize a score from a raw return or a forward-only overlay.
+            for output_key, source_key in factor_map.items():
+                value = pit_row.get(source_key)
+                try:
+                    number = float(value)
+                    if np.isfinite(number) and 0.0 <= number <= 100.0:
+                        row[output_key] = number
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            if "industry_relative_strength" in row:
+                row["industry_strength"] = row["industry_relative_strength"]
+            for gate in gate_map:
+                value = pit_row.get(gate)
+                row[gate] = bool(value) if isinstance(value, (bool, np.bool_)) else None
+            row["stock_residual_top_20pct"] = (
+                bool(pit_row["stock_residual_top_20pct"])
+                if isinstance(pit_row.get("stock_residual_top_20pct"), (bool, np.bool_))
+                else None
+            )
+            row["m5_pit_factor_provenance"] = "verified_pit_snapshot"
+        else:
+            row["m5_pit_factor_provenance"] = "missing_or_ineligible_pit_snapshot"
+        row["m5_pit_snapshot_status"] = pit_snapshot_status
         if environment is not None:
             try:
                 score = float(environment)
