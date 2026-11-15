@@ -1559,10 +1559,31 @@ def main():
     topup_history_ok = 0
     topup_errors = pd.DataFrame()
     if not topup_universe.empty:
-        topup_watchlist, topup_errors = scan(
-            topup_universe, history_sink=kronos_histories
-        )
+        try:
+            topup_watchlist, topup_errors = scan(
+                topup_universe, history_sink=kronos_histories
+            )
+        except Exception as topup_exc:
+            topup_watchlist = pd.DataFrame()
+            topup_errors = pd.DataFrame([{
+                "reason": f"{type(topup_exc).__name__}: {str(topup_exc)[:220]}"
+            }])
         topup_watchlist = ensure_watchlist_schema(topup_watchlist)
+        if not topup_watchlist.empty:
+            try:
+                topup_watchlist, topup_observation_audit = rank_price_observations(
+                    topup_watchlist,
+                    expected_universe_size=len(topup_universe),
+                    scope_id=f"candidate_history_topup_{len(topup_universe)}",
+                )
+            except Exception as topup_rank_exc:
+                topup_watchlist = pd.DataFrame()
+                topup_errors = pd.concat([
+                    topup_errors,
+                    pd.DataFrame([{
+                        "reason": f"topup_observation_rank:{type(topup_rank_exc).__name__}: {str(topup_rank_exc)[:180]}"
+                    }]),
+                ], ignore_index=True)
         history_universe = pd.concat(
             [history_universe, topup_universe], ignore_index=True
         ).drop_duplicates("code").reset_index(drop=True)
@@ -1582,11 +1603,6 @@ def main():
             encoding="utf-8",
         )
         if not topup_watchlist.empty:
-            topup_watchlist, topup_observation_audit = rank_price_observations(
-                topup_watchlist,
-                expected_universe_size=len(topup_universe),
-                scope_id=f"candidate_history_topup_{len(topup_universe)}",
-            )
             topup_watchlist["history_data_available"] = True
             existing_history = w.loc[
                 w.get("history_data_available", pd.Series(False, index=w.index)).fillna(False).astype(bool)
