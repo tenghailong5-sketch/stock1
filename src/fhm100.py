@@ -10,6 +10,7 @@ import pandas as pd
 import requests
 from concurrent.futures import ThreadPoolExecutor
 from src.model.m4_factors import price_structure
+from src.model.m4_pit_runtime import build_runtime_m4_pit_snapshot
 from src.model.m4_observation import rank_price_observations
 from src.model.pipeline import evaluate_candidates, factor_readiness_audit
 from src.model.m4_industry_observations import select_latest_observed_industry_snapshot
@@ -1153,19 +1154,23 @@ def main():
         w["快速初筛通过"] = False
     w=w.sort_values(["快速初筛通过","快速初筛分","技术观察通过","流动性观察通过","当日成交额"],
                     ascending=[False,False,False,False,False])
-    # Current archives do not jointly provide certified PIT stock,
-    # industry and market returns. Never promote retrieval-time history to PIT.
-    m4_pit_factor_snapshot = pd.DataFrame(columns=["symbol","trade_date","available_time","source_id","source_revision","availability_basis","historical_pit_eligible","industry_relative_strength_pct","stock_residual_strength_pct","price_structure_pct","trade_quality_pct","pre_pullback_strength_pct","pullback_reversal_structure_pct","industry_top_30pct","stock_residual_top_20pct","amount_ma20_ge_100m","breakout_or_confirmed_retest","no_high_volume_stall_or_repeated_rejection","pre_pullback_residual_positive","pullback_between_0_5_and_4pct","pullback_volume_le_80pct_prior5d","stop_or_reversal_confirmed","industry_not_weak","no_material_negative_event","liquidity_and_risk_pass"])
-    m4_pit_snapshot_audit = {
-        "status": "NOT_BUILT_NO_CERTIFIED_PIT_INPUTS",
-        "archive_readiness": archive_readiness.get("status"),
-        "reason": "Certified stock bars/returns with valid historical industry mapping, industry returns and market returns are not jointly available.",
-        "builder_invoked": False,
-        "historical_pit_eligible": False,
-        "expected_inputs": ["stock_bars", "stock_returns_with_valid_industry_code", "industry_returns", "market_returns"],
-    }
+    # Load explicitly certified PIT archives when configured. Ordinary
+    # forward/retrieval-time archives are never upgraded into historical PIT.
+    m4_pit_factor_snapshot, m4_pit_factor_audit, m4_pit_snapshot_audit = (
+        build_runtime_m4_pit_snapshot(
+            decision_time=now,
+            input_dir=os.getenv("FHM_M4_PIT_INPUT_DIR", "").strip() or None,
+            coverage_floor=float(os.getenv("FHM_M4_PIT_COVERAGE_FLOOR", "0.80")),
+        )
+    )
+    m4_pit_factor_snapshot.to_csv(
+        OUT/"m4_pit_factor_snapshot.csv", index=False, encoding="utf-8-sig"
+    )
+    m4_pit_factor_audit.to_csv(
+        OUT/"m4_pit_factor_audit.csv", index=False, encoding="utf-8-sig"
+    )
     (OUT/"m4_pit_snapshot_audit.json").write_text(
-        json.dumps(m4_pit_snapshot_audit, ensure_ascii=False, indent=2),
+        json.dumps(m4_pit_snapshot_audit, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
     m5_input = build_m5_diagnostic_input(
