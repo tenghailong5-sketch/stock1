@@ -44,6 +44,8 @@ def _inputs():
             "low": low,
             "close": close,
             "volume": 100000,
+            "open_auction_volume": 100000,
+            "open_auction_available_time": pd.Timestamp(day + "T09:30:00+08:00"),
             "suspended": False,
             "limit_up_locked": False,
             "limit_down_locked": False,
