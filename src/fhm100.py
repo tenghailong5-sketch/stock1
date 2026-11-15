@@ -1339,11 +1339,10 @@ def main():
         formal_blockers.append("M3_NOT_READY:" + str(m3.get("status")))
     if industry_audit.get("status") != "ready_forward_only":
         formal_blockers.append("FORWARD_INDUSTRY_SNAPSHOT_NOT_READY:" + str(industry_audit.get("status")))
-    formal_blockers.extend([
-        "M5_REQUIRED_FACTORS_AND_HARD_GATES_NOT_COMPLETE",
-        "M6_OUT_OF_SAMPLE_PREDICTION_NOT_VALIDATED",
-        "M9_EXECUTION_AWARE_BACKTEST_NOT_ADMITTED",
-    ])
+    # M5 is enforced per strategy/candidate in the four-layer gate above;
+    # M6 is an optional prediction sidecar, not a prerequisite of M2->M3->M5->M8.
+    # Keep only the independent execution-validation requirement here.
+    formal_blockers.append("M9_EXECUTION_AWARE_BACKTEST_NOT_ADMITTED")
     if decision_gate_audit.get("m8_risk_context_complete_symbol_count", 0) == 0:
         formal_blockers.append("M8_DYNAMIC_RISK_CONTEXT_NOT_AVAILABLE")
     if decision_gate_audit.get("allowed_count", 0) == 0:
