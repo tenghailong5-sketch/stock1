@@ -20,11 +20,25 @@ from .run_checkpoint import SQLiteCheckpointStore
 
 
 def _frame_fingerprint(frame: pd.DataFrame) -> str:
-    normalized = frame.copy().astype(str)
+    """Fingerprint values, nulls, column types, labels and row index."""
     digest = hashlib.sha256()
-    digest.update("|".join(map(str, normalized.columns)).encode("utf-8"))
-    digest.update(pd.util.hash_pandas_object(normalized, index=True).values.tobytes())
+    schema = {
+        "columns": [repr(column) for column in frame.columns],
+        "dtypes": [str(dtype) for dtype in frame.dtypes],
+        "index_names": [repr(name) for name in frame.index.names],
+        "index_dtype": str(frame.index.dtype),
+    }
+    digest.update(json.dumps(schema, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    # JSON preserves distinctions such as numeric 1 vs string "1", and null
+    # vs the literal string "nan"; astype(str) would collapse those inputs.
+    payload = frame.to_json(
+        orient="split", date_format="iso", date_unit="ns", default_handler=repr,
+    )
+    digest.update(payload.encode("utf-8"))
     return digest.hexdigest()
+
+
+RUNNER_FINGERPRINT_VERSION = "portfolio-backtest-runner-v2"
 
 
 def run_checkpointed_portfolio_backtest(
@@ -63,6 +77,7 @@ def run_checkpointed_portfolio_backtest(
         (_frame_fingerprint(candidates) + _frame_fingerprint(bars)).encode("ascii")
     ).hexdigest()
     config = {
+        "runner_fingerprint_version": RUNNER_FINGERPRINT_VERSION,
         "initial_cash": float(initial_cash),
         "max_participation": float(max_participation),
         "costs": asdict(costs),
@@ -96,7 +111,6 @@ def run_checkpointed_portfolio_backtest(
     latest_result = None
     for index, batch_dates in enumerate(batches):
         batch_id = f"{index:06d}-{batch_dates[0].isoformat()}-{batch_dates[-1].isoformat()}"
-        summary = store.summary(run_id, stage)
         # Completed batches are immutable and are used to restore the exact
         # state at the end of each prior batch.
         if batch_id not in store.pending_batches(run_id, stage):
