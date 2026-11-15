@@ -60,3 +60,34 @@ def test_research_ranking_rejects_duplicate_symbols():
         assert "duplicate symbol" in str(exc)
     else:
         raise AssertionError("duplicate symbols must be rejected")
+
+
+def test_research_ranking_uses_forward_mainline_context_without_formal_m5_promotion():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002"],
+        "BodyStrength": [0.8, 0.2],
+        "upper_shadow_ratio": [0.05, 0.3],
+    })
+    m5_input = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "price_structure": [80.0, 20.0],
+        "trade_quality": [90.0, 30.0],
+    })
+    industry_context = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "industry_code": ["801780", "801180"],
+        "current_industry_level1": ["银行", "房地产"],
+        "mainline_phase": ["IGNITION", "DECAY"],
+        "mainline_phase_gated": ["IGNITION_UNCONFIRMED", "DECAY"],
+        "strength_percentile": [0.9, 0.2],
+        "startup_evidence_status": ["UNKNOWN", "UNKNOWN"],
+    })
+    ranked, audit = build_research_opportunity_ranking(
+        watchlist, m5_input, industry_context=industry_context,
+    )
+    leader = ranked.set_index("symbol").loc["000001"]
+    assert leader["industry_relative_strength"] == 90.0
+    assert leader["live_mainline_phase_gated"] == "IGNITION_UNCONFIRMED"
+    assert audit["ranked_count"] == 2
+    assert ranked["research_rank_formal_m5_score"].eq(False).all()
+    assert ranked["research_rank_buy_authorization"].eq(False).all()
