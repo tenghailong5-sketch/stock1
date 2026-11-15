@@ -942,10 +942,10 @@ def main():
         u=universe()
         OUT.mkdir(exist_ok=True)
         u.to_csv(OUT/"market_snapshot.csv", index=False, encoding="utf-8-sig")
-        # Adaptive short-term research pool. Default is 800 symbols; set
-        # FHM_HISTORY_SCAN_MAX_SYMBOLS=all to request full-market history retrieval.
+        # Bounded first-pass research pool; set FHM_HISTORY_SCAN_MAX_SYMBOLS=all
+        # only when explicit full-market history retrieval is intended.
         # Scan inclusion never grants M5 eligibility or buy authorization.
-        scan_limit_raw = os.getenv("FHM_HISTORY_SCAN_MAX_SYMBOLS", "all").strip().lower()
+        scan_limit_raw = os.getenv("FHM_HISTORY_SCAN_MAX_SYMBOLS", "500").strip().lower()
         if scan_limit_raw in {"all", "full", "unlimited", "0"}:
             scan_limit = None
         else:
