@@ -138,9 +138,13 @@ def apply_state_cooldown(scored: pd.DataFrame) -> pd.DataFrame:
             current = pending
             pending, streak = None, 0
     x["market_state"] = confirmed
-    x["position_scale"] = x.market_state.map(
-        {"RISK_ON": 1.0, "NEUTRAL": 0.7, "RISK_OFF": 0.0}
-    )
+    # Convert the existing point-in-time environment score into a continuous
+    # 0..1 risk scale. State classification/cooldown still controls permission;
+    # this value only scales the available risk budget within that permission.
+    x["market_environment_score"] = x.apply(market_environment_score, axis=1)
+    x["risk_scale"] = (x["market_environment_score"] / 100.0).clip(0.0, 1.0)
+    # Compatibility alias for existing M8 callers; no state-level fixed map.
+    x["position_scale"] = x["risk_scale"]
     x["candidate_score_threshold"] = x.market_state.map(
         {"RISK_ON": 80, "NEUTRAL": 85, "RISK_OFF": np.nan}
     )
