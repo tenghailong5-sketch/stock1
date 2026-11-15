@@ -1336,10 +1336,39 @@ def main():
     for candidate in catalyst_candidates:
         for industry_name in candidate.get("mapped_industries", []):
             catalyst_counts[industry_name] = catalyst_counts.get(industry_name, 0) + 1
+    # Attach first-seen-based price-in state by industry. It remains diagnostic:
+    # direction/impact is not inferred and this field does not change M5 scores.
+    price_in_candidates = (
+        runtime_mainline_audit.get("event_price_in", {}).get("candidates", [])
+        if isinstance(runtime_mainline_audit, dict) else []
+    )
+    price_in_by_industry = {}
+    for candidate in price_in_candidates:
+        for industry_name in candidate.get("mapped_industries", []):
+            previous = price_in_by_industry.get(industry_name)
+            current_seen = str(candidate.get("first_seen_at", ""))
+            previous_seen = str(previous.get("first_seen_at", "")) if previous else ""
+            if previous is None or current_seen > previous_seen:
+                price_in_by_industry[industry_name] = candidate
     if not forward_stock_mainline.empty and "current_industry_level1" in forward_stock_mainline:
+        industry_names = forward_stock_mainline["current_industry_level1"].astype(str)
         forward_stock_mainline["live_catalyst_candidate_count"] = (
-            forward_stock_mainline["current_industry_level1"].map(catalyst_counts).fillna(0).astype(int)
+            industry_names.map(catalyst_counts).fillna(0).astype(int)
         )
+        forward_stock_mainline["live_event_price_in_state"] = industry_names.map(
+            lambda name: price_in_by_industry.get(name, {}).get("price_in_state")
+        )
+        forward_stock_mainline["live_event_price_in_reason"] = industry_names.map(
+            lambda name: price_in_by_industry.get(name, {}).get("reason")
+        )
+        forward_stock_mainline["live_event_pre_discovery_excess_20d"] = industry_names.map(
+            lambda name: price_in_by_industry.get(name, {}).get("pre_discovery_excess_20d")
+        )
+        forward_stock_mainline["live_event_post_discovery_excess_3d"] = industry_names.map(
+            lambda name: price_in_by_industry.get(name, {}).get("post_discovery_excess_3d")
+        )
+    forward_stock_mainline_audit["price_in_industry_count"] = int(len(price_in_by_industry))
+    forward_stock_mainline_audit["price_in_is_diagnostic_only"] = True
     forward_stock_mainline_audit["mapped_catalyst_industry_count"] = int(len(catalyst_counts))
     forward_stock_mainline_audit["catalyst_candidates_are_score_neutral"] = True
     # Carry reviewed-sector candidate counts down to the stock research rows.
