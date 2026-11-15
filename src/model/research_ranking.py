@@ -11,15 +11,14 @@ import pandas as pd
 
 
 RESEARCH_FACTORS = {
-    # Current quote factors keep the live research rank usable when historical
-    # OHLC is absent. They are explicitly not formal M5/PIT factors.
-    "industry_strength": ("industry_relative_strength", True),
-    "current_momentum": ("涨跌幅%", True),
-    "current_liquidity": ("当日成交额", True),
-    "price_structure": ("price_structure", True),
-    "body_strength": ("BodyStrength", True),
-    "upper_shadow_quality": ("upper_shadow_ratio", False),
-    "trade_quality": ("trade_quality", True),
+    # Weights are renormalized across observed factors for each row.
+    "industry_strength": ("industry_relative_strength", True, 0.35),
+    "current_momentum": ("涨跌幅%", True, 0.45),
+    "current_liquidity": ("当日成交额", True, 0.20),
+    "price_structure": ("price_structure", True, 0.0),
+    "body_strength": ("BodyStrength", True, 0.0),
+    "upper_shadow_quality": ("upper_shadow_ratio", False, 0.0),
+    "trade_quality": ("trade_quality", True, 0.0),
 }
 
 
@@ -96,7 +95,7 @@ def build_research_opportunity_ranking(
 
     ranked_columns = []
     available_factors = []
-    for factor_name, (source_column, higher_is_better) in RESEARCH_FACTORS.items():
+    for factor_name, (source_column, higher_is_better, _) in RESEARCH_FACTORS.items():
         if source_column not in out:
             out[source_column] = np.nan
         values = pd.to_numeric(out[source_column], errors="coerce")
@@ -116,11 +115,18 @@ def build_research_opportunity_ranking(
     # number of observed factors before producing a ranked score.
     mainline_anchor_ready = out["industry_strength_percentile"].notna()
     out["research_mainline_anchor_ready"] = mainline_anchor_ready
-    out["research_opportunity_score"] = (
-        matrix.mean(axis=1).where(
-            (out["research_factor_count"] >= min_observed_factors)
-            & mainline_anchor_ready
-        )
+    weights = pd.Series(
+        {name + "_percentile": weight for name, (_, _, weight) in RESEARCH_FACTORS.items()},
+        dtype=float,
+    ).reindex(ranked_columns)
+    observed_weights = matrix.notna().mul(weights, axis=1)
+    weighted_score = (
+        matrix.fillna(0).mul(weights, axis=1).sum(axis=1)
+        / observed_weights.sum(axis=1).replace(0, np.nan)
+    )
+    out["research_opportunity_score"] = weighted_score.where(
+        (out["research_factor_count"] >= min_observed_factors)
+        & mainline_anchor_ready
     )
     out["research_opportunity_rank"] = (
         out["research_opportunity_score"].rank(method="min", ascending=False).astype("Int64")
@@ -161,10 +167,55 @@ def build_research_opportunity_ranking(
         "missing_mainline_context_count": int((~mainline_anchor_ready).sum()),
         "min_observed_factors": min_observed_factors,
         "factor_count": len(RESEARCH_FACTORS),
-        "factor_sources": {name: source for name, (source, _) in RESEARCH_FACTORS.items()},
+        "factor_sources": {name: source for name, (source, _, _) in RESEARCH_FACTORS.items()},
+        "factor_weights": {name: weight for name, (_, _, weight) in RESEARCH_FACTORS.items() if weight > 0},
+        "score_method": "weighted_observed_percentiles_renormalized_per_row",
         "uses_raw_cross_session_returns": False,
         "historical_pit_eligible": False,
         "formal_m5_score": False,
         "buy_authorization": False,
     }
     return out, audit
+
+
+def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int = 30, max_per_industry: int = 3, min_amount: float = 100_000_000, min_pct_change: float = -5.0, max_pct_change: float = 9.5) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Build a diversified research watchlist; never grants buy authorization."""
+    if max_candidates < 1 or max_per_industry < 1:
+        raise ValueError("shortlist limits must be positive")
+    if ranked is None or ranked.empty:
+        empty = pd.DataFrame()
+        return empty, empty, {"status": "NO_RANKED_CANDIDATES", "candidate_count": 0, "event_watch_count": 0, "buy_authorization": False}
+    data = ranked.copy()
+    for col in ("price", "amount", "pct_chg", "research_opportunity_score"):
+        if col not in data: data[col] = np.nan
+        data[col] = pd.to_numeric(data[col], errors="coerce")
+    if "symbol" not in data:
+        if "代码" not in data: raise ValueError("ranked candidates require symbol or 代码")
+        data["symbol"] = data["代码"].astype(str).str.strip().str.zfill(6)
+    data["symbol"] = data["symbol"].astype(str).str.strip().str.zfill(6)
+    industry_col = "live_industry_level1" if "live_industry_level1" in data else ("current_industry_level1" if "current_industry_level1" in data else None)
+    data["shortlist_industry"] = data[industry_col].fillna("行业未知").astype(str) if industry_col else "行业未知"
+    valid = data[data["research_opportunity_score"].notna() & data["price"].gt(0) & data["amount"].ge(min_amount)].copy()
+    event_watch = valid[valid["pct_chg"].ge(max_pct_change)].copy()
+    event_watch["event_watch_reason"] = "涨幅过大，单列强势事件观察，不进入普通候选池"
+    ordinary = valid[valid["pct_chg"].ge(min_pct_change) & valid["pct_chg"].lt(max_pct_change)].copy()
+    ordinary = ordinary.sort_values(["research_opportunity_score", "amount", "symbol"], ascending=[False, False, True])
+    selected = []; industry_counts = {}
+    for _, row in ordinary.iterrows():
+        industry = row["shortlist_industry"]
+        if industry_counts.get(industry, 0) >= max_per_industry: continue
+        selected.append(row); industry_counts[industry] = industry_counts.get(industry, 0) + 1
+        if len(selected) >= max_candidates: break
+    shortlist = pd.DataFrame(selected, columns=ordinary.columns).reset_index(drop=True)
+    if not shortlist.empty:
+        shortlist.insert(0, "final_candidate_rank", np.arange(1, len(shortlist) + 1))
+        shortlist["candidate_status"] = "RESEARCH_WATCH"
+        shortlist["entry_confirmation_status"] = "PENDING_15M_CONFIRMATION"
+        shortlist["buy_authorization"] = False
+        shortlist["risk_note"] = np.select([shortlist["pct_chg"].ge(7.5), shortlist["pct_chg"].le(-3.0)], ["高涨幅，严禁按排名追价", "当日偏弱，等待结构转强"], default="等待15分钟结构与风险确认")
+    if not event_watch.empty:
+        event_watch = event_watch.sort_values(["research_opportunity_score", "amount"], ascending=[False, False]).reset_index(drop=True)
+        event_watch.insert(0, "event_watch_rank", np.arange(1, len(event_watch) + 1))
+        event_watch["buy_authorization"] = False
+    audit = {"status": "READY_RESEARCH_WATCH" if not shortlist.empty else "NO_ORDINARY_CANDIDATES", "ranked_input_count": int(len(data)), "liquid_valid_count": int(len(valid)), "candidate_count": int(len(shortlist)), "event_watch_count": int(len(event_watch)), "industry_cap": int(max_per_industry), "minimum_amount": float(min_amount), "ordinary_pct_change_range": [float(min_pct_change), float(max_pct_change)], "entry_confirmation": "PENDING_15M_CONFIRMATION", "buy_authorization": False}
+    return shortlist, event_watch, audit
