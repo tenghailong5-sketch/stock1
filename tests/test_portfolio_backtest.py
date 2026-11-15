@@ -179,7 +179,7 @@ def test_portfolio_can_open_more_than_two_positions_with_dynamic_budget():
         bar("000002", "2026-01-06"),
         bar("000003", "2026-01-06"),
     ])
-    result = run_portfolio_backtest(candidates, bars)
+    result = run_portfolio_backtest(candidates, bars, initial_cash=200000)
     buys = [fill for fill in result["fills"] if fill["side"] == "buy" and fill["filled"]]
     assert len(buys) == 3
     assert len(result["open_positions"]) == 3
