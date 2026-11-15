@@ -27,7 +27,7 @@ def _audit_file(path: Path) -> dict:
             "dataset": path.parent.name, "file": str(path), "row_count": 0,
             "pit_eligible_count": 0, "retrieval_only_count": 0,
             "missing_lineage_count": 0, "invalid_available_time_count": 0,
-            "symbol_count": 0, "trade_date_count": 0, "sources": [],
+            "symbol_count": 0, "trade_date_count": 0, "_symbols": [], "sources": [],
             "status": "EMPTY", "errors": [],
         }
     with path.open("r", encoding="utf-8") as handle:
@@ -82,7 +82,7 @@ def _audit_file(path: Path) -> dict:
         "pit_eligible_count": eligible, "retrieval_only_count": retrieval_only,
         "missing_lineage_count": missing_lineage, "invalid_available_time_count": invalid_time,
         "symbol_count": len(symbols), "trade_date_count": len(dates),
-        "sources": sorted(sources), "status": status, "errors": errors,
+        "_symbols": sorted(symbols), "sources": sorted(sources), "status": status, "errors": errors,
     }
 
 
@@ -108,11 +108,11 @@ def audit_forward_archive(archive_root: str | Path = "data/forward_archive") -> 
             "retrieval_only_count": sum(row["retrieval_only_count"] for row in rows),
             "missing_lineage_count": sum(row["missing_lineage_count"] for row in rows),
             "invalid_available_time_count": sum(row["invalid_available_time_count"] for row in rows),
-            "symbol_count": len(set().union(*(set(row["sources"]) for row in rows))),
+            "symbol_count": len(set().union(*(set(row["_symbols"]) for row in rows))),
             "status": status,
         })
     return {
         "archive_root": str(root),
         "status": "PIT_READY" if datasets and all(x["status"] in {"PIT_READY", "EMPTY"} for x in datasets) else "PIT_BLOCKED",
-        "file_count": len(file_rows), "datasets": datasets, "files": file_rows,
+        "file_count": len(file_rows), "datasets": datasets, "files": [{key: value for key, value in row.items() if key != "_symbols"} for row in file_rows],
     }
