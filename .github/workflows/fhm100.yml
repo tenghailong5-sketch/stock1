@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - fix/live-forward-industry-readiness
+      - main
 
 permissions:
   contents: write
