@@ -1160,6 +1160,10 @@ def main():
     (OUT/"runtime_mainline_audit.json").write_text(
         json.dumps(runtime_mainline_audit, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
+    event_price_rows = runtime_mainline_audit.get("event_price_in", {}).get("candidates", [])
+    pd.DataFrame(event_price_rows).to_csv(
+        OUT/"event_price_in_candidates.csv", index=False, encoding="utf-8-sig"
+    )
     if not w.empty and "available_time" in w.columns:
         stock_available = pd.to_datetime(w["available_time"], errors="coerce", utc=True)
         if stock_available.isna().any() or (stock_available > pd.Timestamp(now)).any():

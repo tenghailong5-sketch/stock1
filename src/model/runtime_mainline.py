@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import akshare as ak
+import numpy as np
 import pandas as pd
 import requests
 
@@ -25,6 +26,7 @@ from src.model.market_cycle import classify_market_cycle
 from src.model.m3_assembler import assemble_market_emotion_history
 from src.model.policy_catalysts import visible_policy_events
 from src.model.catalyst_mapping import map_candidate_sectors
+from src.model.event_price_in import evaluate_event_price_in
 from src.providers.eastmoney_market_emotion import fetch_market_emotion_pool_history
 from src.providers.gov_policy import discover_gov_policy_candidates, append_policy_candidates
 from src.providers.global_news import (
@@ -55,9 +57,10 @@ def _read_index_archive(path: Path, *, decision_time: pd.Timestamp) -> pd.DataFr
     frame = frame.dropna(subset=["trade_date", "close", "available_time"])
     frame = frame.loc[(frame.available_time <= cutoff) & (frame.close > 0)]
     frame = frame.sort_values("trade_date").drop_duplicates("trade_date", keep="last")
+    frame["market_return_1d"] = frame.close.pct_change()
     frame["market_return_3d"] = frame.close.div(frame.close.shift(3)).sub(1)
     frame["market_return_5d"] = frame.close.div(frame.close.shift(5)).sub(1)
-    return frame[["trade_date", "market_return_3d", "market_return_5d", "close"]].rename(
+    return frame[["trade_date", "market_return_1d", "market_return_3d", "market_return_5d", "close"]].rename(
         columns={"close": "market_close"}
     )
 
@@ -143,6 +146,12 @@ def _assemble_industry_panel(*, decision_time: pd.Timestamp, archive_root: Path)
         decision_time=decision_time,
     )
     panel["trade_date"] = pd.to_datetime(panel.trade_date, errors="coerce").dt.normalize()
+    if "daily_return" in panel:
+        panel["industry_return_1d"] = pd.to_numeric(panel["daily_return"], errors="coerce")
+    elif "close" in panel:
+        panel["industry_return_1d"] = panel.groupby("industry_code")["close"].pct_change()
+    else:
+        panel["industry_return_1d"] = np.nan
     panel["industry_return_3d"] = pd.to_numeric(panel.return_3, errors="coerce")
     panel["industry_return_5d"] = pd.to_numeric(panel.return_5, errors="coerce")
     panel["turnover"] = pd.to_numeric(panel.amount, errors="coerce")
@@ -320,6 +329,22 @@ def scan_cached_market_emotion(
         }
 
 
+def _read_discovered_candidates(path: str | Path) -> list[dict]:
+    """Read the append-only candidate archive so first_seen_at survives later scans."""
+    target = Path(path)
+    if not target.exists():
+        return []
+    rows = []
+    with target.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            if isinstance(item, dict) and item.get("candidate_id"):
+                rows.append(item)
+    return rows
+
+
 def scan_runtime_mainlines(
     *, decision_time, archive_root: str | Path = Path("data/forward_archive"),
     policy_path: str | Path = Path("data/policy_catalysts/official_policy_events.jsonl"),
@@ -422,10 +447,30 @@ def scan_runtime_mainlines(
         evidence = gate_ignition_labels(evidence)
         latest = evidence.trade_date.max()
         latest_rows = evidence.loc[evidence.trade_date.eq(latest)].copy()
+        # Re-read append-only archives after discovery. This preserves the
+        # original first_seen_at clock across subsequent runs so post-event
+        # reaction windows can accumulate instead of resetting every scan.
+        archived_policy_candidates = _read_discovered_candidates(policy_candidate_path)
+        archived_news_candidates = _read_discovered_candidates(global_news_candidate_path)
         sector_candidates, sector_mapping_audit = map_candidate_sectors(
-            [*policy_candidates, *news_candidates],
+            [*archived_policy_candidates, *archived_news_candidates],
             latest_rows.get("industry_name", pd.Series(dtype=str)).dropna().astype(str).unique(),
         )
+        # Measure pre-discovery run-up and forward post-discovery repricing.
+        # The first-seen clock is authoritative for model availability; publisher
+        # timestamps remain metadata and never move the event clock backwards.
+        price_in_history = panel.copy()
+        price_in_history["industry_return_1d"] = pd.to_numeric(
+            price_in_history.get("daily_return"), errors="coerce"
+        )
+        price_in_history["market_return_1d"] = pd.to_numeric(
+            price_in_history.get("market_return_1d"), errors="coerce"
+        )
+        price_in_history["observation_available_time"] = cutoff.tz_convert("UTC")
+        price_in_rows, price_in_audit = evaluate_event_price_in(
+            sector_candidates, price_in_history, decision_time=cutoff
+        )
+        price_in_audit["candidates"] = price_in_rows.to_dict(orient="records")
         audit = {
             "status": "READY_DIAGNOSTIC_ONLY",
             "industry": industry_audit,
@@ -443,6 +488,7 @@ def scan_runtime_mainlines(
                 "candidate_only": True,
                 "no_unreviewed_news_changes_stock_scores": True,
             },
+            "event_price_in": price_in_audit,
             "catalyst_sector_candidates": {
                 **sector_mapping_audit,
                 "candidates": sector_candidates,
