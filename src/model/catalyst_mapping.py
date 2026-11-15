@@ -77,9 +77,18 @@ def map_candidate_sectors(candidates, available_industries):
     names = {str(name).strip() for name in available_industries if str(name).strip()}
     mapped = []
     unmapped = 0
+    duplicate_headlines = 0
+    seen_headlines = set()
     for candidate in candidates or []:
         if not isinstance(candidate, dict):
             continue
+        headline = re.sub(r"[^a-z0-9\\u4e00-\\u9fff]+", "", str(candidate.get("title") or "").lower())
+        identity = headline or str(candidate.get("candidate_id") or candidate.get("event_id") or "")
+        if identity and identity in seen_headlines:
+            duplicate_headlines += 1
+            continue
+        if identity:
+            seen_headlines.add(identity)
         text = " ".join(str(candidate.get(key) or "") for key in (
             "title", "summary", "catalog", "issuing_agency",
             "discovery_keyword", "theme",
@@ -106,6 +115,7 @@ def map_candidate_sectors(candidates, available_industries):
         "input_candidates": len(candidates or []),
         "mapped_candidates": len(mapped),
         "unmapped_candidates": unmapped,
+        "duplicate_headlines_suppressed": duplicate_headlines,
         "industry_candidate_counts": dict(counts),
         "mapping_is_review_only": True,
         "impact_direction_inferred": False,
