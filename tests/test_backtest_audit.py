@@ -14,7 +14,7 @@ def datasets():
         "corporate_actions_resolved": True, "universe_complete": True,
         "delisted_included": True, "ruleset_version": "FHM-100-test",
         "available_risk_budget": 5000.0, "market_risk_scale": 0.8,
-        "m8_trade_allowed": True,
+        "m8_trade_allowed": True, "stop_price": 9.5,
     }])
     bars = pd.DataFrame([{
         "symbol": "000001", "trade_date": "2026-01-06",
@@ -141,3 +141,27 @@ def test_m8_permission_must_be_explicit_boolean():
     audit = audit_backtest_dataset(candidates, bars)
     assert not audit.ready
     assert "candidate_m8_trade_permission_must_be_boolean" in audit.errors
+
+@pytest.mark.parametrize("bad_stop", [None, float("nan"), 0.0, -1.0, True])
+def test_eligible_candidate_requires_a_valid_positive_stop_price(bad_stop):
+    candidates, bars = datasets()
+    candidates["stop_price"] = candidates["stop_price"].astype(object)
+    candidates.loc[0, "stop_price"] = bad_stop
+    audit = audit_backtest_dataset(candidates, bars)
+    assert not audit.ready
+    assert "eligible_candidate_invalid_stop_price" in audit.errors
+
+
+@pytest.mark.parametrize("field", ["available_risk_budget", "market_risk_scale"])
+def test_boolean_values_are_not_accepted_as_numeric_m8_risk_inputs(field):
+    candidates, bars = datasets()
+    candidates[field] = candidates[field].astype(object)
+    candidates.loc[0, field] = True
+    audit = audit_backtest_dataset(candidates, bars)
+    assert not audit.ready
+    expected = (
+        "candidate_invalid_available_risk_budget"
+        if field == "available_risk_budget"
+        else "candidate_invalid_market_risk_scale"
+    )
+    assert expected in audit.errors
