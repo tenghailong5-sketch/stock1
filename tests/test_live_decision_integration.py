@@ -250,8 +250,12 @@ def test_15m_full_universe_uses_bounded_parallel_workers(monkeypatch):
         {"代码": "600000", "当日成交额": 100},
         {"代码": "000001", "当日成交额": 90},
     ])
+    m5 = pd.DataFrame([
+        {"symbol": "600000", "strategy": "A", "eligible": True, "score": 72},
+        {"symbol": "000001", "strategy": "A", "eligible": True, "score": 68},
+    ])
     rows, audit = integration.build_live_decision_gate_audit(
-        watchlist, pd.DataFrame(), {"status": "UNKNOWN"},
+        watchlist, m5, {"status": "UNKNOWN"},
         pd.DataFrame(), pd.DataFrame(),
         decision_time="2026-11-14T09:00:00+08:00",
         minute_confirmation_fetcher=lambda symbol, **kwargs: {
