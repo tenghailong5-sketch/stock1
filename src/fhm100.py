@@ -1117,7 +1117,10 @@ def main():
             raise RuntimeError("stock snapshot availability exceeds the unified decision cutoff")
         latest_stock_available = stock_available.max().isoformat()
     else:
-        latest_stock_available = None
+        latest_stock_available = (
+            pd.Timestamp(spot_snapshot_observed_at).tz_convert("UTC").isoformat()
+            if not u.empty else None
+        )
     m3 = load_m3_market_context(decision_time=now)
     expected_symbols = u["code"].astype(str).str.zfill(6).tolist() if "code" in u else []
     industry_membership, industry_audit = audit_forward_industry_membership(
@@ -1136,6 +1139,7 @@ def main():
     )
     mainline_mapping_panel = runtime_mainline
     spot_sector_fallback_audit = {"status": "NOT_NEEDED"}
+    spot_trade_date_basis = "observed_history_or_m3"
     if runtime_mainline.empty and not industry_membership.empty and not u.empty:
         try:
             latest_stock_trade_date = (
@@ -1148,7 +1152,7 @@ def main():
                 # The date is a labeling anchor only for a one-snapshot cross-section.
                 # It is not asserted to be an exchange trading date.
                 latest_stock_trade_date = pd.Timestamp(now).tz_convert("Asia/Shanghai").normalize()
-                spot_sector_fallback_audit["trade_date_basis"] = "decision_date_label_only"
+                spot_trade_date_basis = "decision_date_label_only"
             if pd.notna(latest_stock_trade_date):
                 spot_sector_panel, spot_sector_fallback_audit = build_spot_industry_strength_panel(
                     industry_membership,
@@ -1157,6 +1161,7 @@ def main():
                     decision_time=now,
                     snapshot_observed_at=spot_snapshot_observed_at,
                 )
+                spot_sector_fallback_audit["trade_date_basis"] = spot_trade_date_basis
                 if not spot_sector_panel.empty:
                     mainline_mapping_panel = spot_sector_panel
         except Exception as spot_fallback_exc:
