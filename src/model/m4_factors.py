@@ -526,7 +526,10 @@ def build_m4_pit_factor_snapshot(
         amount_ma20.loc[valid_amount] >= 100_000_000
     )
     if hard_gate_snapshot is not None:
-        required_gate = {"symbol", "available_time", "source_id", "source_revision", *gate_fields}
+        external_gate_fields = tuple(
+            field for field in gate_fields if field != "amount_ma20_ge_100m"
+        )
+        required_gate = {"symbol", "available_time", "source_id", "source_revision", *external_gate_fields}
         missing = required_gate - set(hard_gate_snapshot.columns)
         if missing:
             raise ValueError("hard_gate_snapshot missing: " + ",".join(sorted(missing)))
@@ -542,11 +545,11 @@ def build_m4_pit_factor_snapshot(
         gates["symbol"] = gates["symbol"].astype(str).str.strip()
         if gates["symbol"].duplicated().any():
             raise ValueError("duplicate hard_gate_snapshot symbol")
-        for field in gate_fields:
+        for field in external_gate_fields:
             if not gates[field].map(lambda v: isinstance(v, (bool, np.bool_))).all():
                 raise ValueError("hard gate values must be explicit booleans: " + field)
-        base = base.drop(columns=list(gate_fields)).merge(
-            gates[["symbol", *gate_fields]], on="symbol", how="left", validate="one_to_one"
+        base = base.drop(columns=list(external_gate_fields)).merge(
+            gates[["symbol", *external_gate_fields]], on="symbol", how="left", validate="one_to_one"
         )
     base["historical_pit_eligible"] = True
     base["available_time"] = pd.to_datetime(base["available_time"], utc=True)
