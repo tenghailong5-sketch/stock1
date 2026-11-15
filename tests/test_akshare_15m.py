@@ -99,3 +99,16 @@ def test_after_close_breakout_cannot_authorize_next_session_entry():
     assert result["entry_ready"] is False
     assert result["status"] == "OUTSIDE_15M_ENTRY_WINDOW"
 
+
+
+def test_confirmed_15m_breakout_emits_entry_stop_and_invalidation_references():
+    bars = normalize_15m_bars(
+        sample(), symbol="600000", captured_at="2026-11-13T03:20:00Z"
+    )
+    result = confirm_15m_breakout(bars, lookback_bars=4, minimum_volume_multiple=1.0)
+    assert result["entry_ready"] is True
+    assert result["entry_reference_price"] == result["latest_close"]
+    assert result["breakout_trigger_price"] == result["prior_lookback_high"]
+    assert result["stop_reference_price"] < result["entry_reference_price"]
+    assert result["stop_distance_pct"] > 0
+    assert "跌破结构止损参考位" in result["invalidation_condition"]
