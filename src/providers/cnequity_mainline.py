@@ -179,7 +179,8 @@ def build_cnequity_mainline_inputs(
     output_columns = [
         "trade_date", "industry_code", "industry_return_3d", "market_return_3d",
         "industry_return_5d", "market_return_5d", "turnover", "market_turnover",
-        "expected_industry_count", "historical_pit_eligible", "research_only",
+        "expected_industry_count", "n_members", "n_priced", "n_excluded",
+        "member_coverage", "historical_pit_eligible", "research_only",
         "trading_authorization", "availability_basis", "source_provenance",
         "source_version", "source_fetched_at",
     ]
@@ -193,6 +194,9 @@ def build_cnequity_mainline_inputs(
         "start_date": panel["trade_date"].min().date().isoformat() if not panel.empty else None,
         "end_date": panel["trade_date"].max().date().isoformat() if not panel.empty else None,
         "benchmark_symbol": benchmark_symbol,
+        "market_source": sorted(market["source"].astype(str).unique().tolist()),
+        "market_data_versions": sorted(market["data_version"].astype(str).unique().tolist()),
+        "market_fetched_at_max": market["fetched_at"].max().isoformat(),
         "weighting": "amount",
         "historical_pit_eligible": False,
         "trading_authorization": False,
