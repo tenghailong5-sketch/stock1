@@ -869,6 +869,66 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
     return pd.DataFrame(rows)
 
 
+
+def merge_current_quotes_with_history(snapshot, history_watchlist, *, observed_at):
+    """Make the full current quote universe the primary research surface.
+
+    Historical OHLC enriches rows when available, but missing/failed history
+    never removes a currently quoted stock from the live research output.
+    Missing historical factors remain NaN and cannot satisfy formal gates.
+    """
+    required = {"code", "name", "price", "amount", "pct_chg"}
+    if snapshot is None or snapshot.empty or not required.issubset(snapshot.columns):
+        return history_watchlist.copy() if history_watchlist is not None else pd.DataFrame()
+    quotes = snapshot.copy()
+    quotes["代码"] = quotes["code"].astype(str).str.strip().str[-6:].str.zfill(6)
+    quotes["名称"] = quotes["name"].astype(str)
+    quotes["最新价"] = pd.to_numeric(quotes["price"], errors="coerce")
+    quotes["涨跌幅%"] = pd.to_numeric(quotes["pct_chg"], errors="coerce")
+    quotes["当日成交额"] = pd.to_numeric(quotes["amount"], errors="coerce")
+    quotes["symbol"] = quotes["代码"]
+    quotes["available_time"] = pd.Timestamp(observed_at).tz_convert("UTC").isoformat()
+    quotes["20日平均成交额"] = np.nan
+    quotes["5日收益%"] = np.nan
+    quotes["20日收益%"] = np.nan
+    quotes["CLV"] = np.nan
+    quotes["BodyStrength"] = np.nan
+    quotes["upper_shadow_ratio"] = np.nan
+    quotes["trade_quality"] = np.nan
+    quotes["快速5日收益%"] = np.nan
+    quotes["快速20日收益%"] = np.nan
+    quotes["快速量比20日"] = np.nan
+    quotes["快速20日平均成交额"] = np.nan
+    quotes["快速初筛分"] = np.nan
+    quotes["快速初筛通过"] = False
+    quotes["流动性观察通过"] = False
+    quotes["技术观察通过"] = False
+    quotes["未通过项"] = "仅有当前行情；历史OHLC因子未提供"
+    quotes["M4数据口径"] = "current_quote_only"
+    quotes["M4跨日价格状态"] = "UNAVAILABLE"
+    quotes["history_data_available"] = False
+
+    if history_watchlist is not None and not history_watchlist.empty and "代码" in history_watchlist:
+        history = history_watchlist.copy()
+        history["代码"] = history["代码"].astype(str).str.strip().str[-6:].str.zfill(6)
+        history["history_data_available"] = True
+        # Current quote fields always win; history contributes only additional factors.
+        quote_columns = {"代码", "名称", "最新价", "涨跌幅%", "当日成交额", "symbol", "available_time"}
+        enrich = [c for c in history.columns if c == "代码" or c not in quote_columns]
+        history = history[enrich].drop_duplicates("代码")
+        quotes = quotes.merge(history, on="代码", how="left", suffixes=("", "_history"), validate="one_to_one")
+        if "history_data_available_history" in quotes:
+            quotes["history_data_available"] = quotes["history_data_available_history"].fillna(False)
+            quotes = quotes.drop(columns=["history_data_available_history"])
+        # Keep the live snapshot's timestamp as the availability time.
+        if "available_time_history" in quotes:
+            quotes = quotes.drop(columns=["available_time_history"])
+        for column in ("名称", "最新价", "涨跌幅%", "当日成交额", "symbol"):
+            history_column = column + "_history"
+            if history_column in quotes:
+                quotes = quotes.drop(columns=[history_column])
+    return quotes.sort_values(["当日成交额", "代码"], ascending=[False, True]).reset_index(drop=True)
+
 def empty_scan_result(error):
     """Return explicit empty outputs when the live universe provider is unavailable."""
     # Keep this empty-result schema unique: main() applies the same final sort to all scans.
@@ -1031,7 +1091,15 @@ def main():
     # cutoff; no provider response fetched after the cutoff can leak into the run.
     now=datetime.now(timezone.utc)
     # Runtime mainline scan is part of this model invocation; no scheduler is involved.
-    runtime_mainline, runtime_mainline_audit = scan_runtime_mainlines(decision_time=now)
+    try:
+        runtime_mainline, runtime_mainline_audit = scan_runtime_mainlines(decision_time=now)
+    except Exception as mainline_exc:
+        runtime_mainline = pd.DataFrame()
+        runtime_mainline_audit = {
+            "status": "UNAVAILABLE",
+            "reason": f"{type(mainline_exc).__name__}: {str(mainline_exc)[:240]}",
+            "historical_pit_eligible": False, "trading_authorization": False,
+        }
     runtime_mainline.to_csv(OUT/"runtime_mainline_latest.csv", index=False, encoding="utf-8-sig")
     (OUT/"runtime_mainline_audit.json").write_text(
         json.dumps(runtime_mainline_audit, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
@@ -1053,6 +1121,11 @@ def main():
     )
     (OUT/"industry_membership_forward_audit.json").write_text(
         json.dumps(industry_audit, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
+    # From here on, full-market quotes are the core dataset. Historical bars
+    # enrich available symbols but are never required for current discovery.
+    w = merge_current_quotes_with_history(
+        u, w, observed_at=spot_snapshot_observed_at
     )
     mainline_mapping_panel = runtime_mainline
     spot_sector_fallback_audit = {"status": "NOT_NEEDED"}
@@ -1079,9 +1152,18 @@ def main():
                 "historical_pit_eligible": False,
                 "trading_authorization": False,
             }
-    forward_stock_mainline, forward_stock_mainline_audit = build_forward_stock_mainline_research(
-        industry_membership, mainline_mapping_panel, decision_time=now,
-    )
+    try:
+        forward_stock_mainline, forward_stock_mainline_audit = build_forward_stock_mainline_research(
+            industry_membership, mainline_mapping_panel, decision_time=now,
+        )
+    except Exception as mapping_exc:
+        forward_stock_mainline = pd.DataFrame()
+        forward_stock_mainline_audit = {
+            "status": "UNAVAILABLE",
+            "reason": f"{type(mapping_exc).__name__}: {str(mapping_exc)[:240]}",
+            "historical_pit_eligible": False, "trading_authorization": False,
+            "research_only": True,
+        }
     forward_stock_mainline_audit["spot_sector_fallback"] = spot_sector_fallback_audit
     forward_stock_mainline.to_csv(
         OUT/"forward_stock_mainline_research.csv", index=False, encoding="utf-8-sig"
@@ -1170,10 +1252,17 @@ def main():
         "status": "no_target_trade_date", "historical_pit_eligible": False,
     }
     if pd.notna(latest_stock_day) and expected_symbols:
-        pit_stock_turnover, stock_turnover_audit = aggregate_archived_stock_turnover(
-            Path("data/forward_archive"), expected_symbols,
-            trade_date=latest_stock_day, decision_time=now,
-        )
+        try:
+            pit_stock_turnover, stock_turnover_audit = aggregate_archived_stock_turnover(
+                Path("data/forward_archive"), expected_symbols,
+                trade_date=latest_stock_day, decision_time=now,
+            )
+        except Exception as turnover_exc:
+            stock_turnover_audit = {
+                "status": "UNAVAILABLE",
+                "reason": f"{type(turnover_exc).__name__}: {str(turnover_exc)[:220]}",
+                "historical_pit_eligible": False,
+            }
     if not runtime_mainline.empty:
         runtime_mainline = attach_pit_stock_turnover_concentration(
             runtime_mainline, pit_stock_turnover
@@ -1203,13 +1292,21 @@ def main():
                     ascending=[False,False,False,False,False])
     # Load explicitly certified PIT archives when configured. Ordinary
     # forward/retrieval-time archives are never upgraded into historical PIT.
-    m4_pit_factor_snapshot, m4_pit_factor_audit, m4_pit_snapshot_audit = (
-        build_runtime_m4_pit_snapshot(
-            decision_time=now,
-            input_dir=os.getenv("FHM_M4_PIT_INPUT_DIR", "").strip() or None,
-            coverage_floor=os.getenv("FHM_M4_PIT_COVERAGE_FLOOR", "0.80"),
+    try:
+        m4_pit_factor_snapshot, m4_pit_factor_audit, m4_pit_snapshot_audit = (
+            build_runtime_m4_pit_snapshot(
+                decision_time=now,
+                input_dir=os.getenv("FHM_M4_PIT_INPUT_DIR", "").strip() or None,
+                coverage_floor=os.getenv("FHM_M4_PIT_COVERAGE_FLOOR", "0.80"),
+            )
         )
-    )
+    except Exception as pit_exc:
+        m4_pit_factor_snapshot, m4_pit_factor_audit = pd.DataFrame(), pd.DataFrame()
+        m4_pit_snapshot_audit = {
+            "status": "OPTIONAL_PIT_SKIPPED",
+            "reason": f"{type(pit_exc).__name__}: {str(pit_exc)[:220]}",
+            "historical_pit_eligible": False,
+        }
     m4_pit_factor_snapshot.to_csv(
         OUT/"m4_pit_factor_snapshot.csv", index=False, encoding="utf-8-sig"
     )
@@ -1220,8 +1317,21 @@ def main():
         json.dumps(m4_pit_snapshot_audit, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
+    # Forward current membership/mainline context can enrich live diagnostics,
+    # but remains explicitly non-PIT and cannot authorize an order.
+    if not forward_stock_mainline.empty and {"symbol", "industry_code"}.issubset(forward_stock_mainline.columns):
+        current_codes = forward_stock_mainline[["symbol", "industry_code"]].copy()
+        current_codes["symbol"] = current_codes["symbol"].astype(str).str.zfill(6)
+        current_codes = current_codes.rename(columns={"industry_code": "current_forward_industry_code"})
+        w = w.merge(current_codes, on="symbol", how="left", validate="one_to_one")
+        if "sw_history_industry_code" not in w:
+            w["sw_history_industry_code"] = w["current_forward_industry_code"]
+        else:
+            w["sw_history_industry_code"] = w["sw_history_industry_code"].combine_first(
+                w["current_forward_industry_code"]
+            )
     m5_input = build_m5_diagnostic_input(
-        w, m3, runtime_mainline,
+        w, m3, mainline_mapping_panel,
         pit_factor_snapshot=m4_pit_factor_snapshot,
         decision_time=now,
     )
@@ -1387,16 +1497,11 @@ def main():
     # Keep data blockers separate from unfinished model integration so an empty
     # universe can never be misreported as "no stocks passed the strategy".
     formal_blockers = []
-    if archive_readiness.get("status") != "PIT_READY":
-        formal_blockers.append("HISTORICAL_PIT_ARCHIVE_NOT_READY")
+    # Historical PIT, M3 archives, industry lifecycle history and turnover
+    # concentration are research enrichments. Their absence is recorded in
+    # audits, but does not invalidate a current-quote research result.
     if len(u) == 0:
         formal_blockers.append("LIVE_UNIVERSE_UNAVAILABLE")
-    if len(w) == 0:
-        formal_blockers.append("NO_VALID_STOCK_HISTORY")
-    if m3.get("status") != "READY":
-        formal_blockers.append("M3_NOT_READY:" + str(m3.get("status")))
-    if industry_audit.get("status") != "ready_forward_only":
-        formal_blockers.append("FORWARD_INDUSTRY_SNAPSHOT_NOT_READY:" + str(industry_audit.get("status")))
     # M5 is enforced per strategy/candidate in the four-layer gate above;
     # M6 is an optional prediction sidecar, not a prerequisite of M2->M3->M5->M8.
     # Keep only the independent execution-validation requirement here.
