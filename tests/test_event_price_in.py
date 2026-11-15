@@ -66,7 +66,7 @@ def test_event_price_in_unknown_when_mapping_or_clock_missing():
 
 
 def test_event_price_in_unknown_when_post_session_has_no_valid_return():
-    history = _history([0.0] * 26, start="2026-01-01")
+    history = _history([0.0] * 27, start="2026-01-01")
     history.loc[history.trade_date == pd.Timestamp("2026-02-06"), "industry_return_1d"] = float("nan")
     event = {
         "candidate_id": "event-4",
