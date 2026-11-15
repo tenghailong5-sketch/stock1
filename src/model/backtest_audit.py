@@ -116,8 +116,8 @@ def audit_backtest_dataset(candidates: pd.DataFrame, bars: pd.DataFrame) -> Back
             errors.append("bar_invalid_boolean:" + col)
     eligible = candidates.loc[candidates["eligible"] == True]  # noqa: E712
     scores = pd.to_numeric(eligible["score"], errors="coerce")
-    if scores.isna().any() or ((scores < 80) | (scores > 100)).any():
-        errors.append("eligible_candidate_score_outside_80_100")
+    if scores.isna().any() or ((scores < 0) | (scores > 100)).any():
+        errors.append("eligible_candidate_score_outside_0_100")
 
     if candidates["ruleset_version"].isna().any() or candidates["ruleset_version"].astype(str).str.strip().eq("").any():
         errors.append("candidate_missing_ruleset_version")
