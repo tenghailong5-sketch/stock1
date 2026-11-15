@@ -415,3 +415,18 @@ def test_m8_live_sizing_rejects_boolean_cash_input():
     assert not rows["allowed"].any()
     assert rows["m8_risk_context_complete"].eq(False).all()
     assert rows["m8_sized_quantity"].eq(0).all()
+
+
+def test_m8_live_sizing_does_not_require_quantity_when_cash_is_explicit():
+    watchlist, m5, market, mainline, membership, risk = _inputs()
+    del risk["600000"]["quantity"]
+    rows, _ = build_live_decision_gate_audit(
+        watchlist, m5, market, mainline, membership,
+        decision_time="2026-11-16T10:00:00+08:00",
+        risk_context_by_symbol=risk,
+        minute_confirmation_fetcher=lambda symbol, **kwargs: {
+            "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
+        },
+    )
+    assert rows["allowed"].all()
+    assert rows["m8_sized_quantity"].eq(400).all()
