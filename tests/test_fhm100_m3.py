@@ -355,6 +355,7 @@ def test_m5_maps_only_lineage_valid_pit_factor_snapshot():
         "symbol": "000001", "trade_date": "2026-11-13",
         "available_time": "2026-11-13T08:00:00Z",
         "source_id": "pit.factor_builder", "source_revision": "sha256:abc",
+        "availability_basis": "derived_from_certified_pit_inputs",
         "historical_pit_eligible": True,
         "industry_relative_strength_pct": 91.0,
         "stock_residual_strength_pct": 88.0,
@@ -389,6 +390,7 @@ def test_m5_rejects_future_or_retrieval_only_pit_factor_rows():
         "symbol": "000001", "trade_date": "2026-11-13",
         "available_time": "2026-11-15T00:00:00Z",
         "source_id": "pit.factor_builder", "source_revision": "rev1",
+        "availability_basis": "derived_from_certified_pit_inputs",
         "historical_pit_eligible": True,
         "industry_relative_strength_pct": 99.0,
     }])
