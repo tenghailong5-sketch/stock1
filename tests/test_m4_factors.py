@@ -112,7 +112,7 @@ def test_industry_excess_returns():
 
 def test_build_m4_snapshot_ranks_only_complete_declared_universe():
     dates = pd.bdate_range("2026-01-01", periods=45)
-    available = pd.Timestamp("2026-03-10T08:00:00Z")
+    available = pd.Timestamp("2026-03-10T00:00:00Z")
     symbols = ["000001", "000002"]
     bars_rows, stock_rows = [], []
     for symbol, offset, industry_code in zip(symbols, [0.0, 0.01], ["I1", "I2"]):
