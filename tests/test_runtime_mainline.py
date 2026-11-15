@@ -222,14 +222,25 @@ def test_industry_panel_aborts_remaining_batches_after_initial_transport_outage(
     assert len(calls) == 4
 
 
-def test_cached_market_emotion_uses_archive_only_and_returns_latest_cycle(monkeypatch, tmp_path):
+def test_cached_market_emotion_uses_completed_exchange_sessions_only(monkeypatch, tmp_path):
     dates = pd.bdate_range("2026-01-05", periods=4)
+    # A Saturday provider snapshot must not become the latest market session.
     history = pd.DataFrame({
-        "trade_date": dates,
-        "breadth": [0.20, 0.25, 0.35, 0.62],
-        "limit_up_count": [8, 9, 12, 22],
-        "limit_down_count": [25, 20, 18, 6],
+        "trade_date": list(dates) + [pd.Timestamp("2026-01-10")],
+        "breadth": [0.20, 0.25, 0.35, 0.62, 0.01],
+        "limit_up_count": [8, 9, 12, 22, 0],
+        "limit_down_count": [25, 20, 18, 6, 80],
     })
+    index_dir = tmp_path / "index_daily"
+    index_dir.mkdir()
+    (index_dir / "000001.jsonl").write_text(
+        "\\n".join(json.dumps({
+            "trade_date": day.strftime("%Y-%m-%d"),
+            "close": 3000 + i,
+            "available_time": "2026-01-20T07:00:00Z",
+        }) for i, day in enumerate(dates)) + "\\n",
+        encoding="utf-8",
+    )
     calls = []
     def cached_history(*args, **kwargs):
         calls.append((args, kwargs))
@@ -245,6 +256,9 @@ def test_cached_market_emotion_uses_archive_only_and_returns_latest_cycle(monkey
     assert audit["status"] == "READY_CACHED_RESEARCH_ONLY"
     assert audit["market_cycle"] == "RECOVERY"
     assert latest.iloc[0]["market_cycle"] == "RECOVERY"
+    assert audit["latest_trade_date"] == "2026-01-08"
+    assert audit["market_calendar_latest_trade_date"] == "2026-01-08"
+    assert audit["valid_sessions"] == 4
     assert audit["cache_only"] is True
     assert audit["historical_pit_eligible"] is False
     assert audit["trading_authorization"] is False
