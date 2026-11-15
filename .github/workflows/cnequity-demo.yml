@@ -276,9 +276,24 @@ jobs:
           end = date.fromisoformat(os.environ.get("ACTION_END") or os.environ["BAR_END"])
           config = load_config(os.environ["CNE_CONFIG"])
           run_id = os.environ["GITHUB_RUN_ID"]
-          independent, failed = fetch_corporate_actions_baostock(
-              symbols, start, end, config=config, run_id=run_id,
-          )
+          baostock_error = None
+          try:
+              independent, failed = fetch_corporate_actions_baostock(
+                  symbols, start, end, config=config, run_id=run_id,
+              )
+          except Exception as exc:
+              # A source outage/login deadline is an audit failure, not an empty
+              # successful response. Preserve the failure evidence before the
+              # step exits so the always-run enforcement/artifact steps can
+              # explain exactly why independent verification did not complete.
+              import polars as pl
+              baostock_error = f"{type(exc).__name__}: {exc}"
+              independent = pl.DataFrame(schema={
+                  "symbol": pl.String, "ex_date": pl.Date, "action_type": pl.String,
+                  "cash_dividend": pl.Float64, "bonus_ratio": pl.Float64,
+                  "transfer_ratio": pl.Float64,
+              })
+              failed = list(symbols)
           tdx = load("corporate_actions", symbols=symbols, start=start.isoformat(), end=end.isoformat())
           keys = ["symbol", "ex_date", "action_type"]
           terms = ["cash_dividend", "bonus_ratio", "transfer_ratio"]
@@ -382,6 +397,8 @@ jobs:
               "queried_symbols": sorted(symbols),
               "answered_symbols": sorted(set(symbols) - set(failed)),
               "failed_symbols": sorted(failed),
+              "baostock_error": baostock_error,
+              "baostock_query_status": "completed" if baostock_error is None and not failed else "failed_or_partial",
               "tdx_rows_comparable": len(left),
               "baostock_rows_comparable": len(right),
               "tdx_unsupported_event_rows": tdx_unsupported,
