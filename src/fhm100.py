@@ -1251,6 +1251,7 @@ def main():
       f"- 申万个股-行业主线研究映射：{sw_stock_mainline_audit.get('status')}；覆盖={sw_stock_mainline_audit.get('matched_symbols', 0)}/{sw_stock_mainline_audit.get('active_membership_symbols', 0)}；仅作研究展示，不具备历史PIT或交易授权",
       f"- 公司行为前瞻账本：{corporate_action_audit.get('status')}；候选扫描={corporate_action_audit.get('symbols_checked', 0)}只；新增事件版本={corporate_action_audit.get('rows_appended', 0)}；仅首次观察之后可用，未验证总回报，不参与评分或交易授权",
       f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
+      f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
       f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
       f"- 四层决策门：{decision_gate_audit.get('status')}；检查记录={decision_gate_audit.get('candidate_count', 0)}；15分钟扫描={decision_gate_audit.get('minute_scanned_count', 0)}；准入={decision_gate_audit.get('allowed_count', 0)}；阻断={decision_gate_audit.get('blocked_count', 0)}",
       f"- 正式模型状态：{formal_status}",
