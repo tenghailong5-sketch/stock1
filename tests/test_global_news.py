@@ -95,3 +95,38 @@ def test_global_news_retries_one_rate_limit_and_throttles_topics(monkeypatch):
     assert audit["queries_failed"] == 0
     assert audit["status"] == "READY_CANDIDATES_ONLY"
     assert len(rows) == len(global_news.QUERY_THEMES)
+
+
+
+def test_global_news_retries_two_bounded_rate_limits(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(global_news.time, "sleep", sleeps.append)
+
+    class RateLimitResponse(FakeResponse):
+        status_code = 429
+
+    class RetryTwiceSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, *, params, timeout):
+            self.calls += 1
+            if self.calls <= 2:
+                return RateLimitResponse({})
+            return FakeResponse({"articles": [{
+                "title": "Energy policy update",
+                "url": f"https://example.com/retry-{self.calls}",
+                "domain": "example.com",
+            }]})
+
+    session = RetryTwiceSession()
+    rows, audit = global_news.discover_global_news_candidates(
+        session=session,
+        clock=lambda: datetime(2026, 11, 15, 2, tzinfo=timezone.utc),
+    )
+    assert session.calls == len(global_news.QUERY_THEMES) + 2
+    assert audit["queries_succeeded"] == len(global_news.QUERY_THEMES)
+    assert audit["queries_failed"] == 0
+    assert audit["status"] == "READY_CANDIDATES_ONLY"
+    assert len(rows) == len(global_news.QUERY_THEMES)
+    assert sleeps[:2] == [4.0, 8.0]
