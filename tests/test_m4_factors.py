@@ -264,8 +264,10 @@ def test_residual_strength_matches_r21_formula_without_subtracting_regression_in
         "symbol": ["000001"] * len(dates),
         "industry_code": ["I1"] * len(dates),
         "trade_date": dates,
-        "daily_return": stock_daily,
-        "return_5": [0.02] * len(dates),
+        "pit_total_return_daily_return": stock_daily,
+        "pit_total_return_return_5": [0.02] * len(dates),
+        "pit_total_return_available_time": [available] * len(dates),
+        "corporate_action_status": ["VERIFIED"] * len(dates),
         "available_time": [available] * len(dates),
     })
     market = pd.DataFrame({
@@ -353,8 +355,10 @@ def test_residual_strength_rejects_rank_deficient_market_industry_regression():
         "symbol": ["000001"] * len(dates),
         "industry_code": ["I1"] * len(dates),
         "trade_date": dates,
-        "daily_return": np.linspace(-0.001, 0.003, len(dates)),
-        "return_5": [0.025] * len(dates),
+        "pit_total_return_daily_return": np.linspace(-0.001, 0.003, len(dates)),
+        "pit_total_return_return_5": [0.025] * len(dates),
+        "pit_total_return_available_time": [available] * len(dates),
+        "corporate_action_status": ["VERIFIED"] * len(dates),
         "available_time": [available] * len(dates),
     })
     result = residual_strength(
@@ -511,8 +515,11 @@ def test_residual_strength_returns_only_latest_decision_snapshot():
     stock_daily = 0.2 * market_daily + 0.8 * industry_daily + 0.0001
     stocks = pd.DataFrame({
         "symbol": ["000001"] * len(dates), "industry_code": ["I1"] * len(dates),
-        "trade_date": dates, "daily_return": stock_daily,
-        "return_5": [0.01] * len(dates), "available_time": [available] * len(dates),
+        "trade_date": dates, "pit_total_return_daily_return": stock_daily,
+        "pit_total_return_return_5": [0.01] * len(dates),
+        "pit_total_return_available_time": [available] * len(dates),
+        "corporate_action_status": ["VERIFIED"] * len(dates),
+        "available_time": [available] * len(dates),
     })
     market = pd.DataFrame({
         "trade_date": dates, "market_return": market_daily,
@@ -529,3 +536,31 @@ def test_residual_strength_returns_only_latest_decision_snapshot():
     )
     assert len(result) == 1
     assert pd.Timestamp(result["trade_date"].iloc[0]) == dates[-1]
+
+
+def test_residual_strength_rejects_unverified_corporate_action_series():
+    dates = pd.bdate_range("2026-01-01", periods=45)
+    available = pd.Timestamp("2026-03-10T10:00:00Z")
+    daily = np.sin(np.arange(len(dates)) * 0.2) * 0.001
+    stocks = pd.DataFrame({
+        "symbol": ["000001"] * len(dates), "industry_code": ["I1"] * len(dates),
+        "trade_date": dates, "pit_total_return_daily_return": daily,
+        "pit_total_return_return_5": [0.01] * len(dates),
+        "pit_total_return_available_time": [available] * len(dates),
+        "corporate_action_status": ["PENDING"] * len(dates),
+        "available_time": [available] * len(dates),
+    })
+    market = pd.DataFrame({
+        "trade_date": dates, "market_return": daily * 0.5,
+        "market_return_5": [0.002] * len(dates), "available_time": [available] * len(dates),
+    })
+    industry = pd.DataFrame({
+        "trade_date": dates, "industry_code": ["I1"] * len(dates),
+        "industry_return": daily * 0.3, "industry_return_5": [0.003] * len(dates),
+        "available_time": [available] * len(dates),
+    })
+    result = residual_strength(
+        with_lineage(stocks), with_lineage(market), with_lineage(industry),
+        window=60, min_periods=40, decision_time="2026-03-10T11:00:00Z",
+    )
+    assert result.empty

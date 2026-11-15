@@ -92,8 +92,10 @@ def test_residual_strength_uses_prior_daily_returns_and_audits_stock_pool():
         for j, date in enumerate(dates):
             stock_rows.append({
                 "symbol": symbol, "industry_code": code, "trade_date": date,
-                "daily_return": 0.0002 * (i + 1) + 0.00001 * j,
-                "return_5": 0.015 + i * 0.005,
+                "pit_total_return_daily_return": 0.0002 * (i + 1) + 0.00001 * j,
+                "pit_total_return_return_5": 0.015 + i * 0.005,
+                "pit_total_return_available_time": available,
+                "corporate_action_status": "VERIFIED",
                 "available_time": available,
             })
     stocks = pd.DataFrame(stock_rows)
