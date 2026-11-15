@@ -21,7 +21,7 @@ def datasets():
         "available_time": pd.Timestamp("2026-01-06T15:01:00+08:00"),
         "historical_pit_eligible": True, "source_revision": "bar-r1",
         "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2,
-        "volume": 100000, "suspended": False, "limit_up_locked": False,
+        "volume": 100000, "open_auction_volume": 50000,\n        "open_auction_available_time": pd.Timestamp("2026-01-06T09:30:00+08:00"),\n        "suspended": False, "limit_up_locked": False,
         "limit_down_locked": False, "corporate_actions_resolved": True,
         "universe_complete": True, "delisted_included": True,
     }])
