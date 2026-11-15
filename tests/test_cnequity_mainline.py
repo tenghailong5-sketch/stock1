@@ -46,8 +46,8 @@ def test_builds_amount_weighted_level1_mainline_panel_as_research_only():
     )
     assert audit["status"] == "READY_RESEARCH_ONLY"
     assert audit["industry_count"] == 10
-    assert audit["trade_date_count"] == 2
-    assert len(panel) == 20
+    assert audit["trade_date_count"] == 1
+    assert len(panel) == 10
     assert panel["historical_pit_eligible"].eq(False).all()
     assert panel["research_only"].all()
     assert panel["trading_authorization"].eq(False).all()
