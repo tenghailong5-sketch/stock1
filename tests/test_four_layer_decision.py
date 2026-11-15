@@ -117,28 +117,40 @@ def test_planned_risk_cannot_understate_entry_to_stop_loss():
     assert "planned_risk_understates_gross_stop_risk" in result.reasons
 
 
-def test_live_forward_mode_uses_separate_snapshot_and_turnover_qualification():
+def test_live_forward_mode_requires_snapshot_and_m3_persistence():
     live = industry_permission(
-        "IGNITION", persistence_ready=False, historical_pit_eligible=False,
+        "IGNITION", persistence_ready=True, historical_pit_eligible=False,
         stock_turnover_pit_status="not_ready", decision_mode="live_forward",
         industry_live_data_eligible=True, stock_turnover_live_status="ready",
     )
     assert live.allow_new_entries
-    assert not industry_permission(
+
+    # A fresh snapshot cannot bypass M3's industry-persistence requirement.
+    not_persistent = industry_permission(
         "IGNITION", persistence_ready=False, historical_pit_eligible=False,
         stock_turnover_pit_status="not_ready", decision_mode="live_forward",
-        industry_live_data_eligible=False, stock_turnover_live_status="ready",
-    ).allow_new_entries
-    # Missing stock-level turnover concentration is diagnostic in live mode,
-    # not an additional hard gate once the industry snapshot is valid.
+        industry_live_data_eligible=True, stock_turnover_live_status="ready",
+    )
+    assert not not_persistent.allow_new_entries
+    assert not_persistent.reason == "industry_persistence_not_ready"
+
+    # Missing stock-level turnover concentration remains diagnostic in live
+    # mode once the live snapshot and industry persistence are both ready.
     assert industry_permission(
-        "IGNITION", persistence_ready=False, historical_pit_eligible=False,
+        "IGNITION", persistence_ready=True, historical_pit_eligible=False,
         stock_turnover_pit_status="not_ready", decision_mode="live_forward",
         industry_live_data_eligible=True, stock_turnover_live_status="not_ready",
     ).allow_new_entries
+
+    assert not industry_permission(
+        "IGNITION", persistence_ready=True, historical_pit_eligible=False,
+        stock_turnover_pit_status="not_ready", decision_mode="live_forward",
+        industry_live_data_eligible=False, stock_turnover_live_status="ready",
+    ).allow_new_entries
+
     # Retrieval-time live evidence must never satisfy the historical path.
     assert not industry_permission(
-        "IGNITION", persistence_ready=False, historical_pit_eligible=False,
+        "IGNITION", persistence_ready=True, historical_pit_eligible=False,
         stock_turnover_pit_status="ready", decision_mode="historical_pit",
         industry_live_data_eligible=True, stock_turnover_live_status="ready",
     ).allow_new_entries
