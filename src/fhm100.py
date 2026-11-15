@@ -1020,26 +1020,29 @@ def main():
     u = pd.DataFrame()
     history_universe = pd.DataFrame()
     try:
-        # Fetch and retain the complete live A-share quote universe. Only the
-        # deeper per-symbol history requests use the bounded research pool (500 by default).
+        # The full live A-share quote universe is the default model input.
+        # Deep history is an optional enrichment lane and is OFF by default.
         u=universe()
         spot_snapshot_observed_at = datetime.now(timezone.utc)
         OUT.mkdir(exist_ok=True)
         u.to_csv(OUT/"market_snapshot.csv", index=False, encoding="utf-8-sig")
-        # Bounded first-pass research pool; set FHM_HISTORY_SCAN_MAX_SYMBOLS=all
-        # only when explicit full-market history retrieval is intended.
-        # Scan inclusion never grants M5 eligibility or buy authorization.
-        scan_limit_raw = os.getenv("FHM_HISTORY_SCAN_MAX_SYMBOLS", "500").strip().lower()
-        if scan_limit_raw in {"all", "full", "unlimited", "0"}:
+        scan_limit_raw = os.getenv("FHM_HISTORY_SCAN_MAX_SYMBOLS", "off").strip().lower()
+        history_disabled = scan_limit_raw in {"off", "none", "skip", "false", "0", ""}
+        if history_disabled:
+            scan_limit = 0
+            history_universe = u.iloc[0:0].copy()
+        elif scan_limit_raw in {"all", "full", "unlimited"}:
             scan_limit = None
+            history_universe = select_research_history_universe(u, max_symbols=None)
         else:
             scan_limit = int(scan_limit_raw)
-        history_universe = select_research_history_universe(u, max_symbols=scan_limit)
+            history_universe = select_research_history_universe(u, max_symbols=scan_limit)
         history_pool_audit = {
-            "selection_mode": "liquidity_anchor_plus_active_momentum_and_market_fill",
+            "selection_mode": "current_quotes_only" if history_disabled else "optional_history_enrichment",
+            "history_enabled": not history_disabled,
             "primary_history_symbols": int(len(history_universe)),
             "history_scan_symbols": int(len(history_universe)),
-            "history_scan_limit": "ALL" if scan_limit is None else int(scan_limit),
+            "history_scan_limit": "OFF" if history_disabled else ("ALL" if scan_limit is None else int(scan_limit)),
             "full_market_history_scan": bool(len(history_universe) == len(u)),
             "financial_names_excluded_from_research_pool": False,
             "daily_gain_chase_cap_pct": None,
