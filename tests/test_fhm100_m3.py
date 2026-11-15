@@ -417,7 +417,7 @@ def test_m5_pit_liquidity_gate_overrides_live_watchlist_amount():
         watchlist, {"market_state": "RISK_ON"}, pit_factor_snapshot=snapshot,
         decision_time="2026-11-14T09:00:00+08:00",
     )
-    assert frame.loc[0, "amount_ma20_ge_100m"] is False
+    assert bool(frame.loc[0, "amount_ma20_ge_100m"]) is False
     assert frame.loc[0, "m5_pit_factor_provenance"] == "verified_pit_snapshot"
 
 
