@@ -236,3 +236,17 @@ def test_market_cycle_uses_validated_board_failure_and_promotion_rates():
     assert result.iloc[-1].cycle_reason == "board_failure_or_promotion_collapse"
     assert result.iloc[-1].market_cycle_data_basis == "breadth_limit_and_board_metrics"
     assert result.iloc[0].market_cycle_data_basis == "breadth_and_limit_counts_only"
+
+
+
+def test_market_heat_uses_recent_limit_up_percentile_not_fixed_count():
+    frame = pd.DataFrame({
+        "trade_date": pd.date_range("2026-01-01", periods=8),
+        "breadth": [0.30, 0.32, 0.34, 0.35, 0.40, 0.45, 0.55, 0.72],
+        "limit_up_count": [18, 20, 19, 21, 22, 23, 24, 27],
+        "limit_down_count": [12, 10, 9, 8, 7, 6, 4, 2],
+    })
+    out = classify_market_cycle(frame)
+    # 27 is below the old fixed 30-count cutoff but is a recent-period high.
+    assert out.iloc[-1].limit_up_rolling_percentile == 1.0
+    assert out.iloc[-1].market_cycle == "HEAT"
