@@ -24,6 +24,7 @@ from src.model.mainline_signal_gates import (
 from src.model.market_cycle import classify_market_cycle
 from src.model.m3_assembler import assemble_market_emotion_history
 from src.model.policy_catalysts import visible_policy_events
+from src.model.catalyst_mapping import map_candidate_sectors
 from src.providers.eastmoney_market_emotion import fetch_market_emotion_pool_history
 from src.providers.gov_policy import discover_gov_policy_candidates, append_policy_candidates
 from src.providers.global_news import (
@@ -284,10 +285,11 @@ def scan_runtime_mainlines(
         raise ValueError("decision_time must be timezone-aware")
     root = Path(archive_root)
     discovery_audit = {"status": "UNAVAILABLE", "reason": "not attempted"}
+    policy_candidates = []
     try:
-        candidates, discovery_audit = discover_gov_policy_candidates()
+        policy_candidates, discovery_audit = discover_gov_policy_candidates()
         discovery_audit["new_candidates_archived"] = append_policy_candidates(
-            policy_candidate_path, candidates
+            policy_candidate_path, policy_candidates
         )
     except Exception as exc:
         discovery_audit = {
@@ -297,6 +299,7 @@ def scan_runtime_mainlines(
             "formal_stock_score_eligible": False,
         }
     global_news_audit = {"status": "UNAVAILABLE", "reason": "not attempted"}
+    news_candidates = []
     try:
         news_candidates, global_news_audit = discover_global_news_candidates()
         global_news_audit["new_candidates_archived"] = append_global_news_candidates(
@@ -372,6 +375,10 @@ def scan_runtime_mainlines(
         evidence = gate_ignition_labels(evidence)
         latest = evidence.trade_date.max()
         latest_rows = evidence.loc[evidence.trade_date.eq(latest)].copy()
+        sector_candidates, sector_mapping_audit = map_candidate_sectors(
+            [*policy_candidates, *news_candidates],
+            latest_rows.get("industry_name", pd.Series(dtype=str)).dropna().astype(str).unique(),
+        )
         audit = {
             "status": "READY_DIAGNOSTIC_ONLY",
             "industry": industry_audit,
@@ -388,6 +395,11 @@ def scan_runtime_mainlines(
                 "archive_path": str(global_news_candidate_path),
                 "candidate_only": True,
                 "no_unreviewed_news_changes_stock_scores": True,
+            },
+            "catalyst_sector_candidates": {
+                **sector_mapping_audit,
+                "candidates": sector_candidates,
+                "policy_and_global_news_are_review_only": True,
             },
             "latest_trade_date": latest.strftime("%Y-%m-%d"),
             "latest_industry_rows": int(len(latest_rows)),
