@@ -46,6 +46,8 @@ def attach_forward_industry_flow_changes(
     trade_date = dates.max()
     if getattr(trade_date, "tzinfo", None) is not None:
         trade_date = trade_date.tz_localize(None)
+    trade_date = pd.Timestamp(trade_date).normalize()
+    trade_date_key = trade_date.strftime("%Y-%m-%d")
     shares = pd.to_numeric(out["turnover_share"], errors="coerce")
     snapshot = pd.DataFrame({
         "trade_date": dates.dt.strftime("%Y-%m-%d"),
@@ -55,7 +57,7 @@ def attach_forward_industry_flow_changes(
     # Archive only the latest completed session, never relabel older history
     # with today's retrieval timestamp.
     snapshot = snapshot.loc[
-        snapshot["trade_date"].eq(trade_date.strftime("%Y-%m-%d"))
+        snapshot["trade_date"].eq(trade_date_key)
     ].copy()
     snapshot = snapshot.loc[
         snapshot["industry_name"].ne("")
@@ -65,7 +67,7 @@ def attach_forward_industry_flow_changes(
     eligible = (
         local.weekday() < 5
         and local.time() >= pd.Timestamp("15:05").time()
-        and trade_date.date() == local.date()
+        and trade_date_key == local.strftime("%Y-%m-%d")
         and not snapshot.empty
     )
     existing = []
@@ -85,7 +87,7 @@ def attach_forward_industry_flow_changes(
         snapshot["availability_basis"] = "retrieval_time_only"
         snapshot["historical_pit_eligible"] = False
         history = pd.concat([history, snapshot], ignore_index=True)
-        history["trade_date"] = pd.to_datetime(history["trade_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+        history["trade_date"] = pd.to_datetime(history["trade_date"], errors="coerce").dt.normalize().dt.strftime("%Y-%m-%d")
         history["captured_at"] = pd.to_datetime(history["captured_at"], errors="coerce", utc=True)
         history = history.dropna(subset=["trade_date", "captured_at"])
         history = history.sort_values("captured_at").drop_duplicates(
@@ -115,7 +117,7 @@ def attach_forward_industry_flow_changes(
     latest_rows = []
     for name, group in history.groupby("industry_name", sort=False):
         group = group.sort_values("trade_date")
-        current = group.loc[group.trade_date.eq(trade_date)]
+        current = group.loc[group.trade_date.dt.strftime("%Y-%m-%d").eq(trade_date_key)]
         if current.empty:
             continue
         row = current.iloc[-1]
@@ -139,6 +141,10 @@ def attach_forward_industry_flow_changes(
             c for c in ("turnover_share_change_1d", "turnover_share_change_3d",
                         "industry_flow_observation_count") if c in out
         ]).merge(changes, on="industry_name", how="left", validate="many_to_one")
+    else:
+        out["turnover_share_change_1d"] = pd.NA
+        out["turnover_share_change_3d"] = pd.NA
+        out["industry_flow_observation_count"] = 0
     ready = bool(
         not changes.empty
         and pd.to_numeric(changes.get("turnover_share_change_3d"), errors="coerce").notna().any()
