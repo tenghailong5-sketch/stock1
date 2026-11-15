@@ -166,6 +166,10 @@ def evaluate_trade_decision(
         reasons.append("M5_score_missing_or_out_of_range")
     if entry_ready is not True:
         reasons.append("entry_not_confirmed")
+    if not isinstance(same_industry_or_corr_gt_06, bool):
+        reasons.append("invalid_industry_correlation_flag")
+    elif same_industry_or_corr_gt_06:
+        reasons.append("same_industry_or_high_correlation_exposure")
     if isinstance(existing_position_count, bool) or not isinstance(existing_position_count, int) or existing_position_count < 0:
         reasons.append("invalid_existing_position_count")
     if not _finite(entry_price) or float(entry_price) <= 0:
