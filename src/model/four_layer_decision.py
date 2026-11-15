@@ -94,7 +94,12 @@ def industry_permission(
     else:
         return IndustryPermission("BLOCKED", False, "invalid_decision_mode")
     if mainline_phase == "IGNITION":
-        return IndustryPermission("ENTRY_ALLOWED", True, "pit_verified_mainline_ignition")
+        reason = (
+            "live_forward_mainline_ignition"
+            if decision_mode == "live_forward"
+            else "pit_verified_mainline_ignition"
+        )
+        return IndustryPermission("ENTRY_ALLOWED", True, reason)
     if mainline_phase == "PEAK":
         return IndustryPermission("HOLD_ONLY", False, "mainline_peak_no_fresh_entry")
     if mainline_phase == "DECAY":
