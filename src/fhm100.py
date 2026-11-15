@@ -1301,7 +1301,10 @@ def main():
 
     # Execute M2 -> M3 -> M5 -> M8 on every strategy row. Missing PIT,
     # factor, 15-minute or portfolio-risk inputs remain explicit blockers.
-    minute_limit_raw = os.getenv("FHM_15M_SCAN_LIMIT", "all").strip().lower()
+    # Bound the expensive live 15m confirmation pass by default. The full
+    # M5 candidate pool remains in diagnostics; operators can opt into all
+    # candidates with FHM_15M_SCAN_LIMIT=all.
+    minute_limit_raw = os.getenv("FHM_15M_SCAN_LIMIT", "80").strip().lower()
     minute_scan_limit = (
         None if minute_limit_raw in {"all", "full", "unlimited", "0"}
         else int(minute_limit_raw)
