@@ -29,9 +29,10 @@ jobs:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_API_BASE_URL: ${{ secrets.AI_API_BASE_URL }}
           AI_MODEL: ${{ secrets.AI_MODEL }}
-          FHM_HISTORY_SCAN_MAX_SYMBOLS: "off"
-          # Enable the bounded 150-day industry lifecycle + emotion + policy
-          # research pass; deep per-stock history remains disabled above.
+          FHM_HISTORY_SCAN_MAX_SYMBOLS: "80"
+          # Keep the full-market spot scan, but enrich only 80 liquidity/momentum-ranked
+          # names with daily OHLC for live diagnostics. Retrieval-time bars remain
+          # non-PIT and cannot unlock formal M5/backtest gates.
           FHM_CURRENT_SNAPSHOT_MODE: "0"
           FHM_RISK_CONTEXT_JSON: ${{ secrets.FHM_RISK_CONTEXT_JSON }}
         run: python -m src.fhm100
