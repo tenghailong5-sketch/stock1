@@ -188,6 +188,7 @@ def test_quote_only_fallback_ranks_when_industry_context_is_unavailable():
         allow_quote_only_fallback=True,
     )
     assert audit["ranked_count"] == 3
+    assert audit["status"] == "READY_QUOTE_ONLY_FALLBACK"
     assert audit["mainline_context_ready_count"] == 0
     assert ranked.research_rank_status.eq("RANKED_QUOTE_ONLY_NO_INDUSTRY").all()
     shortlist, _, shortlist_audit = build_final_candidate_shortlist(ranked, max_candidates=3)
