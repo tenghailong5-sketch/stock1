@@ -53,11 +53,12 @@ def run_portfolio_backtest(
     bars: pd.DataFrame,
     *,
     initial_cash: float = 100000.0,
-    per_trade_risk_limit: float = 2000.0,
-    portfolio_risk_limit: float = 3000.0,
-    max_positions: int = 2,
     max_participation: float = 0.05,
     costs: ExecutionCosts = ExecutionCosts(),
+    _state: dict[str, Any] | None = None,
+    _date_start: date | None = None,
+    _date_end: date | None = None,
+    _include_state: bool = False,
 ) -> dict[str, Any]:
     """Run close-signal/next-session-open entries with T+1 stop exits.
 
@@ -76,7 +77,7 @@ def run_portfolio_backtest(
     work["_score"] = pd.to_numeric(work["score"], errors="coerce")
     bars_work = bars.copy()
     bars_work["_date"] = bars_work["trade_date"].map(_as_date)
-    bars_work["_volume"] = bars_work["volume"].map(_volume)
+    bars_work["_volume"] = bars_work["open_auction_volume"].map(_volume)
     dates = sorted(bars_work["_date"].unique())
     bars_by_day = {
         day: {str(row["symbol"]): row for row in group.to_dict(orient="records")}
@@ -87,6 +88,9 @@ def run_portfolio_backtest(
     for row in work.to_dict(orient="records"):
         if row["eligible"] is not True:
             continue
+        if row["m8_trade_allowed"] is not True:
+            skipped.append({"symbol": row["symbol"], "reason": "m8_trade_not_allowed"})
+            continue
         decision_day = row["_decision_date"]
         next_index = next((i for i, day in enumerate(dates) if day > decision_day), None)
         if next_index is None:
@@ -94,14 +98,42 @@ def run_portfolio_backtest(
             continue
         candidates_by_entry_day.setdefault(dates[next_index], []).append(row)
 
-    cash = float(initial_cash)
-    positions: dict[str, dict[str, Any]] = {}
-    fills: list[dict[str, Any]] = []
-    trades: list[dict[str, Any]] = []
-    daily_equity: list[dict[str, Any]] = []
-    realized_pnl = 0.0
+    # Signals entering on the same session share one conservative risk pool.
+    # Historical M8 budgets predate these same-session entries; otherwise each
+    # candidate could spend the full snapshot independently.
+    entry_day_risk_budget: dict[date, float] = {}
+    for entry_day, rows in candidates_by_entry_day.items():
+        effective_budgets = [
+            float(row["available_risk_budget"]) * float(row["market_risk_scale"])
+            for row in rows
+        ]
+        if effective_budgets:
+            entry_day_risk_budget[entry_day] = min(effective_budgets)
 
-    for day in dates:
+    if _state is None:
+        cash = float(initial_cash)
+        positions: dict[str, dict[str, Any]] = {}
+        fills: list[dict[str, Any]] = []
+        trades: list[dict[str, Any]] = []
+        daily_equity: list[dict[str, Any]] = []
+        realized_pnl = 0.0
+        completed_through = None
+    else:
+        cash = float(_state["cash"])
+        positions = {str(symbol): {**position, "entry_date": _as_date(position["entry_date"])}
+                     for symbol, position in _state["positions"].items()}
+        fills = list(_state["fills"])
+        trades = list(_state["trades"])
+        skipped = list(_state["skipped"])
+        daily_equity = list(_state["daily_equity"])
+        realized_pnl = float(_state["realized_pnl"])
+        completed_through = _as_date(_state["completed_through"]) if _state.get("completed_through") else None
+
+    simulation_dates = [day for day in dates
+                        if (_date_start is None or day >= _date_start)
+                        and (_date_end is None or day <= _date_end)
+                        and (completed_through is None or day > completed_through)]
+    for day in simulation_dates:
         day_bars = bars_by_day[day]
 
         # 1) Process protective stops on positions carried into this session.
@@ -110,15 +142,11 @@ def run_portfolio_backtest(
             bar = day_bars.get(symbol)
             if bar is None:
                 continue
-            was_already_triggered = position.get("stop_triggered", False)
-            stop_hit_today = float(bar["low"]) <= position["stop_price"]
-            if not was_already_triggered and not stop_hit_today:
+            if not position.get("stop_triggered", False):
                 continue
-            # Once triggered, an unfilled protective stop remains a pending
-            # market exit. Retry on later sessions even if price rebounds.
-            position["stop_triggered"] = True
-            reference = (float(bar["open"]) if was_already_triggered
-                         else min(float(bar["open"]), position["stop_price"]))
+            # A daily low is only known after the session closes. A stop
+            # triggered by that low can execute no earlier than next session.
+            reference = float(bar["open"])
             result = simulate_daily_fill(
                 side="sell", quantity=position["shares"], reference_price=reference,
                 trade_date=day, entry_date=position["entry_date"],
@@ -173,11 +201,12 @@ def run_portfolio_backtest(
                 skipped.append({"symbol": symbol, "date": day.isoformat(), "reason": "stop_not_below_entry"})
                 continue
             portfolio_risk = sum(_risk(p, costs) for p in positions.values())
+            remaining_risk_budget = entry_day_risk_budget.get(day, 0.0)
             sizing = size_long_position(
                 entry_price=expected_entry, stop_price=float(stop), available_cash=cash,
                 open_position_count=len(positions), open_portfolio_risk=portfolio_risk,
-                per_trade_risk_limit=per_trade_risk_limit,
-                portfolio_risk_limit=portfolio_risk_limit, max_positions=max_positions,
+                available_risk_budget=remaining_risk_budget,
+                market_risk_scale=1.0,
                 estimated_round_trip_cost_bps=(2 * costs.slippage_bps + 2 * costs.commission_bps
                                                 + costs.sell_stamp_duty_bps + 2 * costs.transfer_fee_bps),
                 estimated_round_trip_fixed_cost=2 * costs.minimum_commission,
@@ -209,6 +238,11 @@ def run_portfolio_backtest(
                 "entry_date": day, "stop_price": float(stop),
                 "buy_cost": result.total_cost, "last_close": float(bar["close"]),
             }
+            # Consume risk for shares actually filled; the M3 multiplier was
+            # applied once when initializing the shared daily budget.
+            entry_day_risk_budget[day] = max(
+                0.0, remaining_risk_budget - _risk(positions[symbol], costs)
+            )
 
         # 3) Mark remaining positions to the latest available close.
         market_value = 0.0
@@ -216,6 +250,10 @@ def run_portfolio_backtest(
             bar = day_bars.get(symbol)
             if bar is not None:
                 position["last_close"] = float(bar["close"])
+                # Today's low is known only after the opening execution window.
+                # Queue a stop for the next session, never today's open.
+                if float(bar["low"]) <= position["stop_price"]:
+                    position["stop_triggered"] = True
             market_value += position["shares"] * position["last_close"]
         daily_equity.append({
             "date": day.isoformat(), "cash": round(cash, 2),
@@ -236,7 +274,7 @@ def run_portfolio_backtest(
         if (str(trade["symbol"]), str(trade["entry_date"])) not in open_entry_keys
     ]
     metrics = calculate_backtest_metrics(daily_equity, completed_trades, float(initial_cash)) if daily_equity else None
-    return {
+    output = {
         "audit_passed": True,
         "initial_cash": round(float(initial_cash), 2),
         "ending_cash": round(cash, 2),
@@ -260,3 +298,14 @@ def run_portfolio_backtest(
         "daily_equity": daily_equity,
         "metrics": metrics,
     }
+    if _include_state:
+        output["_state"] = {
+            "cash": cash,
+            "positions": {symbol: {**position, "entry_date": position["entry_date"].isoformat()}
+                          for symbol, position in positions.items()},
+            "fills": fills, "trades": trades, "skipped": skipped,
+            "daily_equity": daily_equity, "realized_pnl": realized_pnl,
+            "completed_through": simulation_dates[-1].isoformat() if simulation_dates else
+                                 (completed_through.isoformat() if completed_through else None),
+        }
+    return output

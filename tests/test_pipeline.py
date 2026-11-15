@@ -52,14 +52,14 @@ def test_m5_b_requires_next_day_factor_and_does_not_infer_it():
     assert result["B"]["score"] == pytest.approx(90)
 
 
-def test_m5_neutral_market_raises_floor_to_85():
+def test_m5_neutral_market_does_not_restore_a_fixed_score_floor():
     row = make_row("NEUTRAL")
     for key in A_WEIGHTS:
-        row[key] = 84.99
+        row[key] = 42.0
     result = by_strategy(evaluate_row(row))
-    assert not result["A"]["eligible"]
-    assert result["A"]["minimum_score"] == 85.0
-    assert "below_minimum_score:85" in result["A"]["reasons"]
+    assert result["A"]["eligible"]
+    assert result["A"]["score"] == pytest.approx(42.0)
+    assert result["A"]["minimum_score"] is None
 
 
 def test_m5_risk_off_rejects_even_high_factor_scores():

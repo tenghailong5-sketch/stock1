@@ -128,21 +128,21 @@ def test_non_finite_factor_values_are_rejected():
             weighted_score(A_WEIGHTS, values)
 
 
-def test_candidate_floor_is_hard_and_cannot_be_configured_below_80():
+def test_candidate_floor_is_optional_and_can_be_calibrated_from_zero_to_100():
     from src.model.scoring import qualify_candidate
     gates = all_true([
         "industry_top_30pct", "stock_residual_top_20pct", "amount_ma20_ge_100m",
         "breakout_or_confirmed_retest", "no_high_volume_stall_or_repeated_rejection",
     ])
     result = score_a(factors(A_WEIGHTS), gates, market_state=MarketState.RISK_ON)
-    assert qualify_candidate(result).eligible
-    below = result.__class__(result.strategy, 79.99, True, (), result.stage)
-    rejected = qualify_candidate(below)
+    below = result.__class__(result.strategy, 42.0, True, (), result.stage)
+    assert qualify_candidate(below).eligible
+    assert qualify_candidate(below, minimum_score=40).eligible
+    rejected = qualify_candidate(below, minimum_score=50)
     assert not rejected.eligible
-    assert rejected.score == pytest.approx(79.99)
-    assert "below_minimum_score:80" in rejected.reasons
+    assert "below_minimum_score:50" in rejected.reasons
     with pytest.raises(ValueError):
-        qualify_candidate(result, minimum_score=79)
+        qualify_candidate(result, minimum_score=101)
 
 
 def test_candidate_floor_never_overrides_failed_hard_gate():

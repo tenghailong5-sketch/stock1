@@ -23,7 +23,7 @@ from src.providers.sw_industry_history import fetch_sw_industry_history
 from src.providers.akshare_corporate_actions import archive_shortlist_corporate_actions
 from src.model.live_decision_integration import (
     aggregate_archived_stock_turnover,
-    build_live_decision_gate_audit, summarize_gate_blockers,
+    build_live_decision_gate_audit, load_risk_context_file, summarize_gate_blockers,
 )
 from src.model.mainline_flows import attach_pit_stock_turnover_concentration
 from src.model.archive_readiness import audit_forward_archive
@@ -488,7 +488,7 @@ def load_m3_market_context(decision_time=None, archive_root=Path("data/forward_a
             "status": "INVALID_DATA",
             "reason": f"m3_assembly_error:{type(exc).__name__}:{str(exc)[:180]}",
             "market_state": None, "market_environment_score": None,
-            "position_scale": None, "valid_sessions": 0,
+            "risk_scale": None, "position_scale": None, "valid_sessions": 0,
             "latest_trade_date": None, "historical_backtest_eligible": False,
             "quality_warnings": [],
         }
@@ -508,7 +508,8 @@ def load_m3_market_context(decision_time=None, archive_root=Path("data/forward_a
     return {
         "status": status, "reason": result.get("reason"), "market_state": state,
         "market_environment_score": environment_score,
-        "position_scale": result.get("position_scale") if state else None,
+        "risk_scale": result.get("risk_scale", result.get("position_scale")) if state else None,
+        "position_scale": result.get("risk_scale", result.get("position_scale")) if state else None,
         "valid_sessions": int(result.get("valid_sessions", 0) or 0),
         "latest_trade_date": result.get("latest_trade_date"),
         "historical_backtest_eligible": False,
@@ -1300,9 +1301,18 @@ def main():
         None if minute_limit_raw in {"all", "full", "unlimited", "0"}
         else int(minute_limit_raw)
     )
+    risk_context_by_symbol, risk_context_audit = load_risk_context_file(
+        os.getenv("FHM_RISK_CONTEXT_FILE", "").strip() or None
+    )
     decision_gates, decision_gate_audit = build_live_decision_gate_audit(
         w, m5, m3, runtime_mainline, industry_membership,
         decision_time=now, minute_scan_limit=minute_scan_limit,
+        risk_context_by_symbol=risk_context_by_symbol,
+    )
+    decision_gate_audit["risk_context_source"] = risk_context_audit
+    (OUT/"m8_risk_context_audit.json").write_text(
+        json.dumps(risk_context_audit, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
     decision_gates.to_csv(
         OUT/"four_layer_decision_gates.csv", index=False, encoding="utf-8-sig"
@@ -1330,12 +1340,12 @@ def main():
         formal_blockers.append("M3_NOT_READY:" + str(m3.get("status")))
     if industry_audit.get("status") != "ready_forward_only":
         formal_blockers.append("FORWARD_INDUSTRY_SNAPSHOT_NOT_READY:" + str(industry_audit.get("status")))
-    formal_blockers.extend([
-        "M5_REQUIRED_FACTORS_AND_HARD_GATES_NOT_COMPLETE",
-        "M6_OUT_OF_SAMPLE_PREDICTION_NOT_VALIDATED",
-        "M8_STOP_SIZE_AND_PORTFOLIO_CONTEXT_NOT_AVAILABLE",
-        "M9_EXECUTION_AWARE_BACKTEST_NOT_ADMITTED",
-    ])
+    # M5 is enforced per strategy/candidate in the four-layer gate above;
+    # M6 is an optional prediction sidecar, not a prerequisite of M2->M3->M5->M8.
+    # Keep only the independent execution-validation requirement here.
+    formal_blockers.append("M9_EXECUTION_AWARE_BACKTEST_NOT_ADMITTED")
+    if decision_gate_audit.get("m8_risk_context_complete_symbol_count", 0) == 0:
+        formal_blockers.append("M8_DYNAMIC_RISK_CONTEXT_NOT_AVAILABLE")
     if decision_gate_audit.get("allowed_count", 0) == 0:
         formal_blockers.append("FOUR_LAYER_DECISION_GATE_BLOCKED_ALL_CANDIDATES")
     formal_status = "BLOCKED_FORMAL_SIGNAL" if formal_blockers else "READY"

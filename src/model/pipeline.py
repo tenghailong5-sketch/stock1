@@ -116,11 +116,10 @@ def evaluate_row(row: Mapping[str, Any], *, stage: str = "close") -> list[dict[s
         else:
             result = scorer(factors, gates, market_state=state, stage=default_stage)
 
-        # R1 M3 cooldown raises the floor in neutral markets. RISK_OFF is
-        # independently rejected by the strategy scorers.
-        floor = 85.0 if state == MarketState.NEUTRAL else 80.0
-        result = qualify_candidate(result, minimum_score=floor)
-        output.append(_result_dict(symbol, strategy, result, floor))
+        # No fixed score floor: rank and historical calibration determine
+        # candidate priority; structural/data gates remain independently enforced.
+        result = qualify_candidate(result, minimum_score=None)
+        output.append(_result_dict(symbol, strategy, result, None))
     return output
 
 

@@ -268,6 +268,7 @@ def assemble_m3_history(
             market_environment_score(latest)
             if state in {"RISK_ON", "NEUTRAL", "RISK_OFF"} else None
         ),
+        "risk_scale": None if pd.isna(latest.risk_scale) else float(latest.risk_scale),
         "position_scale": None if pd.isna(latest.position_scale) else float(latest.position_scale),
         "history": scored,
         "historical_backtest_eligible": False,

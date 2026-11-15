@@ -29,6 +29,7 @@ def _inputs():
         "entry_price": 20.0, "stop_price": 19.0, "quantity": 500,
         "planned_risk": 600.0, "reward_risk": 2.0, "minimum_reward_risk": 1.5,
         "existing_portfolio_risk": 0.0, "existing_position_count": 0,
+        "available_risk_budget": 1000.0,
         "same_industry_or_corr_gt_06": False,
     }}
     return watchlist, m5, market, mainline, membership, risk
@@ -187,7 +188,10 @@ def test_15m_confirmation_scan_supports_all_candidates_without_fixed_cap():
         return {"status": "CHECKED", "entry_ready": False, "reason": "test"}
 
     rows, audit = build_live_decision_gate_audit(
-        watchlist, pd.DataFrame(), {"status": "UNKNOWN"}, pd.DataFrame(),
+        watchlist, pd.DataFrame([
+            {"symbol": symbol, "strategy": "A", "score": 90.0, "eligible": True}
+            for symbol in ("600000", "000001", "300001")
+        ]), {"status": "UNKNOWN"}, pd.DataFrame(),
         pd.DataFrame(), decision_time="2026-11-14T09:00:00+08:00",
         minute_confirmation_fetcher=fetcher, minute_scan_limit=None,
     )
@@ -197,6 +201,31 @@ def test_15m_confirmation_scan_supports_all_candidates_without_fixed_cap():
     assert audit["minute_scan_limit"] == "ALL"
 
 
+
+
+def test_15m_scan_skips_symbols_without_any_m5_eligible_strategy():
+    watchlist = pd.DataFrame([
+        {"代码": "600000", "当日成交额": 1e9},
+        {"代码": "000001", "当日成交额": 8e8},
+    ])
+    m5 = pd.DataFrame([
+        {"symbol": "600000", "strategy": "A", "score": 90.0, "eligible": True},
+        {"symbol": "000001", "strategy": "A", "score": 70.0, "eligible": False},
+    ])
+    seen = []
+    rows, audit = build_live_decision_gate_audit(
+        watchlist, m5, {"status": "UNKNOWN"}, pd.DataFrame(), pd.DataFrame(),
+        decision_time="2026-11-14T09:00:00+08:00",
+        minute_confirmation_fetcher=lambda symbol, **kwargs: (
+            seen.append(symbol) or {"status": "CHECKED", "entry_ready": False, "reason": "test"}
+        ),
+        minute_scan_limit=None,
+    )
+    assert seen == ["600000"]
+    assert audit["m5_eligible_symbol_count"] == 1
+    assert audit["minute_scanned_count"] == 1
+    blocked = rows.loc[rows["symbol"] == "000001"]
+    assert blocked["minute_reason"].eq("m5_strategy_not_eligible").all()
 
 def test_15m_full_universe_uses_bounded_parallel_workers(monkeypatch):
     from src.model import live_decision_integration as integration
@@ -221,8 +250,12 @@ def test_15m_full_universe_uses_bounded_parallel_workers(monkeypatch):
         {"代码": "600000", "当日成交额": 100},
         {"代码": "000001", "当日成交额": 90},
     ])
+    m5 = pd.DataFrame([
+        {"symbol": "600000", "strategy": "A", "eligible": True, "score": 72},
+        {"symbol": "000001", "strategy": "A", "eligible": True, "score": 68},
+    ])
     rows, audit = integration.build_live_decision_gate_audit(
-        watchlist, pd.DataFrame(), {"status": "UNKNOWN"},
+        watchlist, m5, {"status": "UNKNOWN"},
         pd.DataFrame(), pd.DataFrame(),
         decision_time="2026-11-14T09:00:00+08:00",
         minute_confirmation_fetcher=lambda symbol, **kwargs: {
@@ -251,3 +284,23 @@ def test_missing_m8_plan_does_not_substitute_latest_quote_as_entry_price():
     assert audit["m8_risk_context_complete_symbol_count"] == 0
     assert audit["m8_risk_context_missing_symbol_count"] == 1
 
+
+
+def test_operator_risk_context_file_loads_explicit_per_symbol_plan(tmp_path):
+    import json
+    from src.model.live_decision_integration import load_risk_context_file
+
+    path = tmp_path / "risk.json"
+    path.write_text(json.dumps({
+        "600000": {
+            "entry_price": 20.0, "stop_price": 19.0, "quantity": 100,
+            "planned_risk": 120.0, "reward_risk": 2.0,
+            "minimum_reward_risk": 1.5, "existing_portfolio_risk": 0.0,
+            "existing_position_count": 0, "available_risk_budget": 500.0,
+        }
+    }), encoding="utf-8")
+    plans, audit = load_risk_context_file(str(path))
+    assert "600000" in plans
+    assert plans["600000"]["available_risk_budget"] == 500.0
+    assert audit["status"] == "LOADED"
+    assert load_risk_context_file(None)[1]["status"] == "NOT_CONFIGURED"

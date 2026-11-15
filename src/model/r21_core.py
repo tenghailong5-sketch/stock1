@@ -98,16 +98,20 @@ def weighted_score(weights: Mapping[str, float], factors: Mapping[str, float]) -
 # Market-state thresholds are deliberately not hard-coded: the model requires
 # point-in-time calibration on historical data before M3 can classify states.
 
-def position_risk_budget(q_rank: int, first_used: float = 0.0,
-                         same_industry_or_corr_gt_06: bool = False) -> float:
-    """R1 S2+S3 allocation, preserving 2,000 per-name and 3,000 portfolio caps."""
-    if q_rank not in (1, 2):
-        return 0.0
-    remaining = max(0.0, 3000.0 - first_used)
-    budget = min(2000.0, remaining) if q_rank == 1 else min(1000.0, remaining)
-    if q_rank == 2 and same_industry_or_corr_gt_06:
-        budget *= 0.5
-    return budget if budget >= 600.0 else 0.0
+def scale_available_risk_budget(available_risk_budget: float,
+                                market_risk_scale: float) -> float:
+    """Scale an externally computed dynamic budget; impose no currency caps."""
+    if (isinstance(available_risk_budget, bool)
+            or not isinstance(available_risk_budget, Real)
+            or not math.isfinite(float(available_risk_budget))
+            or float(available_risk_budget) < 0):
+        raise ValueError("available_risk_budget must be finite and non-negative")
+    if (isinstance(market_risk_scale, bool)
+            or not isinstance(market_risk_scale, Real)
+            or not math.isfinite(float(market_risk_scale))
+            or not 0 <= float(market_risk_scale) <= 1):
+        raise ValueError("market_risk_scale must be finite and within [0, 1]")
+    return float(available_risk_budget) * float(market_risk_scale)
 
 
 def can_open_position(*, a_data_valid: bool, ruleset_known: bool,

@@ -7,19 +7,19 @@ from src.model.four_layer_decision import (
 )
 
 
-def test_market_state_controls_entry_permission_and_risk_scale():
-    assert market_permission("RISK_ON", 1.0, data_ready=True).mode == "ATTACK"
-    neutral = market_permission("NEUTRAL", 0.7, data_ready=True)
+def test_market_state_uses_dynamic_scale_without_fixed_70_percent_probe():
+    assert market_permission("RISK_ON", 0.83, data_ready=True).mode == "ATTACK"
+    neutral = market_permission("NEUTRAL", 0.43, data_ready=True)
     assert neutral.mode == "PROBE"
-    assert neutral.risk_scale == 0.7
+    assert neutral.risk_scale == 0.43
     assert not market_permission("RISK_OFF", 0.0, data_ready=True).allow_new_entries
     assert not market_permission("RISK_ON", 1.0, data_ready=False).allow_new_entries
 
 
-def test_market_state_scale_mismatch_fails_closed():
-    result = market_permission("RISK_ON", 0.7, data_ready=True)
-    assert result.mode == "BLOCKED"
-    assert not result.allow_new_entries
+def test_market_state_scale_mismatch_and_zero_neutral_scale_block():
+    assert not market_permission("RISK_ON", 0.0, data_ready=True).allow_new_entries
+    assert not market_permission("NEUTRAL", 0.0, data_ready=True).allow_new_entries
+    assert not market_permission("UNKNOWN", 0.5, data_ready=True).allow_new_entries
 
 
 def test_industry_ignition_requires_pit_and_complete_stock_turnover():
@@ -57,6 +57,7 @@ def valid_trade(**overrides):
         entry_price=20.0, stop_price=19.0, quantity=1000,
         planned_risk=1100.0, reward_risk=2.0, minimum_reward_risk=1.5,
         existing_portfolio_risk=0.0, existing_position_count=0,
+        available_risk_budget=5000.0,
     )
     args.update(overrides)
     return evaluate_trade_decision(**args)
@@ -65,7 +66,7 @@ def valid_trade(**overrides):
 def test_valid_four_layer_trade_passes_all_gates():
     result = valid_trade()
     assert result.allowed
-    assert result.max_allowed_risk == 2000.0
+    assert result.max_allowed_risk == 5000.0
     assert result.reasons == ()
 
 
@@ -73,11 +74,11 @@ def test_valid_four_layer_trade_passes_all_gates():
     ({"market_state": "RISK_OFF", "market_position_scale": 0.0}, "confirmed_risk_off"),
     ({"mainline_phase": "PEAK"}, "mainline_peak_no_fresh_entry"),
     ({"mainline_phase": "DECAY"}, "mainline_decay"),
-    ({"strategy_score": 79.9}, "M5_score_missing_or_below_80"),
+    ({"strategy_score": None}, "M5_score_missing_or_out_of_range"),
     ({"entry_ready": False}, "entry_not_confirmed"),
-    ({"planned_risk": 2001.0}, "planned_risk_exceeds_market_or_portfolio_budget"),
+    ({"planned_risk": 6000.0}, "planned_risk_exceeds_dynamic_available_budget"),
     ({"reward_risk": 1.0}, "reward_risk_below_configured_minimum"),
-    ({"existing_position_count": 2}, "maximum_two_positions_reached_or_invalid_count"),
+    ({"available_risk_budget": None}, "dynamic_available_risk_budget_missing_or_invalid"),
 ])
 def test_four_layer_gate_blocks_invalid_trade(overrides, reason):
     result = valid_trade(**overrides)
@@ -85,28 +86,29 @@ def test_four_layer_gate_blocks_invalid_trade(overrides, reason):
     assert reason in result.reasons
 
 
-def test_neutral_market_scales_risk_budget_without_changing_hard_caps():
-    result = valid_trade(
-        market_state="NEUTRAL", market_position_scale=0.7, planned_risk=1400.0
-    )
+def test_sub_80_score_is_not_rejected_by_a_fixed_cutoff():
+    result = valid_trade(strategy_score=62.5)
     assert result.allowed
-    assert result.max_allowed_risk == 1400.0
 
 
-def test_second_position_respects_aggregate_3000_and_correlation_budget():
+def test_position_count_and_portfolio_risk_have_no_fixed_caps():
     result = valid_trade(
-        existing_position_count=1, existing_portfolio_risk=2000.0,
-        quantity=500, planned_risk=900.0, same_industry_or_corr_gt_06=False,
+        existing_position_count=12,
+        existing_portfolio_risk=250000.0,
+        planned_risk=4000.0,
+        available_risk_budget=5000.0,
     )
     assert result.allowed
-    assert result.max_allowed_risk == 1000.0
-    correlated = valid_trade(
-        existing_position_count=1, existing_portfolio_risk=2000.0,
-        quantity=500, planned_risk=600.0, same_industry_or_corr_gt_06=True,
+    assert result.max_allowed_risk == 5000.0
+
+
+def test_dynamic_market_scale_scales_available_risk_budget():
+    result = valid_trade(
+        market_state="NEUTRAL", market_position_scale=0.43,
+        planned_risk=2100.0, available_risk_budget=5000.0,
     )
-    assert not correlated.allowed
-    assert correlated.max_allowed_risk == 0.0
-    assert "planned_risk_exceeds_market_or_portfolio_budget" in correlated.reasons
+    assert result.allowed
+    assert result.max_allowed_risk == pytest.approx(2150.0)
 
 
 def test_planned_risk_cannot_understate_entry_to_stop_loss():

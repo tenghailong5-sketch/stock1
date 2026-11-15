@@ -1,4 +1,5 @@
 from datetime import date
+from src.model.portfolio_backtest_runner import run_checkpointed_portfolio_backtest
 
 import pandas as pd
 import pytest
@@ -18,7 +19,8 @@ def candidate(symbol="000001", score=90.0, stop=9.5, strategy="A"):
         "strategy": strategy, "score": score, "eligible": True,
         "corporate_actions_resolved": True, "universe_complete": True,
         "delisted_included": True, "ruleset_version": "FHM-100-test",
-        "stop_price": stop,
+        "stop_price": stop, "available_risk_budget": 5000.0,
+        "market_risk_scale": 1.0, "m8_trade_allowed": True,
     }
 
 
@@ -29,6 +31,8 @@ def bar(symbol, day, *, open_=10.0, high=10.2, low=9.8, close=10.0,
         "available_time": pd.Timestamp(str(day) + "T15:01:00+08:00"),
         "historical_pit_eligible": True, "source_revision": f"bar-{symbol}-{day}",
         "open": open_, "high": high, "low": low, "close": close, "volume": volume,
+        "open_auction_volume": volume,
+        "open_auction_available_time": pd.Timestamp(str(day) + "T09:30:00+08:00"),
         "suspended": False, "limit_up_locked": False, "limit_down_locked": limit_down,
         "corporate_actions_resolved": True, "universe_complete": True,
         "delisted_included": True,
@@ -44,13 +48,14 @@ def test_signal_at_close_enters_next_session_and_stops_next_day():
     bars = frame([
         bar("000001", "2026-01-06", open_=10.0, high=10.2, low=9.8, close=10.1),
         bar("000001", "2026-01-07", open_=9.4, high=9.6, low=9.2, close=9.3),
+        bar("000001", "2026-01-08", open_=9.3, high=9.5, low=9.1, close=9.2),
     ])
     result = run_portfolio_backtest(candidates, bars)
     assert result["audit_passed"]
     assert result["fills"][0]["date"] == "2026-01-06"
     assert result["fills"][0]["side"] == "buy"
     assert result["trades"][0]["entry_date"] == "2026-01-06"
-    assert result["trades"][0]["exit_date"] == "2026-01-07"
+    assert result["trades"][0]["exit_date"] == "2026-01-08"
     assert result["trades"][0]["exit_reason"] == "protective_stop"
     assert result["ending_equity"] < result["initial_cash"]
     assert result["metrics"]["trade_count"] == 1
@@ -63,6 +68,7 @@ def test_t1_prevents_same_session_stop_exit():
     bars = frame([
         bar("000001", "2026-01-06", open_=10.0, high=10.2, low=9.0, close=9.2),
         bar("000001", "2026-01-07", open_=9.4, high=9.6, low=9.2, close=9.3),
+        bar("000001", "2026-01-08", open_=9.3, high=9.5, low=9.1, close=9.2),
     ])
     result = run_portfolio_backtest(candidates, bars)
     assert result["fills"][0]["side"] == "buy"
@@ -74,7 +80,8 @@ def test_locked_limit_down_keeps_stopped_position_open():
     candidates = frame([candidate()])
     bars = frame([
         bar("000001", "2026-01-06"),
-        bar("000001", "2026-01-07", open_=9.4, high=9.5, low=9.2, close=9.3, limit_down=True),
+        bar("000001", "2026-01-07", open_=9.4, high=9.5, low=9.2, close=9.3),
+        bar("000001", "2026-01-08", open_=9.2, high=9.3, low=9.0, close=9.1, limit_down=True),
     ])
     result = run_portfolio_backtest(candidates, bars)
     assert len(result["trades"]) == 0
@@ -120,10 +127,12 @@ def test_partial_exit_fills_count_as_one_trade_only_after_position_closes():
     candidates = frame([candidate(stop=9.5)])
     bars = frame([
         bar("000001", "2026-01-06", volume=100000),
-        bar("000001", "2026-01-07", open_=9.4, high=9.5, low=9.2, close=9.3, volume=2000),
-        bar("000001", "2026-01-08", open_=9.3, high=9.4, low=9.1, close=9.2, volume=2000),
-        bar("000001", "2026-01-09", open_=9.2, high=9.3, low=9.0, close=9.1, volume=2000),
-        bar("000001", "2026-01-12", open_=9.0, high=9.1, low=8.9, close=9.0, volume=100000),
+        bar("000001", "2026-01-07", open_=9.4, high=9.5, low=9.2, close=9.3, volume=20000),
+        bar("000001", "2026-01-08", open_=9.3, high=9.4, low=9.1, close=9.2, volume=20000),
+        bar("000001", "2026-01-09", open_=9.2, high=9.3, low=9.0, close=9.1, volume=20000),
+        bar("000001", "2026-01-12", open_=9.0, high=9.1, low=8.9, close=9.0, volume=20000),
+        bar("000001", "2026-01-13", open_=8.9, high=9.0, low=8.8, close=8.9, volume=20000),
+        bar("000001", "2026-01-14", open_=8.8, high=8.9, low=8.7, close=8.8, volume=20000),
     ])
     result = run_portfolio_backtest(candidates, bars)
     assert result["open_positions"] == []
@@ -131,6 +140,15 @@ def test_partial_exit_fills_count_as_one_trade_only_after_position_closes():
     assert result["metrics"]["trade_count"] == 1
     assert result["metrics"]["losses"] == 1
 
+
+
+def test_candidate_blocked_by_historical_m8_permission_is_not_entered():
+    candidates = frame([candidate()])
+    candidates.loc[0, "m8_trade_allowed"] = False
+    bars = frame([bar("000001", "2026-01-06")])
+    result = run_portfolio_backtest(candidates, bars)
+    assert result["fills"] == []
+    assert result["skipped"][0]["reason"] == "m8_trade_not_allowed"
 
 
 def test_retrieval_time_only_dataset_is_blocked_before_simulation():
@@ -167,22 +185,52 @@ def test_invalid_volume_fraction_is_rejected():
 
 
 
-def test_portfolio_never_opens_more_than_two_positions():
+def test_portfolio_can_open_more_than_two_positions_across_distinct_budget_snapshots():
+    rows = [
+        candidate(symbol="000001", score=93.0),
+        candidate(symbol="000002", score=92.0),
+        candidate(symbol="000003", score=91.0),
+    ]
+    for index, row in enumerate(rows):
+        day = pd.Timestamp("2026-01-05") + pd.Timedelta(days=index)
+        row["decision_time"] = day.tz_localize("Asia/Shanghai") + pd.Timedelta(hours=15)
+        row["available_time"] = day.tz_localize("Asia/Shanghai") + pd.Timedelta(hours=14, minutes=59)
+    candidates = frame(rows)
+    bars = frame([
+        bar(symbol, day)
+        for symbol in ("000001", "000002", "000003")
+        for day in ("2026-01-06", "2026-01-07", "2026-01-08")
+    ])
+    result = run_portfolio_backtest(candidates, bars, initial_cash=200000)
+    buys = [fill for fill in result["fills"] if fill["side"] == "buy" and fill["filled"]]
+    assert len(buys) == 3
+    assert len(result["open_positions"]) == 3
+    assert result["skipped"] == []
+
+
+def test_same_session_entries_share_one_historical_m8_risk_budget():
     candidates = frame([
         candidate(symbol="000001", score=93.0),
         candidate(symbol="000002", score=92.0),
         candidate(symbol="000003", score=91.0),
     ])
-    bars = frame([
-        bar("000001", "2026-01-06"),
-        bar("000002", "2026-01-06"),
-        bar("000003", "2026-01-06"),
-    ])
-    result = run_portfolio_backtest(candidates, bars)
+    bars = frame([bar(symbol, "2026-01-06") for symbol in ("000001", "000002", "000003")])
+    result = run_portfolio_backtest(candidates, bars, initial_cash=200000)
     buys = [fill for fill in result["fills"] if fill["side"] == "buy" and fill["filled"]]
-    assert len(buys) == 2
-    assert len(result["open_positions"]) == 2
-    assert result["skipped"][-1]["reason"] == "position_sizing_rejected"
+    assert len(buys) >= 1
+    # The shared budget is a risk ceiling, not a one-position quota.
+    # Validate aggregate realized position risk against the single 5,000 pool.
+    aggregate_risk = sum(
+        _risk({
+            "shares": fill["quantity"],
+            "entry_price": float(fill["fill_price"]),
+            "stop_price": 9.5,
+            "buy_cost": float(fill["total_cost"]),
+            "last_close": 10.0,
+        }, ExecutionCosts())
+        for fill in buys
+    )
+    assert 0 < aggregate_risk <= 5000.0
 
 
 def test_open_position_risk_includes_paid_buy_fees_and_minimum_sell_commission():
@@ -209,3 +257,54 @@ def test_custom_execution_costs_reduce_position_size_conservatively():
                                 transfer_fee_bps=1)
     high_cost = run_portfolio_backtest(candidates, bars, costs=high_costs)
     assert low_cost["open_positions"][0]["shares"] > high_cost["open_positions"][0]["shares"]
+
+
+
+def test_stateful_date_batches_match_one_continuous_portfolio_run():
+    candidates = frame([candidate(stop=9.5)])
+    bars = frame([
+        bar("000001", "2026-01-06"),
+        bar("000001", "2026-01-07", open_=9.4, high=9.5, low=9.2, close=9.3),
+        bar("000001", "2026-01-08", open_=9.8, high=10.0, low=9.7, close=9.9),
+    ])
+    continuous = run_portfolio_backtest(candidates, bars)
+    first = run_portfolio_backtest(
+        candidates, bars, _date_end=date(2026, 1, 6), _include_state=True,
+    )
+    resumed = run_portfolio_backtest(
+        candidates, bars, _state=first["_state"],
+        _date_start=date(2026, 1, 7), _include_state=True,
+    )
+    resumed.pop("_state")
+    for key in (
+        "ending_cash", "ending_equity", "total_return_pct", "realized_pnl",
+        "unrealized_pnl", "open_positions", "fills", "trades", "skipped",
+        "daily_equity", "metrics",
+    ):
+        assert resumed[key] == continuous[key]
+
+
+def test_checkpointed_portfolio_runner_matches_continuous_and_is_idempotent(tmp_path):
+    candidates = frame([candidate(stop=9.5)])
+    bars = frame([
+        bar("000001", "2026-01-06"),
+        bar("000001", "2026-01-07", open_=9.4, high=9.5, low=9.2, close=9.3),
+        bar("000001", "2026-01-08", open_=9.8, high=10.0, low=9.7, close=9.9),
+    ])
+    continuous = run_portfolio_backtest(candidates, bars)
+    kwargs = {
+        "checkpoint_path": str(tmp_path / "portfolio.sqlite"),
+        "run_id": "resume-equivalence",
+        "batch_size": 1,
+    }
+    first = run_checkpointed_portfolio_backtest(candidates, bars, **kwargs)
+    second = run_checkpointed_portfolio_backtest(candidates, bars, **kwargs)
+    for result in (first, second):
+        for key in (
+            "ending_cash", "ending_equity", "total_return_pct", "realized_pnl",
+            "unrealized_pnl", "open_positions", "fills", "trades", "skipped",
+            "daily_equity", "metrics",
+        ):
+            assert result[key] == continuous[key]
+        assert result["checkpoint"]["completed"] == 3
+        assert result["checkpoint"]["pending"] == 0

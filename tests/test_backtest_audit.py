@@ -13,13 +13,17 @@ def datasets():
         "strategy": "A", "score": 88.0, "eligible": True,
         "corporate_actions_resolved": True, "universe_complete": True,
         "delisted_included": True, "ruleset_version": "FHM-100-test",
+        "available_risk_budget": 5000.0, "market_risk_scale": 0.8,
+        "m8_trade_allowed": True,
     }])
     bars = pd.DataFrame([{
         "symbol": "000001", "trade_date": "2026-01-06",
         "available_time": pd.Timestamp("2026-01-06T15:01:00+08:00"),
         "historical_pit_eligible": True, "source_revision": "bar-r1",
         "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2,
-        "volume": 100000, "suspended": False, "limit_up_locked": False,
+        "volume": 100000, "open_auction_volume": 50000,
+        "open_auction_available_time": pd.Timestamp("2026-01-06T09:30:00+08:00"),
+        "suspended": False, "limit_up_locked": False,
         "limit_down_locked": False, "corporate_actions_resolved": True,
         "universe_complete": True, "delisted_included": True,
     }])
@@ -62,14 +66,29 @@ def test_missing_delisted_or_corporate_action_certification_blocks():
     assert "candidate_not_certified:corporate_actions_resolved" in audit.errors
 
 
-def test_invalid_ohlcv_and_low_score_candidate_block():
+def test_scores_below_80_are_not_rejected_by_a_legacy_floor():
+    candidates, bars = datasets()
+    candidates.loc[0, "score"] = 79.99
+    audit = audit_backtest_dataset(candidates, bars)
+    assert audit.ready
+    assert audit.errors == ()
+
+
+@pytest.mark.parametrize("score", [-0.01, 100.01])
+def test_score_outside_supported_range_is_rejected(score):
+    candidates, bars = datasets()
+    candidates.loc[0, "score"] = score
+    audit = audit_backtest_dataset(candidates, bars)
+    assert not audit.ready
+    assert "eligible_candidate_score_outside_0_100" in audit.errors
+
+
+def test_invalid_ohlcv_still_blocks():
     candidates, bars = datasets()
     bars.loc[0, "high"] = 9.0
-    candidates.loc[0, "score"] = 79.99
     audit = audit_backtest_dataset(candidates, bars)
     assert not audit.ready
     assert "bar_invalid_high" in audit.errors
-    assert "eligible_candidate_score_outside_80_100" in audit.errors
 
 
 def test_duplicate_symbol_decision_strategy_is_rejected():
@@ -101,3 +120,24 @@ def test_blank_ruleset_version_is_rejected():
     audit = audit_backtest_dataset(candidates, bars)
     assert not audit.ready
     assert "candidate_missing_ruleset_version" in audit.errors
+
+def test_dynamic_risk_context_is_required_and_bounded():
+    candidates, bars = datasets()
+    candidates.loc[0, "market_risk_scale"] = 1.01
+    audit = audit_backtest_dataset(candidates, bars)
+    assert not audit.ready
+    assert "candidate_invalid_market_risk_scale" in audit.errors
+
+    candidates, bars = datasets()
+    candidates.loc[0, "available_risk_budget"] = 0
+    audit = audit_backtest_dataset(candidates, bars)
+    assert not audit.ready
+    assert "candidate_invalid_available_risk_budget" in audit.errors
+
+def test_m8_permission_must_be_explicit_boolean():
+    candidates, bars = datasets()
+    candidates["m8_trade_allowed"] = candidates["m8_trade_allowed"].astype(object)
+    candidates.loc[0, "m8_trade_allowed"] = None
+    audit = audit_backtest_dataset(candidates, bars)
+    assert not audit.ready
+    assert "candidate_m8_trade_permission_must_be_boolean" in audit.errors

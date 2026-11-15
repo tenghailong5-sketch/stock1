@@ -10,8 +10,6 @@ from dataclasses import dataclass
 import math
 from typing import Any
 
-from .r21_core import position_risk_budget
-
 
 @dataclass(frozen=True)
 class MarketPermission:
@@ -56,13 +54,13 @@ def market_permission(market_state: str, position_scale: float | None,
     scale = float(position_scale)
     if not 0.0 <= scale <= 1.0:
         return MarketPermission("BLOCKED", 0.0, False, "invalid_market_position_scale")
-    if market_state == "RISK_ON" and scale == 1.0:
+    if market_state == "RISK_ON" and scale > 0:
         return MarketPermission("ATTACK", scale, True, "confirmed_risk_on")
-    if market_state == "NEUTRAL" and scale == 0.7:
-        return MarketPermission("PROBE", scale, True, "confirmed_neutral_probe_only")
-    if market_state == "RISK_OFF" and scale == 0:
+    if market_state == "NEUTRAL" and scale > 0:
+        return MarketPermission("PROBE", scale, True, "confirmed_neutral_dynamic_scale")
+    if market_state == "RISK_OFF":
         return MarketPermission("DEFEND", 0.0, False, "confirmed_risk_off")
-    return MarketPermission("BLOCKED", 0.0, False, "state_scale_mismatch_or_unknown_state")
+    return MarketPermission("BLOCKED", 0.0, False, "unknown_market_state_or_zero_risk_scale")
 
 
 def industry_permission(
@@ -112,14 +110,16 @@ def evaluate_trade_decision(
     minimum_reward_risk: float,
     existing_portfolio_risk: float,
     existing_position_count: int,
+    available_risk_budget: float,
     same_industry_or_corr_gt_06: bool = False,
 ) -> TradeDecision:
     """Apply M2 -> M3 -> M5 -> M8 gates before a new long position.
 
     planned_risk must include estimated fees, slippage and gap allowance.
     The gross stop-distance risk is independently recomputed as a lower bound.
-    Existing hard limits remain CNY 2,000 per position, CNY 3,000 portfolio,
-    and at most two concurrent holdings.
+    No fixed score, position-count, per-name, or portfolio-currency caps are
+    imposed here. M8 consumes the strategy/risk engine's dynamic available
+    risk budget, already net of current exposure and portfolio constraints.
     """
     market = market_permission(
         market_state, market_position_scale, data_ready=market_data_ready
@@ -137,12 +137,12 @@ def evaluate_trade_decision(
         reasons.append(industry.reason)
     if strategy_eligible is not True:
         reasons.append("M5_strategy_not_eligible")
-    if not _finite(strategy_score) or float(strategy_score) < 80.0:
-        reasons.append("M5_score_missing_or_below_80")
+    if not _finite(strategy_score) or not 0.0 <= float(strategy_score) <= 100.0:
+        reasons.append("M5_score_missing_or_out_of_range")
     if entry_ready is not True:
         reasons.append("entry_not_confirmed")
-    if existing_position_count not in (0, 1):
-        reasons.append("maximum_two_positions_reached_or_invalid_count")
+    if isinstance(existing_position_count, bool) or not isinstance(existing_position_count, int) or existing_position_count < 0:
+        reasons.append("invalid_existing_position_count")
     if not _finite(entry_price) or float(entry_price) <= 0:
         reasons.append("invalid_entry_price")
     if not _finite(stop_price) or float(stop_price) <= 0:
@@ -157,10 +157,10 @@ def evaluate_trade_decision(
         reasons.append("invalid_reward_risk_inputs")
     elif float(reward_risk) < float(minimum_reward_risk):
         reasons.append("reward_risk_below_configured_minimum")
-    if not _finite(existing_portfolio_risk) or not 0 <= float(existing_portfolio_risk) <= 3000:
+    if not _finite(existing_portfolio_risk) or float(existing_portfolio_risk) < 0:
         reasons.append("invalid_existing_portfolio_risk")
-    if not isinstance(same_industry_or_corr_gt_06, bool):
-        reasons.append("invalid_industry_correlation_flag")
+    if not _finite(available_risk_budget) or float(available_risk_budget) <= 0:
+        reasons.append("dynamic_available_risk_budget_missing_or_invalid")
 
     if _finite(entry_price) and _finite(stop_price) and isinstance(quantity, int) and not isinstance(quantity, bool):
         gross_stop_risk = max(0.0, (float(entry_price) - float(stop_price)) * quantity)
@@ -169,24 +169,14 @@ def evaluate_trade_decision(
     else:
         gross_stop_risk = float("nan")
 
-    max_allowed_risk = 0.0
-    if (market.allow_new_entries and existing_position_count in (0, 1)
-            and _finite(existing_portfolio_risk)
-            and isinstance(same_industry_or_corr_gt_06, bool)):
-        rank = existing_position_count + 1
-        budget = position_risk_budget(
-            rank,
-            first_used=float(existing_portfolio_risk),
-            same_industry_or_corr_gt_06=same_industry_or_corr_gt_06,
-        )
-        max_allowed_risk = min(
-            budget,
-            2000.0 * market.risk_scale,
-            max(0.0, 3000.0 - float(existing_portfolio_risk)),
-        )
+    max_allowed_risk = (
+        float(available_risk_budget) * market.risk_scale
+        if market.allow_new_entries and _finite(available_risk_budget)
+        and float(available_risk_budget) > 0 else 0.0
+    )
 
     if _finite(planned_risk) and float(planned_risk) > max_allowed_risk:
-        reasons.append("planned_risk_exceeds_market_or_portfolio_budget")
+        reasons.append("planned_risk_exceeds_dynamic_available_budget")
 
     return TradeDecision(
         allowed=not reasons,
