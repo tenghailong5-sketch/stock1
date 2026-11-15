@@ -59,8 +59,7 @@ def test_all_four_gates_can_authorize_only_with_complete_inputs():
 
 def test_current_diagnostic_mainline_and_missing_m8_inputs_block_all_entries():
     watchlist, m5, market, mainline, membership, risk = _inputs()
-    mainline["stock_turnover_live_status"] = "not_ready"
-    mainline["source_revision"] = ""
+    membership["source_revision"] = ""
     rows, audit = build_live_decision_gate_audit(
         watchlist, m5, market, mainline, membership,
         decision_time="2026-11-14T09:00:00+08:00",
@@ -70,7 +69,7 @@ def test_current_diagnostic_mainline_and_missing_m8_inputs_block_all_entries():
         },
     )
     assert not rows["allowed"].any()
-    assert rows["reasons"].map(lambda x: "industry_live_snapshot_not_ready" in x or "stock_turnover_live_not_ready" in x).all()
+    assert rows["reasons"].map(lambda x: "industry_live_snapshot_not_ready" in x).all()
     assert audit["blocked_count"] == 3
 
 
