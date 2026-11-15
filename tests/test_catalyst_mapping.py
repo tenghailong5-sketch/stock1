@@ -28,3 +28,19 @@ def test_ignores_keywords_without_matching_current_sw_industry():
     )
     assert rows == []
     assert audit["unmapped_candidates"] == 1
+
+
+def test_maps_english_global_headlines_to_current_sw_industries():
+    rows, audit = map_candidate_sectors(
+        [
+            {"title": "US weighs new semiconductor export controls"},
+            {"title": "New data center investment plan announced"},
+            {"title": "Global oil supply disruption risk rises"},
+        ],
+        ["电子", "计算机", "石油石化"],
+    )
+    assert [row["mapped_industries"] for row in rows] == [
+        ["电子"], ["计算机"], ["石油石化"]
+    ]
+    assert audit["mapped_candidates"] == 3
+    assert all(row["impact_direction"] == "unclear" for row in rows)
