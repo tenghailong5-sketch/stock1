@@ -1563,6 +1563,24 @@ def main():
             topup_universe, history_sink=kronos_histories
         )
         topup_watchlist = ensure_watchlist_schema(topup_watchlist)
+        history_universe = pd.concat(
+            [history_universe, topup_universe], ignore_index=True
+        ).drop_duplicates("code").reset_index(drop=True)
+        existing_history_count = int(
+            w.get("history_data_available", pd.Series(False, index=w.index))
+            .fillna(False).astype(bool).sum()
+        )
+        topup_history_ok = int(len(topup_watchlist))
+        history_success_count = existing_history_count + topup_history_ok
+        history_pool_audit["candidate_topup_selected"] = int(len(topup_universe))
+        history_pool_audit["candidate_topup_history_ok"] = topup_history_ok
+        history_pool_audit["candidate_topup_error_count"] = int(len(topup_errors))
+        history_pool_audit["history_scan_symbols"] = int(len(history_universe))
+        history_pool_audit["candidate_topup_is_formal_signal"] = False
+        (OUT/"history_pool_audit.json").write_text(
+            json.dumps(history_pool_audit, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         if not topup_watchlist.empty:
             topup_watchlist, topup_observation_audit = rank_price_observations(
                 topup_watchlist,
@@ -1593,19 +1611,7 @@ def main():
                 )
                 w = w.merge(current_codes, on="symbol", how="left", validate="one_to_one")
                 w["sw_history_industry_code"] = w["current_forward_industry_code"]
-            history_universe = pd.concat(
-                [history_universe, topup_universe], ignore_index=True
-            ).drop_duplicates("code").reset_index(drop=True)
-            topup_history_ok = int(len(topup_watchlist))
             history_success_count = int(len(combined_history))
-            history_pool_audit["candidate_topup_selected"] = int(len(topup_universe))
-            history_pool_audit["candidate_topup_history_ok"] = topup_history_ok
-            history_pool_audit["history_scan_symbols"] = int(len(history_universe))
-            history_pool_audit["candidate_topup_is_formal_signal"] = False
-            (OUT/"history_pool_audit.json").write_text(
-                json.dumps(history_pool_audit, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
             # Rebuild diagnostics/ranking with the newly enriched candidates.
             try:
                 m5_input = build_m5_diagnostic_input(
