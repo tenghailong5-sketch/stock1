@@ -160,11 +160,12 @@ def test_weighted_quote_only_score_and_final_shortlist_are_diversified():
     assert audit["score_method"] == "weighted_observed_percentiles_renormalized_per_row"
     assert audit["factor_weights"] == {
         "industry_strength": 0.25,
-        "current_momentum": 0.30,
-        "current_liquidity": 0.15,
-        "industry_flow_concentration": 0.15,
-        "mainline_lifecycle": 0.10,
-        "policy_catalyst": 0.05,
+        "current_momentum": 0.15,
+        "current_liquidity": 0.10,
+        "industry_flow_concentration": 0.20,
+        "mainline_lifecycle": 0.15,
+        "policy_catalyst": 0.10,
+        "emotion_ice_reversal": 0.10,
     }
     assert len(shortlist) == 4
     assert shortlist["shortlist_industry"].value_counts().max() <= 2
@@ -391,3 +392,35 @@ def test_mainline_backed_candidates_rank_ahead_of_momentum_only_watch():
     )
     assert shortlist.iloc[0]["symbol"] == "000002"
     assert shortlist.iloc[1]["candidate_status"] == "MOMENTUM_ONLY_WATCH"
+
+
+def test_research_ranking_rewards_recent_policy_and_ice_reversal_evidence():
+    watchlist = pd.DataFrame({
+        "代码": ["000001", "000002"],
+        "涨跌幅%": [3.0, 3.0],
+        "当日成交额": [200e6, 200e6],
+    })
+    m5_input = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "industry_relative_strength": [80.0, 80.0],
+    })
+    industry = pd.DataFrame({
+        "symbol": ["000001", "000002"],
+        "current_industry_level1": ["计算机", "传媒"],
+        "strength_percentile": [0.8, 0.8],
+        "mainline_phase_gated": ["IGNITION", "IGNITION"],
+        "startup_policy_status": ["POSITIVE_CATALYST", "POSITIVE_CATALYST"],
+        "policy_catalyst_recency_score": [100.0, 40.0],
+        "emotion_reversal_component": [True, False],
+        "turnover_share_change_3d": [0.08, -0.08],
+    })
+    ranked, audit = build_research_opportunity_ranking(
+        watchlist, m5_input, industry_context=industry,
+    )
+    by_symbol = ranked.set_index("symbol")
+    assert by_symbol.loc["000001", "live_emotion_reversal_score"] == 100.0
+    assert by_symbol.loc["000002", "live_emotion_reversal_score"] == 0.0
+    assert by_symbol.loc["000001", "live_policy_catalyst_recency_score"] == 100.0
+    assert by_symbol.loc["000002", "live_policy_catalyst_recency_score"] == 40.0
+    assert by_symbol.loc["000001", "research_opportunity_score"] > by_symbol.loc["000002", "research_opportunity_score"]
+    assert audit["factor_weights"]["emotion_ice_reversal"] == 0.10
