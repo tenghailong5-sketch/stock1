@@ -12,7 +12,7 @@ import pandas as pd
 
 RESEARCH_FACTORS = {
     # Weights are renormalized across observed factors for each row.
-    "industry_strength": ("industry_relative_strength", True, 0.25),
+    "industry_strength": ("industry_relative_strength", True, 0.20),
     "current_momentum": ("涨跌幅%", True, 0.15),
     "current_liquidity": ("当日成交额", True, 0.10),
     "industry_flow_concentration": ("industry_turnover_share_change_3d", True, 0.20),
