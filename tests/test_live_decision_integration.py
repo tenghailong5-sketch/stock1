@@ -389,6 +389,9 @@ def test_m8_live_sizing_derives_quantity_from_cash_stop_and_market_scale():
     assert rows["allowed"].all()
     assert rows["m8_sizing_approved"].all()
     assert rows["m8_sized_quantity"].eq(400).all()
+    assert rows["m8_price_source"].eq("operator_plan_fallback").all()
+    assert rows["m8_entry_price"].eq(20.0).all()
+    assert rows["m8_stop_price"].eq(19.0).all()
     assert (rows["m8_estimated_loss"] <= 1000.0).all()
 
 
@@ -478,3 +481,26 @@ def test_m8_requires_a_valid_price_pair_from_15m_or_operator_plan():
     assert not rows["allowed"].any()
     assert rows["m8_risk_context_complete"].eq(False).all()
     assert rows["m8_price_source"].eq("missing").all()
+
+
+def test_confirmed_15m_pair_can_supply_m8_prices_without_manual_price_fields():
+    watchlist, m5, market, mainline, membership, risk = _inputs()
+    risk["600000"].pop("entry_price")
+    risk["600000"].pop("stop_price")
+    rows, audit = build_live_decision_gate_audit(
+        watchlist, m5, market, mainline, membership,
+        decision_time="2026-11-16T10:00:00+08:00",
+        risk_context_by_symbol=risk,
+        minute_confirmation_fetcher=lambda symbol, captured_at=None: {
+            "status": "CONFIRMED_15M_BREAKOUT", "entry_ready": True,
+            "reason": "all_15m_checks_passed",
+            "entry_reference_price": 20.5,
+            "stop_reference_price": 19.9,
+        },
+    )
+    assert rows["allowed"].all()
+    assert rows["m8_risk_context_complete"].all()
+    assert rows["m8_price_source"].eq("confirmed_15m").all()
+    assert rows["m8_entry_price"].eq(20.5).all()
+    assert rows["m8_stop_price"].eq(19.9).all()
+    assert audit["m8_risk_context_complete_symbol_count"] == 1
