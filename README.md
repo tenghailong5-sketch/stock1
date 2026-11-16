@@ -1,143 +1,41 @@
-# FHM-100 自动研究扫描（stock1）
+# FHM-100 Lite
 
-GitHub Actions 工作日北京时间 16:00 自动运行，也支持手动运行。
+A small A-share live-quote watchlist scanner.
 
-## 最终选股架构
+## What it does
 
-当前统一采用六阶段选股流程：全球新闻/国内政策/行业事件 → 事件识别、预期差与 Price In → 行业主线、资金持续集中与龙头强度 → 全市场初筛及动态个股数据补充 → M2/M3/M5/M8 决策门与真实15分钟买点确认 → 输出可执行名单、入场区间、止损参考和失效条件。完整规则与数据边界见 [`docs/FHM100_FINAL_SELECTION_ARCHITECTURE.md`](docs/FHM100_FINAL_SELECTION_ARCHITECTURE.md)。该架构是目标流程基线，不代表所有模块已完成正式交易准入；未通过门槛的股票只能列为观察候选。
+1. Fetches a current A-share quote snapshot with provider fallback: Eastmoney → Tencent → Sina.
+2. Removes ST/delisting names and invalid quotes.
+3. Keeps stocks with traded value of at least CNY 50 million and daily change between -2% and +7.5%.
+4. Ranks the remaining stocks using only observed cross-sectional data:
+   - Daily-change percentile: 65%
+   - Traded-value percentile: 35%
+5. Publishes up to 20 research-watch candidates.
 
-## 当前功能
-- AkShare A股快照及日线数据；最多扫描成交额靠前的350只非ST沪深主板/创业板股票。
-- 基础流动性、5/20日趋势、CLV、回撤诊断。
-- 输出 Markdown 报告、CSV观察名单、数据异常记录。
-- 可选 AI 风险点评；可选 PushPlus 手机推送。
-- Actions Artifact 保存每次运行结果。
+## Outputs
 
-## 重要边界
-当前是数据接入与技术观察框架，**不是完整正式FHM-100信号引擎**。行业相对强度、市场/行业滚动Beta残差、完整涨跌停事件拆分、经样本外校准的M6收益预测、M8组合风险和M9回测尚未完成。因此不伪造A/B/C正式分数、P_up或预期收益，不把观察名单称为买入名单。原模型80分门槛与风险硬约束不被擅自放宽。
+- `output/market_snapshot.csv`: quote snapshot used by this run.
+- `output/final_candidate_shortlist.csv`: ranked watchlist.
+- `output/simple_scan_audit.json`: provider, coverage, scoring basis and limitations.
+- `output/report.md`: readable report.
+- `output/formal_gate.json`: run status; buy authorization is always false.
 
-完整规则见 `docs/validated_FHM-100_V2.2-R2.1_完整模型.md`。
+## What it deliberately does not do
 
-## 配置 Secrets
-仓库 Settings → Secrets and variables → Actions → New repository secret：
+This version does **not** claim to identify industry mainlines, policy catalysts, capital concentration, market-emotion turning points, multi-day trends, 15-minute entry confirmation, M2/M3/M5/M8 scoring, account-level position sizing, stop prices, backtests, or profitable trades. The available quote snapshot does not support those conclusions.
 
-| Secret | 必需 | 说明 |
-|---|---|---|
-| PUSHPLUS_TOKEN | 推送需要 | PushPlus Token |
-| AI_API_KEY | 否 | OpenAI-compatible API Key |
-| AI_API_BASE_URL | 否 | 默认 https://api.openai.com/v1 |
-| AI_MODEL | 否 | 默认 gpt-4o-mini |
+A candidate is a watchlist observation, not a buy signal. Missing information is not fabricated.
 
-不配置AI仍可扫描；不配置PushPlus则只保存Actions报告。
+## Run
 
-## 运行和查看
-Actions → FHM-100 Daily Research → Run workflow。完成后在运行详情的 Artifacts 下载报告包，包含 report.md、watchlist.csv、data_errors.csv、run_status.json。
+Use the **FHM-100 Daily Research** GitHub Actions workflow manually when a scan is wanted. A push to `main` also triggers a run. No scheduled run is configured.
 
-不保存密钥到代码，不自动下单，不承诺收益。数据缺失时明确降级。
+## Test
 
-## R2.1 工程化进度
+```bash
+pip install -r requirements-simple.txt
+python -m pytest -q tests/test_simple_fhm100.py
+python -m src.simple_fhm100
+```
 
-已新增：
-- `src/model/r21_core.py`：A/B/C 原始权重常量、缺失因子拒绝评分、决策时点数据过滤、M3 市场状态评分与两日切换冷却、组合风险预算、RISK_OFF/关键数据缺失时禁止开仓、日线止盈止损双触发保守处理、退出状态与部分成交记账。
-- `tests/test_r21_core.py`：对应回归测试。
-- 依赖增加 `tabulate`（修复报告 `to_markdown()` 的运行依赖缺失）和 `pytest`。
-
-**重要：这些是 R2.1 安全基础组件，尚未接入每日扫描器，也不代表正式 A/B/C 评分或完整回测已经完成。** 目前的 AkShare 扫描仍只是观察名单；在公司行为账本、点时数据和执行撮合完成前，不得将其当作交易信号。
-
-### 本轮新增：M1 点时数据层
-
-- `src/model/data_layer.py`：原始日线字段与可用时间校验、未来数据剔除、公司行为总收益序列（仅支持已核验现金分红/拆股/送转；其他复杂行为明确拒绝）、行业超额收益、滚动市场/行业残差收益、横截面百分位。
-- `tests/test_data_layer.py`：对应数据质量、公司行为、残差因子与缺失值测试。
-- 行业历史成分必须提供有效期和可用时间；当前行业分类快照不能冒充历史分类。
-- M3 市场状态数值阈值没有在模型中给定，因此不再硬编码未经校准的阈值；必须先做历史样本校准。
-
-**数据边界：** 当前 AkShare 扫描器尚未接入经验证的历史行业成分、公司行为全量账本、历史交易规则和数据供应商修订快照。新模块是可测试的底层组件，不会自动把不完整数据升级为正式评分输入。
-
-
-### 本轮新增：M3 市场状态计算
-
-- `src/model/market_state.py`：按模型 R1 方法二计算趋势、广度、成交活跃度、涨跌停平衡和波动率五个分量；滚动百分位窗口固定为60个交易日；按模型公式生成 StateScore。
-- 三态阈值按模型原文实现：RISK_ON ≥0.60 且趋势分量≥0.5；RISK_OFF ≤0.35、涨跌停平衡百分位≤0.20 或跌停数超过涨停数一半；其余为 NEUTRAL。
-- 状态切换需连续两个交易日确认，确认后的状态从下一交易日生效；NEUTRAL 候选分数门槛85，RISK_ON为80，RISK_OFF停止新开仓。
-- 数据不足60个交易日或关键字段缺失时不伪造状态分数。
-
-以上阈值和映射仍属于模型标注的初始假设/实验参数，须通过训练段冻结并做敏感性检验；当前模块尚未接入真实历史指数、全市场广度及涨跌停统计数据，因此不代表每日扫描已具备正式M3输出。
-
-
-### M3/M4 本轮实现边界
-
-- M3 的 `StateScore` 严格按 R1 公式计算。注意该公式最高可达 0.90（五个分量全为 1 时），因此 RISK_ON 市场环境分数归一化使用 0.60—0.90 区间；避免原实现把理论满分错误映射到 93.75 分。
-- M4 新增 `src/model/m4_factors.py`：价格结构（CLV、BodyStrength、5/10/20日收益、前20日突破、上影线、回撤）、成交质量（LQ、成交额/成交量均值比、放量滞涨、缩量回撤）、行业5/20日超额收益、过去窗口OLS市场/行业残差收益、横截面百分位。
-- 行业与市场收益必须由调用方提供同交易日、点时有效的基准数据；残差因子必须提供历史行业代码。缺失数据保留缺失，不填零。
-- 资金流、消息催化、涨跌停事件、换手率、历史行业成员与正式股票池尚未全部接通；因此本轮仅提供 M4 可计算因子原语，不产生正式 A/B/C 分数，也不改变当前研究扫描器的观察名单口径。
-
-
-### M4 点时与横截面口径补充
-
-- 行业相对强度和个股残差强度现在要求显式传入带时区的 `decision_time`，并要求行情/基准数据包含带时区的 `available_time`；晚于决策时点的数据会被剔除。
-- 行业数据按 `trade_date + industry_code`、市场数据按 `trade_date` 校验唯一性，避免重复行导致笛卡尔扩张。
-- 残差强度的 Beta 使用目标交易日前的单日股票、市场和行业收益估计，再应用于目标日的5日收益；不再用高度重叠的5日收益序列直接拟合 Beta。
-- 新增 `rank_factor_by_date`，按交易日分别进行横截面百分位排名，避免不同日期混合排名。
-- 以上是因子计算原语，不代表数据源已具备可靠的历史行业成分、日收益和发布时间。调用方仍须保证行业代码是历史点时口径；缺失数据不应填零。
-
-
-### 2026-11-10 PIT 数据校验补强
-
-- `src/model/data_layer.py` 的行业相对强度计算现在必须显式提供带时区的 `decision_time`；行业与市场收益均按 `available_time` 过滤，只保留决策时点前已知的数据。
-- 行业收益键 `trade_date + industry_code`、市场收益键 `trade_date` 必须唯一；缺少市场对应日期时保留缺失，不填零。
-- 历史行业成员校验现在检查有效期区间、重复版本，并可按决策时点过滤可见版本。
-- 新增回归测试覆盖未来版本过滤、重复行业键、无时区可用时间和非法有效期。
-
-**验证状态说明：** 上述改动已提交到 `main`。当前连接可读取和提交仓库文件，但没有可用的 GitHub Actions 手动触发/列出运行记录接口；最近查询到的提交状态为空（不是成功）。因此不能声称本轮测试已通过。下一步必须由仓库 Actions 实际执行 `pytest -q`，再验证数据供应商接口、PushPlus Secrets 和定时任务。正式 A/B/C 评分、M6 校准、M8 组合执行与 M9 样本外回测仍未完成，不得把观察名单当成买入信号。
-
-
-### M3 点时市场状态防未来数据修复（2026-11-10）
-
-- `calculate_state_scores` 现在强制要求 `decision_time` 和带时区的 `available_time`，未来才可见的指数/市场广度/涨跌停数据会被排除。
-- 缺失的收盘价、均线不会再被布尔比较误判成 0 分趋势；对应 `S_trend` 与 `StateScore` 保持缺失。
-- 新增未来数据过滤、无时区决策时间、缺失趋势字段回归测试。
-- 这只完成 M3 计算入口的点时保护，不代表指数成分、广度、涨跌停历史数据源已接通，也不代表市场状态阈值已完成样本外校准。
-
-
-### M4 日线因子点时与输入完整性补强（2026-11-10）
-
-- `price_structure` 现在必须显式提供带时区的 `decision_time`；先过滤决策时点之后才可用的日线，再计算滚动因子。
-- 对同一股票同一交易日重复日线直接报错，避免滚动收益和成交均值被重复记录污染。
-- 对非正价格及不符合 OHLC 关系的记录直接拒绝，不让错误行情进入因子计算。
-- 残差强度增加股票 `symbol + trade_date` 唯一性校验，避免重复股票日线造成 Beta 回归样本重复。
-- 更新了 M4/M3 对应测试，统一传入决策时点。
-
-**口径限制：** M4 残差强度仍依赖供应商提供正确的历史行业代码与同步的单日收益序列。该因子实现的是模型公式 `R_stock,5 - beta_m*R_market,5 - beta_i*R_industry,5`；Beta 的估计窗口、截距处理及复利/算术收益口径仍需在数据字典中冻结，并通过历史样本验证。当前不据此生成正式 A/B/C 评分。
-
-
-### M5 独立评分引擎（研究实现）
-
-新增 `src/model/scoring.py`，按原模型 A/B/C 权重独立计算百分制分数：
-
-- A：20/25/15/15/15/10；
-- B：20/15/20/15/20/10；
-- C：15/15/25/20/15/10。
-- 任一加权因子缺失、非数值或超出 0—100，拒绝生成分数；不以 0 分填补。
-- A/C 的初始筛选条件独立作为硬门槛，不能被高分抵消；RISK_OFF 阻止候选通过。
-- B 的“次日价格行为”只允许在 `stage="next_day"` 计算；前一日收盘阶段不生成 B 分数，避免未来函数。
-- 80/90 分区间仅作为研究候选分层，不是买入指令。
-
-**边界说明：** 该模块是 M5 评分执行器，不是完整行情适配器。因子分数和硬门槛必须由经点时验证的数据管线提供；资金流、消息、涨跌停事件、换手率或盘口数据缺失时，不得伪造输入。B 策略四类事件仍须分别验证。当前尚未接入正式生产扫描，也未完成历史回测验收。
-
-
-### M5 第二轮：横截面标准化与事件子样本隔离
-
-- 新增 `score_factor_bundle`：原始因子按每个交易日横截面分别计算百分位，不跨日期混排；缺失值保持缺失。
-- B 策略只接受四种明确事件子类型：`hit_up_unsealed`、`close_up_sealed`、`hit_down_unsealed`、`close_down_sealed`。不支持的事件类型直接拒绝评分。
-- B 策略必须处于 `next_day` 阶段才允许计算完整六因子分数，避免把次日价格行为写入前一日信号。
-- 增加按日期横截面排名、缺失值传播及 B 事件类型隔离测试。
-
-**仍未接通生产扫描：** `score_factor_bundle` 目前是通用排名工具，策略因子与原始字段之间的最终映射表仍需依据 M4 字典逐项审核；不能把未实现的催化、换手率、逐笔事件或订单流用替代指标填充。
-
-### M4 数据源映射审计（2026-11-11）
-
-新增 `docs/M4_DATA_SOURCE_MAPPING.md`，逐项映射 FHM-100 M4 因子所需字段、当前 AkShare/工程接口、点时与历史覆盖限制及准入状态。审计结论：现有日线仅支持部分技术观察；历史行业成员、市场广度/涨跌停历史、公司行为账本、资金流、公告事件和盘中涨跌停路径尚未形成合格数据链路。不能将当前快照或今天下载的历史数据伪装成历史决策时可见数据，也不能将 M4/M5 原语当作正式信号。详见 `docs/M4_DATA_SOURCE_MAPPING.md`。
-
-### AKShare 前瞻数据留档适配器
-
-新增 `src/providers/akshare_pit.py`：日线数据以实际抓取时间标记可用性，并明确禁止作为历史 PIT 回测输入；行业成分只保存当前观测快照，不伪造历史生效区间。新增离线 schema/时间戳契约测试。适配器尚未接入每日生产扫描，详见 `docs/M4_DATA_SOURCE_MAPPING.md`。
+Historical archive files are retained as raw reference material only; the Lite runtime does not read them.
