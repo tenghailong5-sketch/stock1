@@ -84,6 +84,7 @@ def rank_quotes(snapshot: pd.DataFrame, *, max_candidates: int = MAX_CANDIDATES,
     for col in ("price", "amount", "pct_chg"):
         data[col] = _numeric(data[col])
     data = data.dropna(subset=["code", "price", "amount", "pct_chg"])
+    data = data[~data["name"].astype(str).str.contains(r"ST|退", case=False, na=False)]
     data = data[data["price"].gt(0) & data["amount"].ge(min_amount)]
     data = data[data["pct_chg"].between(MIN_CHANGE, MAX_CHANGE)].copy()
 
@@ -96,6 +97,7 @@ def rank_quotes(snapshot: pd.DataFrame, *, max_candidates: int = MAX_CANDIDATES,
         }
         return data, audit
 
+    eligible_count = int(len(data))
     # Percentiles are cross-sectional within this run only. There is no claim
     # of historical calibration or predictive probability.
     data["momentum_percentile"] = data["pct_chg"].rank(pct=True) * 100.0
@@ -117,7 +119,7 @@ def rank_quotes(snapshot: pd.DataFrame, *, max_candidates: int = MAX_CANDIDATES,
     audit = {
         "status": "READY_WATCHLIST",
         "quote_count": int(len(snapshot)),
-        "eligible_count": int(len(data)),
+        "eligible_count": eligible_count,
         "candidate_count": int(len(data)),
         "minimum_amount_cny": float(min_amount),
         "daily_change_range_pct": [MIN_CHANGE, MAX_CHANGE],
