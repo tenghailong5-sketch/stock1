@@ -2037,34 +2037,47 @@ def main():
         encoding="utf-8",
     )
 
-    # A successful research run is not equivalent to a formal FHM-100 signal.
-    # Keep data blockers separate from unfinished model integration so an empty
-    # universe can never be misreported as "no stocks passed the strategy".
-    formal_blockers = []
-    # Historical PIT, M3 archives, industry lifecycle history and turnover
-    # concentration are research enrichments. Their absence is recorded in
-    # audits, but does not invalidate a current-quote research result.
+    # Live shortlist policy: legacy M2/M3/M5 historical gates are diagnostics,
+    # not prerequisites for publishing a real-time 15m-confirmed setup.
+    # M8 remains responsible for position sizing; without account context,
+    # publish entry/stop references but never fabricate quantity or authorize a buy.
+    confirmed_live_rows = pd.DataFrame()
+    if not decision_gates.empty and "minute_entry_ready" in decision_gates:
+        confirmed_live_rows = decision_gates.loc[
+            decision_gates["minute_entry_ready"].map(
+                lambda value: isinstance(value, (bool, np.bool_)) and bool(value)
+            )
+        ]
+    live_setup_count = int(confirmed_live_rows["symbol"].nunique()) if not confirmed_live_rows.empty else 0
+    m8_ready_count = int(decision_gate_audit.get("m8_risk_context_complete_symbol_count", 0))
     if len(u) == 0:
-        formal_blockers.append("LIVE_UNIVERSE_UNAVAILABLE")
-    # M9 execution-aware backtesting is a later validation lane, not a runtime prerequisite.
-    if decision_gate_audit.get("m8_risk_context_complete_symbol_count", 0) == 0:
-        formal_blockers.append("M8_DYNAMIC_RISK_CONTEXT_NOT_AVAILABLE")
-    if decision_gate_audit.get("allowed_count", 0) == 0:
-        formal_blockers.append("FOUR_LAYER_DECISION_GATE_BLOCKED_ALL_CANDIDATES")
+        formal_status = "FAILED_NO_LIVE_UNIVERSE"
+        formal_blockers = ["LIVE_UNIVERSE_UNAVAILABLE"]
+    elif live_setup_count == 0:
+        formal_status = "NO_CONFIRMED_15M_SETUP"
+        formal_blockers = ["NO_15M_CONFIRMED_SETUP"]
+    elif m8_ready_count == 0:
+        formal_status = "LIVE_SETUPS_READY_RISK_SIZING_REQUIRED"
+        formal_blockers = ["M8_ACCOUNT_RISK_CONTEXT_REQUIRED_FOR_POSITION_SIZING"]
+    else:
+        formal_status = "LIVE_SETUPS_READY_SIZING_AVAILABLE"
+        formal_blockers = []
     research_run_status = "COMPLETED" if len(u) > 0 else "FAILED_NO_LIVE_UNIVERSE"
-    formal_status = "BLOCKED_FORMAL_SIGNAL" if formal_blockers else "READY"
     (OUT/"formal_gate.json").write_text(json.dumps({
         "status": formal_status,
         "research_run_status": research_run_status,
         "blockers": formal_blockers,
+        "live_setup_count": live_setup_count,
+        "buy_authorization": False,
+        "decision_policy": "live_15m_setup_first; legacy M2/M3/M5 historical gates are diagnostics only; M8 controls position sizing and never fabricates quantity",
         "live_universe_count": int(len(u)),
         "history_scan_universe_count": int(len(history_universe)),
         "history_pool_audit": history_pool_audit,
         "valid_history_count": history_success_count,
         "m3_status": str(m3.get("status")),
         "m5_is_diagnostic_only": True,
-        "four_layer_decision_integrated": True,
-        "four_layer_decision_audit": decision_gate_audit,
+        "four_layer_decision_integrated": False,
+        "legacy_four_layer_audit": decision_gate_audit,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     (OUT/"m3_market_context.json").write_text(json.dumps(m3, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     w.to_csv(OUT/"watchlist.csv",index=False,encoding="utf-8-sig")
