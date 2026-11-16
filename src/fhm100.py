@@ -892,9 +892,9 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
             # bounded-universe ranking basis.
             "industry_relative_strength": industry_value,
             "industry_strength": industry_value,
-            "stock_residual_strength": live_stock_residual_rank.loc[idx],
-            "stock_residual_top_20pct": live_stock_residual_top20.loc[idx],
-            "stock_residual_strength_basis": (
+            "live_stock_residual_strength": live_stock_residual_rank.loc[idx],
+            "live_stock_residual_top_20pct": live_stock_residual_top20.loc[idx],
+            "live_stock_residual_strength_basis": (
                 "same_session_excess_vs_industry_median"
                 if pd.notna(live_stock_residual_rank.loc[idx]) else None
             ),
