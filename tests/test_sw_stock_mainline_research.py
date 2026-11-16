@@ -276,4 +276,4 @@ def test_forward_mapper_carries_emotion_reversal_and_policy_timing_to_stocks():
     assert bool(row["emotion_reversal_component"])
     assert row["policy_catalyst_age_sessions"] == 1.0
     assert row["policy_catalyst_recency_score"] == 80.0
-    assert row["historical_pit_eligible"] is False
+    assert bool(row["historical_pit_eligible"]) is False
