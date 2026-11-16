@@ -1845,6 +1845,33 @@ def main():
             "candidate_count": 0, "event_watch_count": 0,
             "buy_authorization": False,
         }
+    # Hard fallback: a valid live quote universe must always yield a visible
+    # research list, even if factor ranking or shortlist filters return no rows.
+    # These are quote-ranked observations only, never formal scores or buy signals.
+    if final_candidates.empty and not u.empty:
+        quote_fallback = u.copy()
+        quote_fallback = quote_fallback.sort_values(
+            ["amount", "pct_chg", "code"], ascending=[False, False, True]
+        ).head(20).reset_index(drop=True)
+        final_candidates = pd.DataFrame({
+            "symbol": quote_fallback["code"].astype(str).str.zfill(6),
+            "代码": quote_fallback["code"].astype(str).str.zfill(6),
+            "名称": quote_fallback["name"].astype(str),
+            "最新价": quote_fallback["price"],
+            "涨跌幅%": quote_fallback["pct_chg"],
+            "当日成交额": quote_fallback["amount"],
+            "research_opportunity_rank": range(1, len(quote_fallback) + 1),
+            "candidate_basis": "LIVE_QUOTE_ONLY",
+            "candidate_note": "因子排名/普通候选筛选无结果，按实时成交额与涨跌幅生成兜底观察序列；非买入信号",
+            "buy_authorization": False,
+        })
+        final_candidate_audit = {
+            "status": "LIVE_QUOTE_FALLBACK",
+            "reason": "factor ranking or ordinary shortlist produced no rows",
+            "candidate_count": int(len(final_candidates)),
+            "event_watch_count": int(len(momentum_event_watch)),
+            "buy_authorization": False,
+        }
     final_candidates.to_csv(OUT/"final_candidate_shortlist.csv", index=False, encoding="utf-8-sig")
     momentum_event_watch.to_csv(OUT/"momentum_event_watch.csv", index=False, encoding="utf-8-sig")
     (OUT/"final_candidate_audit.json").write_text(
