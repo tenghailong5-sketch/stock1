@@ -2074,8 +2074,13 @@ def main():
     ]
     minute_trade_plan = pd.DataFrame()
     if not decision_gates.empty and set(minute_plan_columns).issubset(decision_gates.columns):
+        confirmed_rows = decision_gates.loc[
+            decision_gates["minute_entry_ready"].map(
+                lambda value: isinstance(value, (bool, np.bool_)) and bool(value)
+            )
+        ]
         minute_trade_plan = (
-            decision_gates[minute_plan_columns].drop_duplicates("symbol")
+            confirmed_rows[minute_plan_columns].drop_duplicates("symbol")
             .dropna(subset=["entry_reference_price", "stop_reference_price"])
             .reset_index(drop=True)
         )
