@@ -1831,7 +1831,7 @@ def main():
             }
     try:
         final_candidates, momentum_event_watch, final_candidate_audit = build_final_candidate_shortlist(
-            research_opportunities, max_candidates=30, max_per_industry=3,
+            research_opportunities, max_candidates=20, max_per_industry=3,
             min_amount=100_000_000, min_pct_change=-5.0, max_pct_change=9.5,
         )
     except Exception as shortlist_exc:
