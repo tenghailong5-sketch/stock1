@@ -481,9 +481,12 @@ def test_m5_uses_same_session_industry_residual_for_live_forward_diagnostics():
         watchlist, {"market_state": "RISK_ON", "market_environment_score": 70.0},
     )
     by_symbol = frame.set_index("symbol")
-    assert by_symbol.loc["000001", "stock_residual_strength"] == 100.0
-    assert bool(by_symbol.loc["000001", "stock_residual_top_20pct"]) is True
-    assert bool(by_symbol.loc["000003", "stock_residual_top_20pct"]) is False
-    assert by_symbol.loc["000001", "stock_residual_strength_basis"] == "same_session_excess_vs_industry_median"
+    assert by_symbol.loc["000001", "live_stock_residual_strength"] == 100.0
+    assert bool(by_symbol.loc["000001", "live_stock_residual_top_20pct"]) is True
+    assert bool(by_symbol.loc["000003", "live_stock_residual_top_20pct"]) is False
+    assert by_symbol.loc["000001", "live_stock_residual_strength_basis"] == "same_session_excess_vs_industry_median"
     assert by_symbol["m5_pit_factor_provenance"].eq("missing_or_ineligible_pit_snapshot").all()
+    # Live same-session diagnostics must never populate formal historical PIT fields.
+    assert "stock_residual_strength" not in frame.columns
+    assert "stock_residual_top_20pct" not in frame.columns
     assert by_symbol["m5_factor_scope"].eq("bounded_live_research_pool_percentile").all()
