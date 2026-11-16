@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from src.providers.akshare_15m import normalize_15m_bars, confirm_15m_breakout
+from src.providers.akshare_15m import normalize_15m_bars, confirm_15m_breakout, fetch_live_15m_confirmation
 
 
 def sample():
@@ -112,3 +112,43 @@ def test_confirmed_15m_breakout_emits_entry_stop_and_invalidation_references():
     assert result["stop_reference_price"] < result["entry_reference_price"]
     assert result["stop_distance_pct"] > 0
     assert "跌破结构止损参考位" in result["invalidation_condition"]
+
+
+def test_sina_minute_bars_without_amount_remain_unfabricated_and_can_check_volume():
+    raw = sample().rename(columns={
+        "时间": "day", "开盘": "open", "最高": "high", "最低": "low",
+        "收盘": "close", "成交量": "volume",
+    }).drop(columns=["成交额"])
+    bars = normalize_15m_bars(
+        raw, symbol="600000", captured_at="2026-11-13T03:20:00Z",
+        source_id="akshare.stock_zh_a_minute_sina",
+    )
+    assert bars["amount"].isna().all()
+    assert not bars["turnover_observed"].any()
+    result = confirm_15m_breakout(bars)
+    assert result["checks"]["positive_turnover"] is True
+    assert result["turnover_basis"] == "positive_volume_only_amount_unavailable"
+    assert result["source_id"] == "akshare.stock_zh_a_minute_sina"
+
+
+def test_eastmoney_rate_limit_falls_back_to_sina_minute_provider():
+    calls = {}
+
+    def eastmoney(**kwargs):
+        raise RuntimeError("Push2RateLimitError")
+
+    def sina(**kwargs):
+        calls.update(kwargs)
+        return sample().rename(columns={
+            "时间": "day", "开盘": "open", "最高": "high", "最低": "low",
+            "收盘": "close", "成交量": "volume",
+        }).drop(columns=["成交额"])
+
+    result = fetch_live_15m_confirmation(
+        "600000", captured_at="2026-11-13T03:20:00Z",
+        fetcher=eastmoney, fallback_fetcher=sina,
+    )
+    assert calls["symbol"] == "sh600000"
+    assert calls["period"] == "15"
+    assert result["entry_ready"] is True
+    assert result["source_id"] == "akshare.stock_zh_a_minute_sina"
