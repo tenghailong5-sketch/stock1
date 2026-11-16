@@ -81,6 +81,8 @@ def build_research_opportunity_ranking(
             "mainline_phase_gated", "strength_percentile", "turnover_share",
             "turnover_share_change_1d", "turnover_share_change_3d",
             "startup_evidence_status", "startup_policy_status",
+            "emotion_reversal_component", "policy_catalyst_age_sessions",
+            "policy_catalyst_recency_score",
             "peak_evidence", "decay_evidence", "phase_gate_reason",
             "membership_observed_at", "mainline_trade_date",
             "live_catalyst_candidate_count", "live_event_price_in_state",
