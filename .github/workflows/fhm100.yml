@@ -33,7 +33,7 @@ jobs:
           # optional enrichment pool; final shortlist top-ups remain enabled.
           FHM_HISTORY_SCAN_MAX_SYMBOLS: "12"
           FHM_HISTORY_SCAN_WORKERS: "6"
-          FHM_15M_SCAN_LIMIT: "all"
+          FHM_15M_SCAN_LIMIT: "20"
           FHM_15M_SCAN_WORKERS: "6"
           FHM_CURRENT_SNAPSHOT_MODE: "0"
           FHM_RISK_CONTEXT_JSON: ${{ secrets.FHM_RISK_CONTEXT_JSON }}
