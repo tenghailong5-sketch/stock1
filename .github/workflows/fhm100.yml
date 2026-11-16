@@ -23,20 +23,8 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run research scan
-        env:
-          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-          AI_API_KEY: ${{ secrets.AI_API_KEY }}
-          AI_API_BASE_URL: ${{ secrets.AI_API_BASE_URL }}
-          AI_MODEL: ${{ secrets.AI_MODEL }}
-          # Fast live scan only: historical/PIT enrichment is intentionally excluded.
-          # 15m confirmation runs on the ranked shortlist; M8 still requires real account context.
-          FHM_HISTORY_SCAN_MAX_SYMBOLS: "off"
-          FHM_15M_SCAN_LIMIT: "20"
-          FHM_15M_SCAN_WORKERS: "6"
-          FHM_CURRENT_SNAPSHOT_MODE: "1"
-          FHM_RISK_CONTEXT_JSON: ${{ secrets.FHM_RISK_CONTEXT_JSON }}
-        run: python -m src.fhm100
+      - name: Run simplified quote scan
+        run: python -m src.simple_fhm100
       - name: Upload research report
         if: always()
         uses: actions/upload-artifact@v4
