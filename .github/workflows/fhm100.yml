@@ -22,7 +22,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-simple.txt
       - name: Run simplified quote scan
         run: python -m src.simple_fhm100
       - name: Upload research report
