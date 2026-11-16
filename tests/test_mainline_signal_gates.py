@@ -315,3 +315,28 @@ def test_m3_persistence_is_false_when_three_session_flow_fields_are_missing():
     })
     out = gate_ignition_labels(frame)
     assert out["persistence_ready"].tolist() == [False]
+
+
+def test_policy_catalyst_recency_uses_first_available_trading_session():
+    industry = pd.DataFrame({
+        "trade_date": ["2026-01-05", "2026-01-06", "2026-01-07"],
+        "industry_code": ["I1", "I1", "I1"],
+        "turnover_share": [0.1, 0.1, 0.1],
+        "turnover_share_change_3d": [0.02, 0.02, 0.02],
+        "strength_3d_percentile": [0.9, 0.9, 0.9],
+        "relative_strength_change_2d": [0.02, 0.02, 0.02],
+    })
+    emotion = pd.DataFrame({
+        "trade_date": ["2026-01-05", "2026-01-06", "2026-01-07"],
+        "market_cycle": ["RECOVERY", "RECOVERY", "RECOVERY"],
+    })
+    policy = pd.DataFrame({
+        "available_at": ["2026-01-05T06:00:00Z"],
+        "industry_codes": [["I1"]],
+        "impact_direction": ["positive"],
+    })
+    out = attach_startup_evidence(
+        industry, emotion, policy, policy_archive_complete=True,
+    )
+    assert out["policy_catalyst_age_sessions"].tolist() == [0.0, 1.0, 2.0]
+    assert out["policy_catalyst_recency_score"].tolist() == [100.0, 80.0, 60.0]
