@@ -221,7 +221,7 @@ def test_sustained_industry_flow_concentration_is_used_when_observed():
     by_symbol = ranked.set_index("symbol")
     assert by_symbol.loc["000001", "industry_flow_concentration_percentile"] > by_symbol.loc["000002", "industry_flow_concentration_percentile"]
     assert by_symbol.loc["000001", "research_opportunity_score"] > by_symbol.loc["000002", "research_opportunity_score"]
-    assert audit["factor_weights"]["industry_flow_concentration"] == 0.15
+    assert audit["factor_weights"]["industry_flow_concentration"] == 0.20
 
 
 def test_gated_mainline_phase_and_policy_catalyst_adjust_research_score():
@@ -250,8 +250,8 @@ def test_gated_mainline_phase_and_policy_catalyst_adjust_research_score():
     assert by_symbol.loc["000001", "live_policy_catalyst_score"] == 100.0
     assert by_symbol.loc["000002", "live_policy_catalyst_score"] == 0.0
     assert by_symbol.loc["000001", "research_opportunity_score"] > by_symbol.loc["000002", "research_opportunity_score"]
-    assert audit["factor_weights"]["mainline_lifecycle"] == 0.10
-    assert audit["factor_weights"]["policy_catalyst"] == 0.05
+    assert audit["factor_weights"]["mainline_lifecycle"] == 0.15
+    assert audit["factor_weights"]["policy_catalyst"] == 0.10
 
 
 def test_market_emotion_limits_research_watchlist_by_regime():
