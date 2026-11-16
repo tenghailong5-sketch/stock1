@@ -2042,17 +2042,16 @@ def main():
     # audits, but does not invalidate a current-quote research result.
     if len(u) == 0:
         formal_blockers.append("LIVE_UNIVERSE_UNAVAILABLE")
-    # M5 is enforced per strategy/candidate in the four-layer gate above;
-    # M6 is an optional prediction sidecar, not a prerequisite of M2->M3->M5->M8.
-    # Keep only the independent execution-validation requirement here.
-    formal_blockers.append("M9_EXECUTION_AWARE_BACKTEST_NOT_ADMITTED")
+    # M9 execution-aware backtesting is a later validation lane, not a runtime prerequisite.
     if decision_gate_audit.get("m8_risk_context_complete_symbol_count", 0) == 0:
         formal_blockers.append("M8_DYNAMIC_RISK_CONTEXT_NOT_AVAILABLE")
     if decision_gate_audit.get("allowed_count", 0) == 0:
         formal_blockers.append("FOUR_LAYER_DECISION_GATE_BLOCKED_ALL_CANDIDATES")
+    research_run_status = "COMPLETED" if len(u) > 0 else "FAILED_NO_LIVE_UNIVERSE"
     formal_status = "BLOCKED_FORMAL_SIGNAL" if formal_blockers else "READY"
     (OUT/"formal_gate.json").write_text(json.dumps({
         "status": formal_status,
+        "research_run_status": research_run_status,
         "blockers": formal_blockers,
         "live_universe_count": int(len(u)),
         "history_scan_universe_count": int(len(history_universe)),
@@ -2166,7 +2165,7 @@ def main():
       "sw_industry_history_research_audit":sw_history_audit,
       "sw_stock_mainline_research_audit":sw_stock_mainline_audit,
       "corporate_action_ledger_audit":corporate_action_audit,
-      "formal_status":formal_status,"formal_blockers":formal_blockers},ensure_ascii=False,indent=2),encoding="utf-8")
+      "research_run_status":research_run_status,"formal_status":formal_status,"formal_blockers":formal_blockers},ensure_ascii=False,indent=2),encoding="utf-8")
     print(report); print(status)
     if push_error is not None:
         raise RuntimeError(status) from push_error
