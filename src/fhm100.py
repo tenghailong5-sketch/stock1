@@ -2049,16 +2049,12 @@ def main():
             )
         ]
     live_setup_count = int(confirmed_live_rows["symbol"].nunique()) if not confirmed_live_rows.empty else 0
-    m8_ready_count = int(decision_gate_audit.get("m8_risk_context_complete_symbol_count", 0))
     if len(u) == 0:
         formal_status = "FAILED_NO_LIVE_UNIVERSE"
         formal_blockers = ["LIVE_UNIVERSE_UNAVAILABLE"]
-    elif live_setup_count == 0:
-        formal_status = "NO_CONFIRMED_15M_SETUP"
-        formal_blockers = ["NO_15M_CONFIRMED_SETUP"]
     else:
-        # Missing account context must never suppress research candidates.
-        # M8 sizing is optional metadata; it cannot block publishing live setups.
+        # Live universe availability is the only candidate-publication gate.
+        # 15m confirmation and M8 sizing are annotations, never output blockers.
         formal_status = "LIVE_RESEARCH_CANDIDATES_READY"
         formal_blockers = []
     research_run_status = "COMPLETED" if len(u) > 0 else "FAILED_NO_LIVE_UNIVERSE"
@@ -2068,7 +2064,7 @@ def main():
         "blockers": formal_blockers,
         "live_setup_count": live_setup_count,
         "buy_authorization": False,
-        "decision_policy": "publish ranked live research candidates regardless of M2/M3/M5/M8 availability; 15m confirmation is an execution annotation; M8 sizing is optional; buy_authorization remains false",
+        "decision_policy": "publish ranked live research candidates whenever live universe is available; 15m/M2/M3/M5/M8 are annotations or optional sizing only; buy_authorization remains false",
         "live_universe_count": int(len(u)),
         "history_scan_universe_count": int(len(history_universe)),
         "history_pool_audit": history_pool_audit,
