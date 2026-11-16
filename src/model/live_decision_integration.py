@@ -325,9 +325,8 @@ def build_live_decision_gate_audit(
         risk_context_complete = (
             all(field in risk for field in required_risk_fields)
             and all(_finite(risk.get(field)) for field in (
-                "entry_price", "stop_price", "reward_risk",
-                "minimum_reward_risk", "existing_portfolio_risk",
-                "available_risk_budget",
+                "reward_risk", "minimum_reward_risk",
+                "existing_portfolio_risk", "available_risk_budget",
             ))
             and (
                 (
