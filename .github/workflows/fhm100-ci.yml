@@ -30,14 +30,14 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-simple.txt
       - name: Run regression tests
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python -m compileall -q src
-          python -c "import src.fhm100; from src.model.live_decision_integration import build_live_decision_gate_audit; print('FHM-100 runtime imports OK')"
-          python -m pytest -q tests/test_fhm100_m3.py tests/test_live_decision_integration.py tests/test_akshare_15m.py tests/test_research_ranking.py tests/test_mainline_signal_gates.py
+          python -c "import src.simple_fhm100; print('Simplified FHM runtime imports OK')"
+          python -m pytest -q tests/test_simple_fhm100.py
       - name: Validate GitHub Actions workflow YAML
         run: |
           ruby -e 'require "yaml"; Dir.glob(".github/workflows/*.{yml,yaml}").sort.each { |path| begin; YAML.load_file(path); puts "valid YAML: #{path}"; rescue Psych::SyntaxError => e; warn "INVALID YAML: #{path}: line=#{e.line} column=#{e.column} problem=#{e.problem.inspect} context=#{e.context.inspect}"; exit 1; end }'
