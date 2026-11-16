@@ -150,7 +150,7 @@ def fetch_sw_industry_history(
         target = Path(cache_path)
         if target.exists():
             try:
-                cached = pd.read_json(target, lines=True)
+                cached = pd.read_json(target, lines=True, dtype={"symbol": "string", "industry_code": "string", "l1_code": "string", "l2_code": "string"})
                 required = set(OUTPUT_COLUMNS)
                 if not cached.empty and required.issubset(cached.columns):
                     cached["valid_from"] = pd.to_datetime(cached.valid_from, errors="coerce")
