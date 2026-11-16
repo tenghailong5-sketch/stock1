@@ -100,6 +100,7 @@ def build_research_opportunity_ranking(
             "turnover_share_change_3d": "live_industry_turnover_share_change_3d",
             "startup_evidence_status": "live_startup_evidence_status",
             "startup_policy_status": "live_startup_policy_status",
+            "policy_catalyst_recency_score": "live_policy_catalyst_recency_score",
         })
         out = out.merge(context, on="symbol", how="left", validate="one_to_one")
         live_flow_change = pd.to_numeric(
