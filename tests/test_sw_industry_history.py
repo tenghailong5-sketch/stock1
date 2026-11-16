@@ -83,18 +83,19 @@ def test_fetch_uses_official_workbook_and_normalizes_response():
         calls.append((url, headers, timeout))
         return Response()
 
-    def fake_read_excel(_):
-        return source_rows()
+    def fake_sheet_rows(_):
+        frame = source_rows()
+        return list(frame.columns), iter(frame.astype(object).values.tolist())
 
-    import src.providers.sw_industry_history as provider
-    original = provider.pd.read_excel
-    provider.pd.read_excel = fake_read_excel
+    import src.providers.sw_industry as sw_provider
+    original = sw_provider._sheet_rows
+    sw_provider._sheet_rows = fake_sheet_rows
     try:
         result = fetch_sw_industry_history(
             http_get=fake_get, fetched_at="2026-11-15T00:00:00Z"
         )
     finally:
-        provider.pd.read_excel = original
+        sw_provider._sheet_rows = original
 
     assert len(calls) == 1
     assert "swsresearch.com" in calls[0][0]
