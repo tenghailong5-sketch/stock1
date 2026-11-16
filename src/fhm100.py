@@ -2071,6 +2071,8 @@ def main():
         "symbol", "minute_status", "minute_entry_ready",
         "entry_reference_price", "breakout_trigger_price",
         "stop_reference_price", "stop_distance_pct", "invalidation_condition",
+        "m8_price_source", "m8_sized_quantity", "m8_estimated_loss",
+        "m8_cash_required", "m8_risk_context_complete",
     ]
     minute_trade_plan = pd.DataFrame()
     if not decision_gates.empty and set(minute_plan_columns).issubset(decision_gates.columns):
@@ -2110,7 +2112,7 @@ def main():
       f"- 最终候选观察名单：{final_candidate_audit.get('candidate_count', 0)}只；主线证据候选={final_candidate_audit.get('mainline_backed_candidate_count', 0)}只；纯动量观察={final_candidate_audit.get('momentum_only_watch_count', 0)}只；单行业最多3只；成交额至少1亿元；涨幅区间-5%至+9.5%；不代表买入授权",
       f"- 强势事件观察：{final_candidate_audit.get('event_watch_count', 0)}只；涨幅达到9.5%的股票单独观察，不混入普通候选，不追高",
       f"- M5诊断记录：{len(m5)}；实时同业当日超额强度可用={int(m5_input['stock_residual_strength'].notna().sum()) if 'stock_residual_strength' in m5_input else 0}只；同日因子仅用于前瞻诊断，不替代历史PIT",
-      f"- 四层决策门：{decision_gate_audit.get('status')}；检查记录={decision_gate_audit.get('candidate_count', 0)}；15分钟扫描={decision_gate_audit.get('minute_scanned_count', 0)}；准入={decision_gate_audit.get('allowed_count', 0)}；阻断={decision_gate_audit.get('blocked_count', 0)}",
+      f"- 四层决策门：{decision_gate_audit.get('status')}；检查记录={decision_gate_audit.get('candidate_count', 0)}；15分钟扫描={decision_gate_audit.get('minute_scanned_count', 0)}；M8风险上下文完整股票={decision_gate_audit.get('m8_risk_context_complete_symbol_count', 0)}；准入={decision_gate_audit.get('allowed_count', 0)}；阻断={decision_gate_audit.get('blocked_count', 0)}",
       f"- 正式模型状态：{formal_status}",
       "## 正式模型阻塞项",
       *[f"- {reason}" for reason in formal_blockers],
