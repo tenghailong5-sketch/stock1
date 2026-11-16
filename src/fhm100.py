@@ -894,6 +894,8 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
             "industry_strength": industry_value,
             "live_stock_residual_strength": live_stock_residual_rank.loc[idx],
             "live_stock_residual_top_20pct": live_stock_residual_top20.loc[idx],
+            # Formal cross-session residual remains explicitly unknown without PIT.
+            "stock_residual_top_20pct": None,
             "live_stock_residual_strength_basis": (
                 "same_session_excess_vs_industry_median"
                 if pd.notna(live_stock_residual_rank.loc[idx]) else None
