@@ -17,7 +17,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: fhm100-ci-${{ github.ref }}
+  group: fhm100-ci-fast-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   test:
