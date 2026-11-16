@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from io import BytesIO
 from pathlib import Path
 import time
 
@@ -122,8 +121,12 @@ def fetch_sw_industry_history(
                 # Reuse the already fingerprint-pinned SW certificate adapter.
                 from src.providers.sw_industry import _download_xls
                 payload = _download_xls(requests, SW_INDUSTRY_HISTORY_URL, timeout)
-            frame = pd.read_excel(BytesIO(payload))
-            if frame is None or frame.empty:
+            # Use the same xlrd/OLE parser as the stable SW membership provider.
+            # pandas.read_excel can return an empty/misread header for this legacy XLS.
+            from src.providers.sw_industry import _sheet_rows
+            headers, rows = _sheet_rows(payload)
+            frame = pd.DataFrame(list(rows), columns=headers)
+            if frame.empty:
                 raise RuntimeError("SW industry history workbook is empty")
             result = normalize_sw_industry_history(frame, fetched_at=fetched_at)
             result.attrs["provider_status"] = "LIVE"
