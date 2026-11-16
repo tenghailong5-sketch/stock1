@@ -41,3 +41,31 @@ def test_fetch_sw_industry_index_history_rejects_duplicate_dates():
         fetch_sw_industry_index_history(
             "801010", history_fetcher=lambda **kwargs: raw
         )
+
+
+def test_native_akshare_failure_falls_back_to_pinned_sw_api(monkeypatch):
+    import akshare as ak
+    import src.providers.sw_industry as sw_industry
+
+    raw = pd.DataFrame({
+        "日期": ["2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13",
+                "2026-11-16", "2026-11-17"],
+        "收盘": [100, 101, 102, 103, 104, 110],
+        "成交额": [10, 10, 10, 10, 10, 10],
+    })
+    monkeypatch.setattr(
+        ak, "index_hist_sw",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("publisher TLS timeout")),
+    )
+    fallback_calls = []
+    def fallback(code):
+        fallback_calls.append(code)
+        return raw.copy()
+    monkeypatch.setattr(sw_industry, "_fetch_sw_index_history_api", fallback)
+
+    result = fetch_sw_industry_index_history(
+        "801010", clock=lambda: pd.Timestamp("2026-11-18T00:00:00Z")
+    )
+    assert fallback_calls == ["801010"]
+    assert len(result) == 6
+    assert result["historical_pit_eligible"].eq(False).all()

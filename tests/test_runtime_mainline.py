@@ -6,21 +6,6 @@ import pytest
 from src.model import runtime_mainline
 
 
-@pytest.fixture(autouse=True)
-def stub_external_discovery(monkeypatch):
-    # Runtime orchestration tests must not depend on live policy/news services.
-    monkeypatch.setattr(
-        runtime_mainline, "discover_gov_policy_candidates",
-        lambda: ([], {"status": "READY_CANDIDATES_ONLY", "candidate_count": 0}),
-    )
-    monkeypatch.setattr(runtime_mainline, "append_policy_candidates", lambda *args, **kwargs: 0)
-    monkeypatch.setattr(
-        runtime_mainline, "discover_global_news_candidates",
-        lambda: ([], {"status": "READY_CANDIDATES_ONLY", "candidate_count": 0}),
-    )
-    monkeypatch.setattr(runtime_mainline, "append_global_news_candidates", lambda *args, **kwargs: 0)
-
-
 def test_runtime_mainline_scan_connects_phases_and_evidence(monkeypatch, tmp_path):
     dates = pd.bdate_range("2026-01-05", periods=8)
     codes = [f"{i:06d}" for i in range(1, 21)]
@@ -174,10 +159,14 @@ def test_industry_panel_keeps_ninety_percent_when_two_providers_fail(monkeypatch
             raise RuntimeError("temporary provider timeout")
         return pd.DataFrame({
             "trade_date": dates, "industry_code": code,
+            "close": [100.0 + i for i in range(len(dates))],
             "return_3": [0.02] * len(dates), "return_5": [0.03] * len(dates),
             "amount": [1_000_000.0] * len(dates),
         })
 
+    monkeypatch.setattr(
+        runtime_mainline, "fetch_sw_industry_index_history_native", fetch_history
+    )
     monkeypatch.setattr(
         runtime_mainline, "fetch_sw_api_industry_index_history", fetch_history
     )
@@ -223,6 +212,9 @@ def test_industry_panel_aborts_remaining_batches_after_initial_transport_outage(
         raise requests.exceptions.ReadTimeout("SW endpoint unavailable")
 
     monkeypatch.setattr(
+        runtime_mainline, "fetch_sw_industry_index_history_native", unavailable
+    )
+    monkeypatch.setattr(
         runtime_mainline, "fetch_sw_api_industry_index_history", unavailable
     )
     try:
@@ -231,10 +223,10 @@ def test_industry_panel_aborts_remaining_batches_after_initial_transport_outage(
             archive_root=tmp_path,
         )
     except RuntimeError as exc:
-        assert "aborted remaining industry requests early" in str(exc)
+        assert "unavailable from alternate/live/cache providers" in str(exc)
     else:
         raise AssertionError("an unavailable first batch should abort early")
-    assert len(calls) == 4
+    assert len(calls) == 8
 
 
 def test_cached_market_emotion_uses_completed_exchange_sessions_only(monkeypatch, tmp_path):
@@ -380,3 +372,57 @@ def test_full_emotion_assembly_excludes_weekend_provider_snapshot(monkeypatch, t
     assert cycles.trade_date.max() == sessions[-1]
     assert audit["latest_trade_date"] == "2026-01-08"
     assert len(cycles) == len(sessions)
+
+
+def test_industry_panel_uses_recent_cached_history_when_both_live_routes_fail(monkeypatch, tmp_path):
+    dates = pd.bdate_range(end="2026-02-13", periods=30)
+    codes = [f"801{i:03d}" for i in range(20)]
+    universe_dir = tmp_path / "sw_industry_universe"
+    history_dir = tmp_path / "industry_index_history"
+    index_dir = tmp_path / "index_daily"
+    universe_dir.mkdir()
+    history_dir.mkdir()
+    index_dir.mkdir()
+    (universe_dir / "2026-02-14.jsonl").write_text(
+        "\n".join(json.dumps({
+            "industry_code": code,
+            "industry_name": f"industry-{i}",
+            "observed_at": "2026-02-14T07:00:00Z",
+        }) for i, code in enumerate(codes)) + "\n",
+        encoding="utf-8",
+    )
+    for i, code in enumerate(codes):
+        pd.DataFrame({
+            "trade_date": dates.strftime("%Y-%m-%d"),
+            "industry_code": code,
+            "close": [100.0 + j + i * 0.1 for j in range(len(dates))],
+            "amount": ([0.0] * len(dates) if i == 19 else [1_000_000.0] * len(dates)),
+            "available_time": ["2026-02-14T07:00:00Z"] * len(dates),
+        }).to_json(history_dir / f"{code}.jsonl", orient="records", lines=True)
+    (index_dir / "000001.jsonl").write_text(
+        "\n".join(json.dumps({
+            "trade_date": day.strftime("%Y-%m-%d"),
+            "close": 3000.0 + i * 2,
+            "available_time": "2026-02-14T07:00:00Z",
+        }) for i, day in enumerate(dates)) + "\n",
+        encoding="utf-8",
+    )
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("live SW providers unavailable")
+
+    monkeypatch.setattr(runtime_mainline, "fetch_sw_industry_index_history_native", unavailable)
+    monkeypatch.setattr(runtime_mainline, "fetch_sw_api_industry_index_history", unavailable)
+    panel, audit = runtime_mainline._assemble_industry_panel(
+        decision_time=pd.Timestamp("2026-02-15T08:00:00Z"),
+        archive_root=tmp_path,
+    )
+    assert audit["universe_source"] == "archived_SW_universe"
+    assert audit["industry_count"] == 20
+    assert audit["available_industries"] == 19
+    assert audit["failed_industry_count"] == 1
+    assert audit["minimum_industries_per_date"] == 18
+    assert audit["latest_trade_date"] == "2026-02-13"
+    assert panel.industry_code.nunique() == 19
+    assert "801019" not in set(panel.industry_code)
+    assert not audit["historical_pit_eligible"]

@@ -288,22 +288,45 @@ def build_live_decision_gate_audit(
             "reason": "outside_configured_15m_scan_pool", "historical_pit_eligible": False,
         })
         risk = risk_context_by_symbol.get(symbol, {})
+        # A confirmed, completed 15m setup is the authoritative live price
+        # source. Operator prices are retained only as an explicit fallback
+        # when a complete 15m entry/stop pair is unavailable; the entry gate
+        # still blocks if 15m confirmation itself is false.
+        minute_price_pair_ready = (
+            _truth(minute.get("entry_ready"))
+            and _finite(minute.get("entry_reference_price"))
+            and _finite(minute.get("stop_reference_price"))
+            and float(minute.get("entry_reference_price")) > float(minute.get("stop_reference_price")) > 0
+        )
+        manual_price_pair_ready = (
+            _finite(risk.get("entry_price"))
+            and _finite(risk.get("stop_price"))
+            and float(risk.get("entry_price")) > float(risk.get("stop_price")) > 0
+        )
+        price_source = "confirmed_15m" if minute_price_pair_ready else (
+            "operator_plan_fallback" if manual_price_pair_ready else "missing"
+        )
+        entry_price = (
+            minute.get("entry_reference_price") if minute_price_pair_ready
+            else risk.get("entry_price", np.nan)
+        )
+        stop_price = (
+            minute.get("stop_reference_price") if minute_price_pair_ready
+            else risk.get("stop_price", np.nan)
+        )
         # M8 computes board-lot quantity from cash, stop distance and the
         # remaining portfolio risk budget. Operator-supplied quantity/planned
         # risk are not trusted as sizing decisions.
-        entry_price = risk.get("entry_price", np.nan)
         required_risk_fields = (
-            "entry_price", "stop_price", "reward_risk",
-            "minimum_reward_risk", "existing_portfolio_risk",
+            "reward_risk", "minimum_reward_risk", "existing_portfolio_risk",
             "existing_position_count", "available_risk_budget",
             "same_industry_or_corr_gt_06",
         )
         risk_context_complete = (
             all(field in risk for field in required_risk_fields)
             and all(_finite(risk.get(field)) for field in (
-                "entry_price", "stop_price", "reward_risk",
-                "minimum_reward_risk", "existing_portfolio_risk",
-                "available_risk_budget",
+                "reward_risk", "minimum_reward_risk",
+                "existing_portfolio_risk", "available_risk_budget",
             ))
             and (
                 (
@@ -321,13 +344,14 @@ def build_live_decision_gate_audit(
             and isinstance(risk.get("existing_position_count"), int)
             and not isinstance(risk.get("existing_position_count"), bool)
             and isinstance(risk.get("same_industry_or_corr_gt_06"), bool)
+            and (minute_price_pair_ready or manual_price_pair_ready)
             and _finite(market_scale)
         )
         sizing = None
         if risk_context_complete:
             sizing = size_long_position(
                 entry_price=float(entry_price),
-                stop_price=float(risk["stop_price"]),
+                stop_price=float(stop_price),
                 available_cash=float(
                     risk["available_cash"] if "available_cash" in risk
                     else risk["quantity"] * float(entry_price)
@@ -353,7 +377,7 @@ def build_live_decision_gate_audit(
             "strategy_score": None,
             "entry_ready": _truth(minute.get("entry_ready")),
             "entry_price": entry_price,
-            "stop_price": risk.get("stop_price", np.nan),
+            "stop_price": stop_price,
             "quantity": sizing.shares if sizing_approved else 0,
             "planned_risk": sizing.estimated_loss if sizing_approved else np.nan,
             "reward_risk": risk.get("reward_risk", np.nan),
@@ -377,6 +401,14 @@ def build_live_decision_gate_audit(
                 "minute_status": minute.get("status"),
                 "minute_entry_ready": _truth(minute.get("entry_ready")),
                 "minute_reason": minute.get("reason"),
+                "entry_reference_price": minute.get("entry_reference_price"),
+                "breakout_trigger_price": minute.get("breakout_trigger_price"),
+                "m8_entry_price": float(entry_price) if _finite(entry_price) else None,
+                "m8_stop_price": float(stop_price) if _finite(stop_price) else None,
+                "m8_price_source": price_source,
+                "stop_reference_price": minute.get("stop_reference_price"),
+                "stop_distance_pct": minute.get("stop_distance_pct"),
+                "invalidation_condition": minute.get("invalidation_condition"),
                 "m8_risk_context_complete": bool(risk_context_complete),
                 "m8_sizing_approved": sizing_approved,
                 "m8_sized_quantity": sizing.shares if sizing is not None else 0,

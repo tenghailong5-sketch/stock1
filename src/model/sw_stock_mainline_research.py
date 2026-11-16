@@ -209,6 +209,7 @@ def build_forward_stock_mainline_research(
         "startup_evidence_status", "startup_policy_status",
         "policy_catalyst_component", "negative_policy_event_component",
         "emotion_reversal_component", "capital_concentration_component",
+        "policy_catalyst_age_sessions", "policy_catalyst_recency_score",
         "peak_evidence", "decay_evidence", "phase_gate_reason",
     ) if c in latest.columns]
     mapped = members.merge(

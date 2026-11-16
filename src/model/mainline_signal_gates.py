@@ -148,6 +148,32 @@ def attach_startup_evidence(
     out["policy_catalyst_component"] = _event_match("positive")
     out["negative_policy_event_component"] = _event_match("negative")
 
+    # Preserve catalyst timing, not just presence: a newly available event is
+    # more relevant than one near the edge of the five-session window.
+    positive_events = events.loc[events.impact_direction.eq("positive")]
+    positive_event_sessions = []
+    for event in positive_events.itertuples(index=False):
+        event_pos = bisect_left(session_close_cutoffs, event.available_at)
+        if event_pos < len(dates):
+            positive_event_sessions.append((
+                event_pos, {str(code) for code in event.industry_codes}
+            ))
+    catalyst_ages = []
+    for row in out.itertuples(index=False):
+        pos = date_position[pd.Timestamp(row.trade_date)]
+        ages = [
+            pos - event_pos for event_pos, codes in positive_event_sessions
+            if str(row.industry_code) in codes
+            and 0 <= pos - event_pos < policy_window_sessions
+        ]
+        catalyst_ages.append(float(min(ages)) if ages else float("nan"))
+    out["policy_catalyst_age_sessions"] = pd.Series(catalyst_ages, index=out.index, dtype=float)
+    out["policy_catalyst_recency_score"] = (
+        100.0 * (1.0 - out["policy_catalyst_age_sessions"] / policy_window_sessions)
+    ).clip(lower=0.0, upper=100.0)
+    if policy_archive_complete:
+        out.loc[out["policy_catalyst_component"].eq(False), "policy_catalyst_recency_score"] = 0.0
+
     numeric = ["turnover_share", "turnover_share_change_3d",
                "strength_3d_percentile", "relative_strength_change_2d"]
     for field in numeric:

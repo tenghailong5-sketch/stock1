@@ -4,14 +4,6 @@ on:
   push:
     branches:
       - main
-    # Only runtime/model changes trigger a full-market scan. Documentation,
-    # tests and forward archives must not launch or cancel a live research run.
-    paths:
-      - 'src/**'
-      - 'config/**'
-      - 'scripts/**'
-      - 'requirements*.txt'
-      - '.github/workflows/fhm100.yml'
 
 permissions:
   contents: write
@@ -39,19 +31,17 @@ jobs:
           AI_MODEL: ${{ secrets.AI_MODEL }}
           # Full-market spot scan stays intact. Daily history is only a small
           # optional enrichment pool; final shortlist top-ups remain enabled.
-          FHM_HISTORY_SCAN_MAX_SYMBOLS: "12"
-          FHM_HISTORY_SCAN_WORKERS: "8"
-          FHM_MAINLINE_HISTORY_WORKERS: "8"
-          FHM_HISTORY_CANDIDATE_TOPUP_MAX_SYMBOLS: "20"
-          FHM_15M_SCAN_LIMIT: "15"
-          FHM_15M_SCAN_WORKERS: "8"
-          FHM_CURRENT_SNAPSHOT_MODE: "0"
+          FHM_HISTORY_SCAN_MAX_SYMBOLS: "off"
+          FHM_HISTORY_SCAN_WORKERS: "2"
+          FHM_15M_SCAN_LIMIT: "20"
+          FHM_15M_SCAN_WORKERS: "6"
+          FHM_CURRENT_SNAPSHOT_MODE: "1"
           FHM_RISK_CONTEXT_JSON: ${{ secrets.FHM_RISK_CONTEXT_JSON }}
         run: python -m src.fhm100
       - name: Commit forward-only stock history archive
         if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
         run: |
-          for archive_path in data/forward_archive/stock_daily data/forward_archive/stock_daily_manifest data/forward_archive/industry_flow_daily.jsonl data/policy_catalysts/discovered_candidates.jsonl data/global_news/discovered_candidates.jsonl; do
+          for archive_path in data/forward_archive/stock_daily data/forward_archive/stock_daily_manifest data/forward_archive/industry_flow_daily.jsonl data/forward_archive/industry_index_history data/forward_archive/sw_industry_universe data/forward_archive/sw_industry_history_cache.jsonl data/policy_catalysts/discovered_candidates.jsonl data/global_news/discovered_candidates.jsonl; do
             if [ -e "$archive_path" ]; then
               git add -A "$archive_path"
             fi

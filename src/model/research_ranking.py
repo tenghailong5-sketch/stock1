@@ -12,12 +12,13 @@ import pandas as pd
 
 RESEARCH_FACTORS = {
     # Weights are renormalized across observed factors for each row.
-    "industry_strength": ("industry_relative_strength", True, 0.25),
-    "current_momentum": ("涨跌幅%", True, 0.30),
-    "current_liquidity": ("当日成交额", True, 0.15),
-    "industry_flow_concentration": ("industry_turnover_share_change_3d", True, 0.15),
-    "mainline_lifecycle": ("live_mainline_phase_score", True, 0.10),
-    "policy_catalyst": ("live_policy_catalyst_score", True, 0.05),
+    "industry_strength": ("industry_relative_strength", True, 0.20),
+    "current_momentum": ("涨跌幅%", True, 0.15),
+    "current_liquidity": ("当日成交额", True, 0.10),
+    "industry_flow_concentration": ("industry_turnover_share_change_3d", True, 0.20),
+    "mainline_lifecycle": ("live_mainline_phase_score", True, 0.15),
+    "policy_catalyst": ("live_policy_catalyst_recency_score", True, 0.10),
+    "emotion_ice_reversal": ("live_emotion_reversal_score", True, 0.10),
     "price_structure": ("price_structure", True, 0.0),
     "body_strength": ("BodyStrength", True, 0.0),
     "upper_shadow_quality": ("upper_shadow_ratio", False, 0.0),
@@ -80,6 +81,8 @@ def build_research_opportunity_ranking(
             "mainline_phase_gated", "strength_percentile", "turnover_share",
             "turnover_share_change_1d", "turnover_share_change_3d",
             "startup_evidence_status", "startup_policy_status",
+            "emotion_reversal_component", "policy_catalyst_age_sessions",
+            "policy_catalyst_recency_score",
             "peak_evidence", "decay_evidence", "phase_gate_reason",
             "membership_observed_at", "mainline_trade_date",
             "live_catalyst_candidate_count", "live_event_price_in_state",
@@ -97,6 +100,7 @@ def build_research_opportunity_ranking(
             "turnover_share_change_3d": "live_industry_turnover_share_change_3d",
             "startup_evidence_status": "live_startup_evidence_status",
             "startup_policy_status": "live_startup_policy_status",
+            "policy_catalyst_recency_score": "live_policy_catalyst_recency_score",
         })
         out = out.merge(context, on="symbol", how="left", validate="one_to_one")
         live_flow_change = pd.to_numeric(
@@ -133,13 +137,23 @@ def build_research_opportunity_ranking(
         policy_scores = {
             "POSITIVE_CATALYST": 100.0,
             "NEGATIVE_CATALYST": 0.0,
-            "NO_MAPPED_CATALYST": 50.0,
         }
         out["live_policy_catalyst_score"] = (
             out["live_startup_policy_status"].astype(str).map(policy_scores)
         )
     else:
         out["live_policy_catalyst_score"] = np.nan
+    if "live_policy_catalyst_recency_score" not in out:
+        out["live_policy_catalyst_recency_score"] = out["live_policy_catalyst_score"]
+    else:
+        out["live_policy_catalyst_recency_score"] = pd.to_numeric(
+            out["live_policy_catalyst_recency_score"], errors="coerce"
+        ).combine_first(out["live_policy_catalyst_score"])
+    if "emotion_reversal_component" in out:
+        emotion = out["emotion_reversal_component"].astype("boolean")
+        out["live_emotion_reversal_score"] = emotion.map({True: 100.0, False: 0.0}).astype(float)
+    else:
+        out["live_emotion_reversal_score"] = np.nan
 
     ranked_columns = []
     available_factors = []
@@ -180,6 +194,21 @@ def build_research_opportunity_ranking(
     out["research_opportunity_rank"] = (
         out["research_opportunity_score"].rank(method="min", ascending=False).astype("Int64")
     )
+    # Separate genuine mainline-backed opportunities from momentum-only fallbacks.
+    # An industry label or same-day relative strength alone is not proof of a live mainline.
+    mainline_evidence_columns = [
+        "industry_flow_concentration_percentile",
+        "mainline_lifecycle_percentile",
+        "policy_catalyst_percentile",
+    ]
+    mainline_evidence_count = out[mainline_evidence_columns].notna().sum(axis=1)
+    out["research_mainline_evidence_count"] = mainline_evidence_count.astype(int)
+    out["research_rank_tier"] = np.where(
+        mainline_evidence_count.gt(0),
+        "MAINLINE_BACKED_RESEARCH",
+        "MOMENTUM_ONLY_WATCH",
+    )
+    out["research_rank_priority"] = np.where(mainline_evidence_count.gt(0), 0, 1)
     out["research_rank_status"] = np.select(
         [
             out["research_opportunity_score"].notna() & mainline_anchor_ready,
@@ -200,8 +229,8 @@ def build_research_opportunity_ranking(
     out["research_rank_formal_m5_score"] = False
     out["research_rank_buy_authorization"] = False
     out = out.sort_values(
-        ["research_opportunity_score", "research_factor_count", "symbol"],
-        ascending=[False, False, True], na_position="last",
+        ["research_rank_priority", "research_opportunity_score", "research_factor_count", "symbol"],
+        ascending=[True, False, False, True], na_position="last",
     ).reset_index(drop=True)
     audit = {
         "status": (
@@ -222,6 +251,9 @@ def build_research_opportunity_ranking(
         "factor_count": len(RESEARCH_FACTORS),
         "factor_sources": {name: source for name, (source, _, _) in RESEARCH_FACTORS.items()},
         "factor_weights": {name: weight for name, (_, _, weight) in RESEARCH_FACTORS.items() if weight > 0},
+        "mainline_backed_ranked_count": int((out["research_rank_tier"] == "MAINLINE_BACKED_RESEARCH").sum()),
+        "momentum_only_watch_count": int((out["research_rank_tier"] == "MOMENTUM_ONLY_WATCH").sum()),
+        "rank_priority_policy": "mainline-backed opportunities precede momentum-only watches; no missing factor imputation",
         "score_method": "weighted_observed_percentiles_renormalized_per_row",
         "allow_quote_only_fallback": allow_quote_only_fallback,
         "uses_raw_cross_session_returns": False,
@@ -280,7 +312,11 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
         phase_eligible = ~phase_values.isin({"PEAK", "DECAY"})
         phase_filtered_count = int((~phase_eligible).sum())
         ordinary = ordinary.loc[phase_eligible].copy()
-    ordinary = ordinary.sort_values(["research_opportunity_score", "amount", "symbol"], ascending=[False, False, True])
+    if "research_rank_priority" in ordinary:
+        ordinary["research_rank_priority"] = pd.to_numeric(ordinary["research_rank_priority"], errors="coerce").fillna(1)
+        ordinary = ordinary.sort_values(["research_rank_priority", "research_opportunity_score", "amount", "symbol"], ascending=[True, False, False, True])
+    else:
+        ordinary = ordinary.sort_values(["research_opportunity_score", "amount", "symbol"], ascending=[False, False, True])
     # Market emotion controls the breadth of the research watchlist, not the
     # relative stock score. Unknown emotion preserves discovery but is explicit.
     regime_caps = {
@@ -308,7 +344,11 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
     shortlist = pd.DataFrame(selected, columns=ordinary.columns).reset_index(drop=True)
     if not shortlist.empty:
         shortlist.insert(0, "final_candidate_rank", np.arange(1, len(shortlist) + 1))
-        shortlist["candidate_status"] = "RESEARCH_WATCH"
+        shortlist["candidate_status"] = np.where(
+            shortlist.get("research_rank_tier", pd.Series("MOMENTUM_ONLY_WATCH", index=shortlist.index)).eq("MAINLINE_BACKED_RESEARCH"),
+            "MAINLINE_BACKED_RESEARCH_WATCH",
+            "MOMENTUM_ONLY_WATCH",
+        )
         shortlist["entry_confirmation_status"] = "PENDING_15M_CONFIRMATION"
         shortlist["buy_authorization"] = False
         if phase_column:
@@ -346,5 +386,6 @@ def build_final_candidate_shortlist(ranked: pd.DataFrame, *, max_candidates: int
         event_watch = event_watch.sort_values(["research_opportunity_score", "amount"], ascending=[False, False]).reset_index(drop=True)
         event_watch.insert(0, "event_watch_rank", np.arange(1, len(event_watch) + 1))
         event_watch["buy_authorization"] = False
-    audit = {"status": "READY_RESEARCH_WATCH" if not shortlist.empty else "NO_ORDINARY_CANDIDATES", "ranked_input_count": int(len(data)), "liquid_valid_count": int(len(valid)), "mainline_phase_filtered_count": phase_filtered_count, "mainline_phase_filter": "exclude observed PEAK/DECAY; retain UNKNOWN as non-authorizing research watch", "candidate_count": int(len(shortlist)), "event_watch_count": int(len(event_watch)), "market_cycle_state": regime_state, "market_regime_candidate_cap": effective_candidate_cap, "market_regime_policy": "ICE<=10; RECOVERY<=max; TRANSITION<=20; HEAT<=15; EXHAUSTION<=5; UNKNOWN<=max_with_warning", "industry_cap": int(max_per_industry), "minimum_amount": float(min_amount), "ordinary_pct_change_range": [float(min_pct_change), float(max_pct_change)], "entry_confirmation": "PENDING_15M_CONFIRMATION", "buy_authorization": False}
+    tier_counts = shortlist.get("candidate_status", pd.Series(dtype=str)).value_counts().to_dict() if not shortlist.empty else {}
+    audit = {"status": "READY_RESEARCH_WATCH" if not shortlist.empty else "NO_ORDINARY_CANDIDATES", "ranked_input_count": int(len(data)), "liquid_valid_count": int(len(valid)), "mainline_phase_filtered_count": phase_filtered_count, "mainline_phase_filter": "exclude observed PEAK/DECAY; retain UNKNOWN as non-authorizing research watch", "candidate_count": int(len(shortlist)), "mainline_backed_candidate_count": int(tier_counts.get("MAINLINE_BACKED_RESEARCH_WATCH", 0)), "momentum_only_watch_count": int(tier_counts.get("MOMENTUM_ONLY_WATCH", 0)), "event_watch_count": int(len(event_watch)), "market_cycle_state": regime_state, "market_regime_candidate_cap": effective_candidate_cap, "market_regime_policy": "ICE<=10; RECOVERY<=max; TRANSITION<=20; HEAT<=15; EXHAUSTION<=5; UNKNOWN<=max_with_warning", "industry_cap": int(max_per_industry), "minimum_amount": float(min_amount), "ordinary_pct_change_range": [float(min_pct_change), float(max_pct_change)], "entry_confirmation": "PENDING_15M_CONFIRMATION", "buy_authorization": False}
     return shortlist, event_watch, audit

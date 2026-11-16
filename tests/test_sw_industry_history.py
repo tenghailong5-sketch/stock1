@@ -83,18 +83,19 @@ def test_fetch_uses_official_workbook_and_normalizes_response():
         calls.append((url, headers, timeout))
         return Response()
 
-    def fake_read_excel(_):
-        return source_rows()
+    def fake_sheet_rows(_):
+        frame = source_rows()
+        return list(frame.columns), iter(frame.astype(object).values.tolist())
 
-    import src.providers.sw_industry_history as provider
-    original = provider.pd.read_excel
-    provider.pd.read_excel = fake_read_excel
+    import src.providers.sw_industry as sw_provider
+    original = sw_provider._sheet_rows
+    sw_provider._sheet_rows = fake_sheet_rows
     try:
         result = fetch_sw_industry_history(
             http_get=fake_get, fetched_at="2026-11-15T00:00:00Z"
         )
     finally:
-        provider.pd.read_excel = original
+        sw_provider._sheet_rows = original
 
     assert len(calls) == 1
     assert "swsresearch.com" in calls[0][0]
@@ -107,3 +108,31 @@ def test_fetch_failure_is_reported_not_returned_as_empty_data():
         raise ConnectionError("offline")
     with pytest.raises(RuntimeError, match="fetch/parse failed"):
         fetch_sw_industry_history(http_get=fail_get)
+
+
+def test_fetch_uses_recent_cache_after_live_transport_failure(tmp_path):
+    cache = tmp_path / "sw-history.jsonl"
+    seeded = normalize_sw_industry_history(
+        source_rows(), fetched_at="2026-11-14T00:00:00Z"
+    )
+    seeded.assign(
+        valid_from=seeded.valid_from.dt.strftime("%Y-%m-%d"),
+        valid_to=seeded.valid_to.dt.strftime("%Y-%m-%d"),
+        source_update_date=seeded.source_update_date.dt.strftime("%Y-%m-%d"),
+        observed_at=seeded.observed_at.astype(str),
+        available_time=seeded.available_time.astype(str),
+    ).to_json(cache, orient="records", lines=True, force_ascii=False)
+
+    def fail_get(*args, **kwargs):
+        raise ConnectionError("publisher unavailable")
+
+    result = fetch_sw_industry_history(
+        http_get=fail_get,
+        fetched_at="2026-11-15T00:00:00Z",
+        cache_path=cache,
+        retry_attempts=1,
+    )
+    assert result.attrs["provider_status"] == "CACHED_FALLBACK"
+    assert set(result.symbol) == {"000001", "600000"}
+    assert result.historical_pit_eligible.eq(False).all()
+    assert result.availability_basis.eq("retrieval_time_only").all()

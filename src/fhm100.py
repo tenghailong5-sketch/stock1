@@ -33,6 +33,7 @@ from src.model.live_decision_integration import (
 )
 from src.model.mainline_flows import attach_pit_stock_turnover_concentration
 from src.model.catalyst_mapping import map_candidate_sectors
+from src.model.catalyst_mapping import map_candidate_sectors
 from src.model.archive_readiness import audit_forward_archive
 from src.model.shortline_architecture import audit_shortline_architecture
 from src.model.research_ranking import build_research_opportunity_ranking, build_final_candidate_shortlist
@@ -816,6 +817,32 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
 
     structure_rank = _cross_section_percentile("CLV")
     trade_quality_rank = _cross_section_percentile("20日平均成交额")
+    # Live-only residual strength: compare today's official quote return with
+    # the same-industry median. This is a same-session observation, not a
+    # substitute for multi-session adjusted returns or historical PIT factors.
+    pct_change_col = next((name for name in ("涨跌幅%", "pct_chg") if name in base), None)
+    residual_group_col = next((
+        name for name in ("current_forward_industry_code", "sw_history_industry_code", "current_industry_level1")
+        if name in base
+    ), None)
+    live_stock_residual_rank = pd.Series(np.nan, index=base.index, dtype=float)
+    live_stock_residual_top20 = pd.Series(None, index=base.index, dtype=object)
+    if pct_change_col is not None and residual_group_col is not None:
+        live_pct = pd.to_numeric(base[pct_change_col], errors="coerce")
+        live_group = base[residual_group_col].astype("string").str.strip()
+        valid_group = live_group.notna() & live_group.ne("")
+        group_size = live_group.where(valid_group).groupby(live_group.where(valid_group)).transform("count")
+        group_median = live_pct.where(valid_group).groupby(live_group.where(valid_group)).transform("median")
+        residual = live_pct - group_median
+        valid_residual = valid_group & group_size.ge(3) & residual.notna()
+        if valid_residual.any():
+            ranks = residual.loc[valid_residual].groupby(live_group.loc[valid_residual]).rank(
+                method="average", pct=True,
+            ) * 100.0
+            live_stock_residual_rank.loc[ranks.index] = ranks
+            live_stock_residual_top20.loc[ranks.index] = (
+                residual.loc[ranks.index].gt(0) & ranks.ge(80.0)
+            ).astype(bool)
     amount_ma20 = pd.to_numeric(
         base.get("20日平均成交额", pd.Series(np.nan, index=base.index)),
         errors="coerce",
@@ -865,13 +892,19 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
             # bounded-universe ranking basis.
             "industry_relative_strength": industry_value,
             "industry_strength": industry_value,
+            "live_stock_residual_strength": live_stock_residual_rank.loc[idx],
+            "live_stock_residual_top_20pct": live_stock_residual_top20.loc[idx],
+            # Formal cross-session residual is emitted only from a verified PIT snapshot.
+            "live_stock_residual_strength_basis": (
+                "same_session_excess_vs_industry_median"
+                if pd.notna(live_stock_residual_rank.loc[idx]) else None
+            ),
             "price_structure": structure_rank.loc[idx],
             "trade_quality": trade_quality_rank.loc[idx],
             # A/B/C factors not supported by this run's PIT data remain absent.
             "industry_top_30pct": (
                 bool(industry_value >= 70.0) if pd.notna(industry_value) else None
             ),
-            "stock_residual_top_20pct": None,
             "amount_ma20_ge_100m": (
                 bool(amount_ma20.loc[idx] >= MIN_AMOUNT)
                 if pd.notna(amount_ma20.loc[idx]) else None
@@ -893,6 +926,10 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
                 else "missing_or_ambiguous_industry_mapping"
             ),
         }
+        # Keep the formal PIT schema as explicitly missing for legacy/PIT-shaped inputs.
+        # Pure current-forward inputs expose only live_* diagnostics, never PIT factor columns.
+        if "current_forward_industry_code" not in watchlist.columns:
+            row["stock_residual_top_20pct"] = None
         if pit_row:
             # Percentiles are already ranked within their declared PIT peer set.
             # Never synthesize a score from a raw return or a forward-only overlay.
@@ -1464,11 +1501,17 @@ def main():
         sw_history_audit = {"status": "UNAVAILABLE", "historical_pit_eligible": False,
                             "trading_authorization": False}
         try:
-            sw_history = fetch_sw_industry_history()
+            sw_history = fetch_sw_industry_history(
+                cache_path=Path("data/forward_archive/sw_industry_history_cache.jsonl"),
+                fetched_at=now,
+            )
             sw_research, sw_history_audit = select_sw_industry_research_snapshot(
                 sw_history, expected_symbols,
                 as_of_date=now.astimezone(ZoneInfo("Asia/Shanghai")).date(),
             )
+            sw_history_audit["provider_status"] = sw_history.attrs.get("provider_status", "LIVE")
+            if sw_history.attrs.get("live_fetch_error"):
+                sw_history_audit["live_fetch_error"] = sw_history.attrs["live_fetch_error"]
             sw_stock_mainline, sw_stock_mainline_audit = build_sw_stock_mainline_research(
                 sw_research, runtime_mainline,
                 as_of_date=now.astimezone(ZoneInfo("Asia/Shanghai")).date(),
@@ -1791,7 +1834,7 @@ def main():
             }
     try:
         final_candidates, momentum_event_watch, final_candidate_audit = build_final_candidate_shortlist(
-            research_opportunities, max_candidates=30, max_per_industry=3,
+            research_opportunities, max_candidates=20, max_per_industry=3,
             min_amount=100_000_000, min_pct_change=-5.0, max_pct_change=9.5,
         )
     except Exception as shortlist_exc:
@@ -2003,17 +2046,16 @@ def main():
     # audits, but does not invalidate a current-quote research result.
     if len(u) == 0:
         formal_blockers.append("LIVE_UNIVERSE_UNAVAILABLE")
-    # M5 is enforced per strategy/candidate in the four-layer gate above;
-    # M6 is an optional prediction sidecar, not a prerequisite of M2->M3->M5->M8.
-    # Keep only the independent execution-validation requirement here.
-    formal_blockers.append("M9_EXECUTION_AWARE_BACKTEST_NOT_ADMITTED")
+    # M9 execution-aware backtesting is a later validation lane, not a runtime prerequisite.
     if decision_gate_audit.get("m8_risk_context_complete_symbol_count", 0) == 0:
         formal_blockers.append("M8_DYNAMIC_RISK_CONTEXT_NOT_AVAILABLE")
     if decision_gate_audit.get("allowed_count", 0) == 0:
         formal_blockers.append("FOUR_LAYER_DECISION_GATE_BLOCKED_ALL_CANDIDATES")
+    research_run_status = "COMPLETED" if len(u) > 0 else "FAILED_NO_LIVE_UNIVERSE"
     formal_status = "BLOCKED_FORMAL_SIGNAL" if formal_blockers else "READY"
     (OUT/"formal_gate.json").write_text(json.dumps({
         "status": formal_status,
+        "research_run_status": research_run_status,
         "blockers": formal_blockers,
         "live_universe_count": int(len(u)),
         "history_scan_universe_count": int(len(history_universe)),
@@ -2029,6 +2071,25 @@ def main():
     e.to_csv(OUT/"data_errors.csv",index=False,encoding="utf-8-sig")
     observation_audit.to_csv(OUT/"m4_observation_audit.csv",index=False,encoding="utf-8-sig")
     c=w[w["技术观察通过"]&w["流动性观察通过"]]
+    minute_plan_columns = [
+        "symbol", "minute_status", "minute_entry_ready",
+        "entry_reference_price", "breakout_trigger_price",
+        "stop_reference_price", "stop_distance_pct", "invalidation_condition",
+        "m8_price_source", "m8_sized_quantity", "m8_estimated_loss",
+        "m8_cash_required", "m8_risk_context_complete",
+    ]
+    minute_trade_plan = pd.DataFrame()
+    if not decision_gates.empty and set(minute_plan_columns).issubset(decision_gates.columns):
+        confirmed_rows = decision_gates.loc[
+            decision_gates["minute_entry_ready"].map(
+                lambda value: isinstance(value, (bool, np.bool_)) and bool(value)
+            )
+        ]
+        minute_trade_plan = (
+            confirmed_rows[minute_plan_columns].drop_duplicates("symbol")
+            .dropna(subset=["entry_reference_price", "stop_reference_price"])
+            .reset_index(drop=True)
+        )
     lines=["# FHM-100 自动研究扫描报告",f"- 运行时间：{now.isoformat()}",
       f"- 全市场实时行情快照：{len(u)}只（含沪深北及科创板；见market_snapshot.csv）",
       f"- 深度历史扫描池：{len(history_universe)}只；扫描上限={history_pool_audit.get('history_scan_limit')}；全市场扫描={history_pool_audit.get('full_market_history_scan', False)}",
@@ -2051,12 +2112,11 @@ def main():
       f"- 申万个股-行业主线研究映射：{sw_stock_mainline_audit.get('status')}；覆盖={sw_stock_mainline_audit.get('matched_symbols', 0)}/{sw_stock_mainline_audit.get('active_membership_symbols', 0)}；仅作研究展示，不具备历史PIT或交易授权",
       f"- 公司行为前瞻账本：{corporate_action_audit.get('status')}；候选扫描={corporate_action_audit.get('symbols_checked', 0)}只；新增事件版本={corporate_action_audit.get('rows_appended', 0)}；仅首次观察之后可用，未验证总回报，不参与评分或交易授权",
       f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
-      f"- 五层短线架构审计：{shortline_architecture.get('status')}；候选={shortline_architecture.get('candidate_count', 0)}；PIT可用={shortline_architecture.get('pit_backed_candidate_count', 0)}；权重保持冻结",
-      f"- 研究机会排序：{research_opportunity_audit.get('ranked_count', 0)}/{research_opportunity_audit.get('row_count', 0)}只；行业强度35%、当日动量45%、成交额20%，行业映射缺失时退化为行情动量+成交额排序；不是正式M5分数或买入授权",
-      f"- 最终候选观察名单：{final_candidate_audit.get('candidate_count', 0)}只；单行业最多3只；成交额至少1亿元；涨幅区间-5%至+9.5%；15分钟确认待执行",
+      f"- 研究机会排序：{research_opportunity_audit.get('ranked_count', 0)}/{research_opportunity_audit.get('row_count', 0)}只；权重=行业强度20%、当日动量15%、成交额10%、行业资金集中变化20%、主线阶段15%、政策催化时效10%、情绪冰点反转10%；主线证据候选优先，纯动量观察单独分层；缺失项不补值；不是正式M5分数或买入授权",
+      f"- 最终候选观察名单：{final_candidate_audit.get('candidate_count', 0)}只；主线证据候选={final_candidate_audit.get('mainline_backed_candidate_count', 0)}只；纯动量观察={final_candidate_audit.get('momentum_only_watch_count', 0)}只；单行业最多3只；成交额至少1亿元；涨幅区间-5%至+9.5%；不代表买入授权",
       f"- 强势事件观察：{final_candidate_audit.get('event_watch_count', 0)}只；涨幅达到9.5%的股票单独观察，不混入普通候选，不追高",
-      f"- M5诊断记录：{len(m5)}（每只股票A/B/C各一条；不代表正式评分）",
-      f"- 四层决策门：{decision_gate_audit.get('status')}；检查记录={decision_gate_audit.get('candidate_count', 0)}；15分钟扫描={decision_gate_audit.get('minute_scanned_count', 0)}；准入={decision_gate_audit.get('allowed_count', 0)}；阻断={decision_gate_audit.get('blocked_count', 0)}",
+      f"- M5诊断记录：{len(m5)}；实时同业当日超额强度可用={int(m5_input['live_stock_residual_strength'].notna().sum()) if 'live_stock_residual_strength' in m5_input else 0}只；同日因子仅用于前瞻诊断，不替代历史PIT",
+      f"- 四层决策门：{decision_gate_audit.get('status')}；检查记录={decision_gate_audit.get('candidate_count', 0)}；15分钟扫描={decision_gate_audit.get('minute_scanned_count', 0)}；M8风险上下文完整股票={decision_gate_audit.get('m8_risk_context_complete_symbol_count', 0)}；准入={decision_gate_audit.get('allowed_count', 0)}；阻断={decision_gate_audit.get('blocked_count', 0)}",
       f"- 正式模型状态：{formal_status}",
       "## 正式模型阻塞项",
       *[f"- {reason}" for reason in formal_blockers],
@@ -2068,9 +2128,11 @@ def main():
       (m5_blockers.head(15).to_string(index=False) if len(m5_blockers) else "本次没有股票诊断记录；这不代表模型阻塞项为零。"), "",
       "## 模型状态（重要）",
       "**本次不是正式FHM-100信号。** 行业相对强度、市场/行业滚动Beta残差、完整涨跌停事件、经样本外校准的M6收益预测、M8组合风险及M9回测尚未完成。",
-      "M4已新增CLV、BodyStrength、5/10/20日收益、20日突破和上影线的横截面观察分位，并输出m4_observation_audit.csv。分位仅在同一交易日、声明的当前高成交额股票池完整覆盖且因子覆盖率达到80%；低于80%则不生成分位时生成；不完整则全部留空。它们不是价格结构/成交质量复合分，也未接入M5。M3仅在前瞻归档状态READY时传入M5；行业/残差分位及策略硬门槛仍未全部接入，因此M5仍是诊断而非正式评分。",
+      "M5已接入当前行情的同业当日超额强度诊断，并明确标记为live-forward；政策催化、跨日筹码/残差、突破回踩结构和M8组合风险仍须各自具备真实数据。缺失项不补零、不伪造PIT，未满足策略门槛时不发正式信号。",
       "不输出A/B/C正式评分、P_up、预期收益或买入指令；观察名单不等于达到80分门槛。AI仅作文字点评，不参与评分、不放宽硬门槛。",
       "价格口径：本扫描仅用未复权原始日线；尚无点时公司行为账本，分红送转附近的跨日收益/均线可能失真，相关观察值不得进入正式模型评分或回测标签。",
+      "## 15分钟交易参考（仅在当前有效交易时段、完整K线确认后生成）",
+      (minute_trade_plan.head(20).to_markdown(index=False) if not minute_trade_plan.empty else "当前未取得有效的当日15分钟确认数据；不猜测入场价和止损价，等待有效交易时段重新扫描。"),
       "## 最终候选观察名单（不是买入指令；15分钟确认待执行）",
       (final_candidates.head(30).to_markdown(index=False)
        if not final_candidates.empty else "本次没有满足普通候选观察条件的股票；完整排序见research_opportunity_rank.csv。"),
@@ -2107,7 +2169,7 @@ def main():
       "sw_industry_history_research_audit":sw_history_audit,
       "sw_stock_mainline_research_audit":sw_stock_mainline_audit,
       "corporate_action_ledger_audit":corporate_action_audit,
-      "formal_status":formal_status,"formal_blockers":formal_blockers},ensure_ascii=False,indent=2),encoding="utf-8")
+      "research_run_status":research_run_status,"formal_status":formal_status,"formal_blockers":formal_blockers},ensure_ascii=False,indent=2),encoding="utf-8")
     print(report); print(status)
     if push_error is not None:
         raise RuntimeError(status) from push_error

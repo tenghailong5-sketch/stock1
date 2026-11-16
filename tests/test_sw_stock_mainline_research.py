@@ -247,3 +247,33 @@ def test_forward_mapper_carries_live_m3_persistence_readiness_to_each_stock():
     )
     readiness = result.set_index("symbol")["persistence_ready"].to_dict()
     assert readiness == {"000001": False, "600000": True}
+
+
+def test_forward_mapper_carries_emotion_reversal_and_policy_timing_to_stocks():
+    from src.model.sw_stock_mainline_research import build_forward_stock_mainline_research
+
+    membership = pd.DataFrame([{
+        "symbol": "600000", "industry_level1": "银行",
+        "observed_at": "2026-11-14T13:00:00Z",
+        "availability_basis": "retrieval_time_only",
+        "historical_pit_eligible": False,
+        "source_id": "snapshot", "source_revision": "rev-a",
+        "snapshot_scope": "current_membership_observation_only",
+    }])
+    mainline = pd.DataFrame([{
+        "industry_code": "801780", "industry_name": "银行",
+        "trade_date": "2026-11-13", "mainline_phase": "IGNITION",
+        "mainline_phase_gated": "IGNITION",
+        "strength_percentile": 0.9,
+        "emotion_reversal_component": True,
+        "policy_catalyst_age_sessions": 1.0,
+        "policy_catalyst_recency_score": 80.0,
+    }])
+    result, _ = build_forward_stock_mainline_research(
+        membership, mainline, decision_time="2026-11-15T10:00:00Z"
+    )
+    row = result.iloc[0]
+    assert bool(row["emotion_reversal_component"])
+    assert row["policy_catalyst_age_sessions"] == 1.0
+    assert row["policy_catalyst_recency_score"] == 80.0
+    assert bool(row["historical_pit_eligible"]) is False

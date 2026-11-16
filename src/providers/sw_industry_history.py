@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from io import BytesIO
+from pathlib import Path
+import time
 
 import pandas as pd
 import requests
@@ -98,21 +99,83 @@ def normalize_sw_industry_history(
     return out[OUTPUT_COLUMNS].reset_index(drop=True)
 
 
-def fetch_sw_industry_history(*, http_get=None, fetched_at=None) -> pd.DataFrame:
-    """Fetch the official SW workbook; network and schema errors fail closed."""
+def fetch_sw_industry_history(
+    *, http_get=None, fetched_at=None, cache_path: str | Path | None = None,
+    timeout: int = 35, retry_attempts: int = 2, sleep_fn=time.sleep,
+) -> pd.DataFrame:
+    """Fetch SW history with pinned-TLS retry and a recent research-only cache fallback."""
     getter = http_get or requests.get
-    try:
-        response = getter(
-            SW_INDUSTRY_HISTORY_URL,
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=60,
-        )
-        response.raise_for_status()
-        frame = pd.read_excel(BytesIO(response.content))
-    except Exception as exc:
-        raise RuntimeError(
-            f"SW industry history fetch/parse failed: {type(exc).__name__}: {str(exc)[:180]}"
-        ) from exc
-    if frame is None or frame.empty:
-        raise RuntimeError("SW industry history workbook is empty")
-    return normalize_sw_industry_history(frame, fetched_at=fetched_at)
+    last_error = None
+    payload = None
+    for attempt in range(max(1, int(retry_attempts))):
+        try:
+            try:
+                response = getter(
+                    SW_INDUSTRY_HISTORY_URL,
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                payload = response.content
+            except requests.exceptions.SSLError:
+                # Reuse the already fingerprint-pinned SW certificate adapter.
+                from src.providers.sw_industry import _download_xls
+                payload = _download_xls(requests, SW_INDUSTRY_HISTORY_URL, timeout)
+            # Use the same xlrd/OLE parser as the stable SW membership provider.
+            # pandas.read_excel can return an empty/misread header for this legacy XLS.
+            from src.providers.sw_industry import _sheet_rows
+            headers, rows = _sheet_rows(payload)
+            frame = pd.DataFrame(list(rows), columns=headers)
+            if frame.empty:
+                raise RuntimeError("SW industry history workbook is empty")
+            result = normalize_sw_industry_history(frame, fetched_at=fetched_at)
+            result.attrs["provider_status"] = "LIVE"
+            if cache_path is not None:
+                target = Path(cache_path)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                result.assign(
+                    valid_from=result.valid_from.dt.strftime("%Y-%m-%d"),
+                    valid_to=result.valid_to.dt.strftime("%Y-%m-%d"),
+                    source_update_date=result.source_update_date.dt.strftime("%Y-%m-%d"),
+                    observed_at=result.observed_at.astype(str),
+                    available_time=result.available_time.astype(str),
+                ).to_json(target, orient="records", lines=True, force_ascii=False)
+            return result
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            last_error = exc
+            if attempt + 1 < max(1, int(retry_attempts)):
+                sleep_fn(0.5 * (attempt + 1))
+        except Exception as exc:
+            last_error = exc
+            break
+
+    if cache_path is not None:
+        target = Path(cache_path)
+        if target.exists():
+            try:
+                cached = pd.read_json(target, lines=True, dtype={"symbol": "string", "industry_code": "string", "l1_code": "string", "l2_code": "string"})
+                required = set(OUTPUT_COLUMNS)
+                if not cached.empty and required.issubset(cached.columns):
+                    cached["valid_from"] = pd.to_datetime(cached.valid_from, errors="coerce")
+                    cached["valid_to"] = pd.to_datetime(cached.valid_to, errors="coerce")
+                    cached["source_update_date"] = pd.to_datetime(cached.source_update_date, errors="coerce")
+                    cached["observed_at"] = pd.to_datetime(cached.observed_at, errors="coerce", utc=True)
+                    cached["available_time"] = pd.to_datetime(cached.available_time, errors="coerce", utc=True)
+                    cached = cached.dropna(subset=["valid_from", "observed_at", "available_time"])
+                    cutoff = pd.Timestamp(fetched_at) if fetched_at is not None else pd.Timestamp.now(tz="UTC")
+                    if cutoff.tzinfo is None:
+                        raise ValueError("fetched_at must be timezone-aware")
+                    latest = cached.observed_at.max()
+                    if (cutoff.tz_convert("UTC") - latest).total_seconds() <= 14 * 86400:
+                        cached["historical_pit_eligible"] = False
+                        cached["availability_basis"] = "retrieval_time_only"
+                        cached.attrs["provider_status"] = "CACHED_FALLBACK"
+                        cached.attrs["live_fetch_error"] = (
+                            f"{type(last_error).__name__}: {str(last_error)[:180]}"
+                        )
+                        return cached[OUTPUT_COLUMNS].copy()
+            except Exception:
+                pass
+    raise RuntimeError(
+        f"SW industry history fetch/parse failed: {type(last_error).__name__}: {str(last_error)[:180]}"
+    ) from last_error

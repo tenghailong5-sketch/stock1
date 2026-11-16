@@ -151,6 +151,17 @@ def confirm_15m_breakout(
         "positive_turnover": bool(float(latest.amount) > 0),
     }
     passed = all(checks.values())
+    entry_reference_price = float(latest.close)
+    breakout_trigger_price = prior_high
+    stop_reference_price = min(float(latest.low), prior_high)
+    stop_distance_pct = (
+        (entry_reference_price - stop_reference_price) / entry_reference_price * 100.0
+        if entry_reference_price > stop_reference_price else None
+    )
+    invalidation_condition = (
+        f"15分钟收盘跌破结构止损参考位{stop_reference_price:.4f}，"
+        f"或重新跌回突破触发位{breakout_trigger_price:.4f}下方"
+    )
     return {
         "status": "CONFIRMED_15M_BREAKOUT" if passed else "NO_15M_CONFIRMATION",
         "entry_ready": passed,
@@ -160,6 +171,11 @@ def confirm_15m_breakout(
         "bar_end_time": bar_end.isoformat(),
         "available_time": capture.isoformat(),
         "latest_close": float(latest.close),
+        "entry_reference_price": entry_reference_price,
+        "breakout_trigger_price": breakout_trigger_price,
+        "stop_reference_price": stop_reference_price,
+        "stop_distance_pct": stop_distance_pct,
+        "invalidation_condition": invalidation_condition,
         "prior_lookback_high": prior_high,
         "volume_multiple": volume_multiple if np.isfinite(volume_multiple) else None,
         "checks": checks,
