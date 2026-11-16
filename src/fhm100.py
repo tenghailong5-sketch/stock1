@@ -2056,11 +2056,10 @@ def main():
     elif live_setup_count == 0:
         formal_status = "NO_CONFIRMED_15M_SETUP"
         formal_blockers = ["NO_15M_CONFIRMED_SETUP"]
-    elif m8_ready_count == 0:
-        formal_status = "LIVE_SETUPS_READY_RISK_SIZING_REQUIRED"
-        formal_blockers = ["M8_ACCOUNT_RISK_CONTEXT_REQUIRED_FOR_POSITION_SIZING"]
     else:
-        formal_status = "LIVE_SETUPS_READY_SIZING_AVAILABLE"
+        # Missing account context must never suppress research candidates.
+        # M8 sizing is optional metadata; it cannot block publishing live setups.
+        formal_status = "LIVE_RESEARCH_CANDIDATES_READY"
         formal_blockers = []
     research_run_status = "COMPLETED" if len(u) > 0 else "FAILED_NO_LIVE_UNIVERSE"
     (OUT/"formal_gate.json").write_text(json.dumps({
@@ -2069,7 +2068,7 @@ def main():
         "blockers": formal_blockers,
         "live_setup_count": live_setup_count,
         "buy_authorization": False,
-        "decision_policy": "live_15m_setup_first; legacy M2/M3/M5 historical gates are diagnostics only; M8 controls position sizing and never fabricates quantity",
+        "decision_policy": "publish ranked live research candidates regardless of M2/M3/M5/M8 availability; 15m confirmation is an execution annotation; M8 sizing is optional; buy_authorization remains false",
         "live_universe_count": int(len(u)),
         "history_scan_universe_count": int(len(history_universe)),
         "history_pool_audit": history_pool_audit,
