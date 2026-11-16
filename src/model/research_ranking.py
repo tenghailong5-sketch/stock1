@@ -13,11 +13,12 @@ import pandas as pd
 RESEARCH_FACTORS = {
     # Weights are renormalized across observed factors for each row.
     "industry_strength": ("industry_relative_strength", True, 0.25),
-    "current_momentum": ("涨跌幅%", True, 0.30),
-    "current_liquidity": ("当日成交额", True, 0.15),
-    "industry_flow_concentration": ("industry_turnover_share_change_3d", True, 0.15),
-    "mainline_lifecycle": ("live_mainline_phase_score", True, 0.10),
-    "policy_catalyst": ("live_policy_catalyst_score", True, 0.05),
+    "current_momentum": ("涨跌幅%", True, 0.15),
+    "current_liquidity": ("当日成交额", True, 0.10),
+    "industry_flow_concentration": ("industry_turnover_share_change_3d", True, 0.20),
+    "mainline_lifecycle": ("live_mainline_phase_score", True, 0.15),
+    "policy_catalyst": ("live_policy_catalyst_recency_score", True, 0.10),
+    "emotion_ice_reversal": ("live_emotion_reversal_score", True, 0.10),
     "price_structure": ("price_structure", True, 0.0),
     "body_strength": ("BodyStrength", True, 0.0),
     "upper_shadow_quality": ("upper_shadow_ratio", False, 0.0),
@@ -139,6 +140,17 @@ def build_research_opportunity_ranking(
         )
     else:
         out["live_policy_catalyst_score"] = np.nan
+    if "live_policy_catalyst_recency_score" not in out:
+        out["live_policy_catalyst_recency_score"] = out["live_policy_catalyst_score"]
+    else:
+        out["live_policy_catalyst_recency_score"] = pd.to_numeric(
+            out["live_policy_catalyst_recency_score"], errors="coerce"
+        ).combine_first(out["live_policy_catalyst_score"])
+    if "emotion_reversal_component" in out:
+        emotion = out["emotion_reversal_component"].astype("boolean")
+        out["live_emotion_reversal_score"] = emotion.map({True: 100.0, False: 0.0}).astype(float)
+    else:
+        out["live_emotion_reversal_score"] = np.nan
 
     ranked_columns = []
     available_factors = []
