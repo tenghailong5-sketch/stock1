@@ -13,22 +13,27 @@ import pandas as pd
 
 
 ALIASES = {
-    "时间": "bar_time", "日期": "bar_time", "开盘": "open",
+    "时间": "bar_time", "日期": "bar_time", "day": "bar_time", "开盘": "open",
     "最高": "high", "最低": "low", "收盘": "close",
     "成交量": "volume", "成交额": "amount",
     "bar_time": "bar_time", "open": "open", "high": "high",
     "low": "low", "close": "close", "volume": "volume", "amount": "amount",
 }
-REQUIRED = {"bar_time", "open", "high", "low", "close", "volume", "amount"}
+BAR_REQUIRED = {"bar_time", "open", "high", "low", "close", "volume"}
+REQUIRED = BAR_REQUIRED | {"amount"}
 
 
-def normalize_15m_bars(raw: pd.DataFrame, *, symbol: str, captured_at=None) -> pd.DataFrame:
+def normalize_15m_bars(raw: pd.DataFrame, *, symbol: str, captured_at=None, source_id="akshare.stock_zh_a_hist_min_em") -> pd.DataFrame:
     if raw is None or not isinstance(raw, pd.DataFrame) or raw.empty:
         raise ValueError("15-minute provider returned no bars")
     frame = raw.rename(columns={key: value for key, value in ALIASES.items() if key in raw.columns}).copy()
-    missing = REQUIRED - set(frame.columns)
+    missing = BAR_REQUIRED - set(frame.columns)
     if missing:
         raise ValueError("15-minute bars missing: " + ",".join(sorted(missing)))
+    # Sina's minute endpoint does not expose traded value; keep it missing.
+    # Never manufacture turnover from close * volume.
+    if "amount" not in frame.columns:
+        frame["amount"] = np.nan
     stamp = pd.Timestamp.now(tz="UTC") if captured_at is None else pd.Timestamp(captured_at)
     if stamp.tzinfo is None:
         raise ValueError("captured_at must be timezone-aware")
@@ -43,14 +48,17 @@ def normalize_15m_bars(raw: pd.DataFrame, *, symbol: str, captured_at=None) -> p
     frame["bar_time"] = times
     for column in ("open", "high", "low", "close", "volume", "amount"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    if frame[list(("open", "high", "low", "close", "volume", "amount"))].isna().any().any():
-        raise ValueError("15-minute OHLCV contains missing/non-numeric values")
-    if (~np.isfinite(frame[["open", "high", "low", "close", "volume", "amount"]])).any().any():
-        raise ValueError("15-minute OHLCV contains non-finite values")
+    if frame[["open", "high", "low", "close", "volume"]].isna().any().any():
+        raise ValueError("15-minute OHLCV contains missing/non-numeric core values")
+    if (~np.isfinite(frame[["open", "high", "low", "close", "volume"]])).any().any():
+        raise ValueError("15-minute OHLCV contains non-finite core values")
+    observed_amount = frame["amount"].dropna()
+    if not observed_amount.empty and (~np.isfinite(observed_amount)).any():
+        raise ValueError("15-minute traded value contains non-finite values")
     if (frame[["open", "high", "low", "close"]] <= 0).any().any():
         raise ValueError("15-minute prices must be positive")
-    if (frame[["volume", "amount"]] < 0).any().any():
-        raise ValueError("15-minute volume/amount cannot be negative")
+    if (frame["volume"] < 0).any() or (frame["amount"].dropna() < 0).any():
+        raise ValueError("15-minute volume/observed amount cannot be negative")
     if (frame["high"] < frame[["open", "low", "close"]].max(axis=1)).any():
         raise ValueError("15-minute high is inconsistent")
     if (frame["low"] > frame[["open", "high", "close"]].min(axis=1)).any():
@@ -63,7 +71,8 @@ def normalize_15m_bars(raw: pd.DataFrame, *, symbol: str, captured_at=None) -> p
     frame = frame.loc[frame["bar_end_time"].dt.tz_convert("UTC") <= stamp].copy()
     frame["symbol"] = str(symbol).strip().zfill(6)
     frame["available_time"] = stamp
-    frame["source_id"] = "akshare.stock_zh_a_hist_min_em"
+    frame["source_id"] = str(source_id)
+    frame["turnover_observed"] = frame["amount"].notna()
     frame["availability_basis"] = "retrieval_time_only"
     frame["historical_pit_eligible"] = False
     return frame.reset_index(drop=True)
@@ -148,7 +157,7 @@ def confirm_15m_breakout(
         "close_above_prior_high": bool(float(latest.close) > prior_high),
         "volume_expansion": bool(np.isfinite(volume_multiple) and volume_multiple >= minimum_volume_multiple),
         "positive_candle": bool(float(latest.close) >= float(latest.open)),
-        "positive_turnover": bool(float(latest.amount) > 0),
+        "positive_turnover": bool(float(latest.amount) > 0 if pd.notna(latest.amount) else float(latest.volume) > 0),
     }
     passed = all(checks.values())
     entry_reference_price = float(latest.close)
@@ -180,25 +189,53 @@ def confirm_15m_breakout(
         "volume_multiple": volume_multiple if np.isfinite(volume_multiple) else None,
         "checks": checks,
         "source_id": str(latest.get("source_id", "unknown")),
+        "turnover_basis": "observed_amount" if pd.notna(latest.amount) else "positive_volume_only_amount_unavailable",
         "availability_basis": str(latest.get("availability_basis", "unknown")),
         "historical_pit_eligible": False,
     }
 
 
-def fetch_live_15m_confirmation(symbol: str, *, captured_at=None, fetcher=None) -> dict:
-    """Fetch recent 15m bars from AKShare and return a live-only confirmation."""
-    if fetcher is None:
-        import akshare as ak
-        fetcher = ak.stock_zh_a_hist_min_em
+def fetch_live_15m_confirmation(
+    symbol: str, *, captured_at=None, fetcher=None, fallback_fetcher=None
+) -> dict:
+    """Fetch 15m bars with Eastmoney first and Sina fallback on provider failure."""
+    import akshare as ak
+
     capture = pd.Timestamp.now(tz="UTC") if captured_at is None else pd.Timestamp(captured_at)
     if capture.tzinfo is None:
         raise ValueError("captured_at must be timezone-aware")
     local_now = capture.tz_convert("Asia/Shanghai")
     start = (local_now - pd.Timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     end = local_now.strftime("%Y-%m-%d %H:%M:%S")
-    raw = fetcher(
-        symbol=str(symbol).zfill(6), period="15",
-        start_date=start, end_date=end, adjust="",
+    primary = fetcher or ak.stock_zh_a_hist_min_em
+    try:
+        raw = primary(
+            symbol=str(symbol).zfill(6), period="15",
+            start_date=start, end_date=end, adjust="",
+        )
+        source_id = "akshare.stock_zh_a_hist_min_em"
+    except Exception as primary_exc:
+        secondary = fallback_fetcher or ak.stock_zh_a_minute
+        code = str(symbol).strip().zfill(6)
+        if code.startswith("6"):
+            sina_symbol = "sh" + code
+        elif code.startswith(("0", "2", "3")):
+            sina_symbol = "sz" + code
+        else:
+            raise RuntimeError(
+                f"Eastmoney 15m failed and Sina fallback does not support symbol {code}: "
+                f"{type(primary_exc).__name__}:{str(primary_exc)[:180]}"
+            ) from primary_exc
+        try:
+            raw = secondary(symbol=sina_symbol, period="15", adjust="")
+            source_id = "akshare.stock_zh_a_minute_sina"
+        except Exception as fallback_exc:
+            raise RuntimeError(
+                "15m providers failed; Eastmoney="
+                f"{type(primary_exc).__name__}:{str(primary_exc)[:120]}; Sina="
+                f"{type(fallback_exc).__name__}:{str(fallback_exc)[:120]}"
+            ) from fallback_exc
+    normalized = normalize_15m_bars(
+        raw, symbol=symbol, captured_at=capture, source_id=source_id
     )
-    normalized = normalize_15m_bars(raw, symbol=symbol, captured_at=capture)
     return confirm_15m_breakout(normalized)
