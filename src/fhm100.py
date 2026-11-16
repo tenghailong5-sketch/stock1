@@ -926,6 +926,10 @@ def build_m5_diagnostic_input(watchlist, market_context, mainline=None, *, pit_f
                 else "missing_or_ambiguous_industry_mapping"
             ),
         }
+        # Keep the formal PIT schema as explicitly missing for legacy/PIT-shaped inputs.
+        # Pure current-forward inputs expose only live_* diagnostics, never PIT factor columns.
+        if "current_forward_industry_code" not in watchlist.columns:
+            row["stock_residual_top_20pct"] = None
         if pit_row:
             # Percentiles are already ranked within their declared PIT peer set.
             # Never synthesize a score from a raw return or a forward-only overlay.
